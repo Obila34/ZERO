@@ -19,8 +19,13 @@ class OpenWakeWordEngine(WakeWord):
 
         self.threshold = threshold
         self.model_name = model
-        # Pass a known keyword name or a path to a custom .onnx/.tflite model.
-        self._model = Model(wakeword_models=[model]) if model else Model()
+        # Force the ONNX backend: tflite-runtime has no wheel for Python 3.13,
+        # so onnxruntime is the only viable inference path on a current Pi OS.
+        # Pass a known keyword name or a path to a custom .onnx model.
+        kwargs = {"inference_framework": "onnx"}
+        self._model = (
+            Model(wakeword_models=[model], **kwargs) if model else Model(**kwargs)
+        )
         log.info("openWakeWord loaded (model=%s, threshold=%.2f)", model, threshold)
 
     def process(self, frame: np.ndarray) -> bool:
