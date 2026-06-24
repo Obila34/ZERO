@@ -4,8 +4,8 @@
 audio:
   sample_rate: 16000        # 16 kHz mono everywhere in the pipeline
   block_ms: 30              # frame size for capture / VAD
-  input_device: null        # null = system default; or an int index / name substring
-  output_device: null       # set via scripts/list_audio_devices.py
+  input_device: pulse       # PipeWire bridge (ALSA "default" times out on this Pi)
+  output_device: pulse      # routes to the default PipeWire sink = BT speaker
 
 wake:
   engine: openwakeword
