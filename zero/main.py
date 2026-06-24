@@ -58,6 +58,8 @@ class Zero:
 
     # -- state transition helper -------------------------------------------
     def _to(self, dst: State) -> None:
+        if dst == self.state:
+            return  # no-op (e.g. re-arming IDLE) — not an illegal transition
         if not can_transition(self.state, dst):
             log.warning("illegal transition %s -> %s", self.state, dst)
         log.debug("state: %s -> %s", self.state, dst)
@@ -69,9 +71,8 @@ class Zero:
         log.info("ZERO ready. Say the wake word to talk. (Ctrl-C to quit)")
         try:
             while True:
-                self._wait_for_wake()        # IDLE
-                utterance = self._listen()   # LISTENING
-                self._respond(utterance)     # THINKING + SPEAKING
+                self._wait_for_wake()   # IDLE — block until wake word
+                self._converse()        # stay in conversation until it goes quiet
         except KeyboardInterrupt:
             print()
             log.info("shutting down")
@@ -81,33 +82,49 @@ class Zero:
     def _wait_for_wake(self) -> None:
         self._to(State.IDLE)
         self.wake.reset()
+        self.mic.drain()  # discard audio buffered during THINKING/SPEAKING
         for frame in self.mic.frames():
             if self.wake.process(frame):
                 log.info("wake word!")
                 return
 
-    def _listen(self) -> "None | object":
-        self._to(State.LISTENING)
-        self.mic.drain()  # drop any audio buffered during wake detection
-        return self.endpointer.capture(self.mic.frames())
+    def _converse(self) -> None:
+        """After the wake word, keep listening turn-by-turn (no re-waking) until
+        the user is silent for `conversation.timeout_ms`, then go back to sleep."""
+        timeout = self.cfg.get("conversation.timeout_ms", 30000)
+        multi_turn = self.cfg.get("conversation.enabled", True)
+        log.info("listening... (talk; %ds of silence = back to sleep)", timeout // 1000)
+
+        while True:
+            self._to(State.LISTENING)
+            self.mic.drain()
+            utterance = self.endpointer.capture(
+                self.mic.frames(), start_timeout_ms=timeout
+            )
+            if utterance is None or utterance.size == 0:
+                log.info("quiet — going back to sleep. Say the wake word to talk again.")
+                self._to(State.IDLE)
+                return
+
+            self._respond(utterance)
+            if not multi_turn:
+                self._to(State.IDLE)
+                return
 
     def _respond(self, utterance) -> None:
         self._to(State.THINKING)
-        if utterance is None or utterance.size == 0:
-            log.info("nothing heard")
-            self._to(State.IDLE)
-            return
-
         sr = self.cfg.get("audio.sample_rate", 16000)
         text = self.stt.transcribe(utterance, sr).strip()
-        if not text:
-            self._to(State.IDLE)
+        # whisper emits markers like [BLANK_AUDIO] on silence — ignore them.
+        if not text or text.startswith("[") and text.endswith("]"):
+            log.info("nothing meaningful heard")
             return
 
+        log.info("you: %s", text)
         self.convo.add_user(text)
         reply = self._speak_streaming(self.llm.stream(self.convo.messages()))
+        log.info("zero: %s", reply or "(no reply)")
         self.convo.add_assistant(reply)
-        self._to(State.IDLE)
 
     def _speak_streaming(self, chunks) -> str:
         """Speak sentences as they complete; return the full reply text."""

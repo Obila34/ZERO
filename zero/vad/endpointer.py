@@ -31,11 +31,20 @@ class _BaseEndpointer:
     def _is_speech(self, frame: np.ndarray) -> bool:  # pragma: no cover - overridden
         raise NotImplementedError
 
-    def capture(self, frames: Iterable[np.ndarray]) -> np.ndarray | None:
+    def _reset(self) -> None:
+        """Hook: clear per-utterance state before a new capture. Optional."""
+
+    def capture(self, frames: Iterable[np.ndarray],
+                start_timeout_ms: int | None = None) -> np.ndarray | None:
+        """Collect one utterance. If start_timeout_ms is set and no speech begins
+        within that window, return None (used by conversation mode to go to sleep)."""
+        self._reset()
         collected: list[np.ndarray] = []
         trailing_silence = 0
         started = False
+        pre_speech = 0
         n = 0
+        start_timeout_blocks = (start_timeout_ms // self.block_ms) if start_timeout_ms else None
 
         for frame in frames:
             n += 1
@@ -46,6 +55,10 @@ class _BaseEndpointer:
                 trailing_silence = 0
             elif started:
                 trailing_silence += 1
+            else:
+                pre_speech += 1
+                if start_timeout_blocks and pre_speech >= start_timeout_blocks:
+                    return None  # nobody spoke in time
 
             if started:
                 collected.append(frame)
@@ -63,6 +76,9 @@ class _BaseEndpointer:
 
 
 class SileroEndpointer(_BaseEndpointer):
+    # silero v5 requires EXACTLY this many samples per call at 16 kHz (256 at 8 kHz).
+    WINDOW = 512
+
     def __init__(self, **kw):
         super().__init__(**kw)
         import torch  # lazy
@@ -72,13 +88,30 @@ class SileroEndpointer(_BaseEndpointer):
         model, _ = torch.hub.load("snakers4/silero-vad", "silero_vad", trust_repo=True)
         self._model = model
         self._threshold = 0.5
+        self._window = self.WINDOW if self.sample_rate == 16000 else 256
+        self._buf = np.zeros(0, dtype=np.int16)
+        self._last = False
         log.info("silero VAD loaded")
 
+    def _reset(self) -> None:
+        self._buf = np.zeros(0, dtype=np.int16)
+        self._last = False
+        try:
+            self._model.reset_states()
+        except Exception:  # noqa: BLE001
+            pass
+
     def _is_speech(self, frame: np.ndarray) -> bool:
-        # silero wants float32 in [-1, 1]; it expects 512-sample chunks at 16 kHz.
-        x = self._torch.from_numpy(frame.astype(np.float32) / 32768.0)
-        prob = float(self._model(x, self.sample_rate).item())
-        return prob >= self._threshold
+        # Our frames are 480 samples (30 ms) but silero needs exact 512-sample
+        # windows. Buffer incoming audio and run the model on each full window.
+        self._buf = np.concatenate([self._buf, frame])
+        while len(self._buf) >= self._window:
+            chunk = self._buf[: self._window]
+            self._buf = self._buf[self._window :]
+            x = self._torch.from_numpy(chunk.astype(np.float32) / 32768.0)
+            prob = float(self._model(x, self.sample_rate).item())
+            self._last = prob >= self._threshold
+        return self._last
 
 
 class WebrtcEndpointer(_BaseEndpointer):

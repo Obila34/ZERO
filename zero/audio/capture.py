@@ -39,7 +39,14 @@ class MicCapture:
         try:
             self._q.put_nowait(pcm16.copy())
         except queue.Full:
-            log.warning("capture queue full — dropping frame")
+            # Ring-buffer behaviour: while we're busy (THINKING/SPEAKING) nobody
+            # drains the queue — drop the OLDEST frame and keep the newest rather
+            # than spamming warnings. Stale audio is drained before we listen again.
+            try:
+                self._q.get_nowait()
+                self._q.put_nowait(pcm16.copy())
+            except (queue.Empty, queue.Full):
+                pass
 
     def start(self) -> None:
         if self._stream is not None:

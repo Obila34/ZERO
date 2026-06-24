@@ -24,6 +24,9 @@ class PiperTTS(TTS):
         self.binary = binary
         self.voice = str(voice)
         self.length_scale = length_scale
+        if not Path(self.voice).is_file():
+            log.warning("Piper voice NOT found: %s — synthesis will be silent. "
+                        "Download it (see scripts/setup_pi.sh).", self.voice)
         self.sample_rate = self._read_sample_rate(voice)
         log.info("Piper ready (voice=%s, %d Hz)", Path(voice).name, self.sample_rate)
 

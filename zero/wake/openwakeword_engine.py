@@ -30,11 +30,13 @@ class OpenWakeWordEngine(WakeWord):
         log.info("openWakeWord loaded (model=%s, framework=%s, threshold=%.2f)",
                  model, inference_framework, threshold)
 
-    def process(self, frame: np.ndarray) -> bool:
-        # openWakeWord expects int16 mono samples.
+    def score(self, frame: np.ndarray) -> float:
+        # openWakeWord expects int16 mono samples; returns the top model score.
         scores = self._model.predict(frame)
-        score = max(scores.values()) if scores else 0.0
-        return score >= self.threshold
+        return max(scores.values()) if scores else 0.0
+
+    def process(self, frame: np.ndarray) -> bool:
+        return self.score(frame) >= self.threshold
 
     def reset(self) -> None:
         # Drop accumulated context so the next activation starts clean.

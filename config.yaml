@@ -26,6 +26,11 @@ stt:
   engine: whispercpp
   model: base.en # tiny.en (fast) | base.en | small.en (accurate)
   model_path: models/whisper/ggml-base.en.bin
+  n_threads: 4 # Pi 5 has 4 cores; use them all during transcription
+
+conversation:
+  enabled: true # wake once, then converse without re-waking each turn
+  timeout_ms: 30000 # silence (no speech start) before going back to sleep
 
 llm:
   engine: ollama
