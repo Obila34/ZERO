@@ -43,8 +43,11 @@ def build_stt(cfg: Config) -> STT:
     if engine == "whispercpp":
         from zero.stt.whispercpp_engine import WhisperCppSTT
 
-        model_path = cfg.resolve_path("stt.model_path", "models/whisper/ggml-base.en.bin")
-        return WhisperCppSTT(model_path=str(model_path))
+        model_path = cfg.resolve_path("stt.model_path", "models/whisper/ggml-small.en.bin")
+        return WhisperCppSTT(
+            model_path=str(model_path),
+            initial_prompt=cfg.get("stt.initial_prompt"),
+        )
     raise ValueError(f"unknown stt engine: {engine}")
 
 

@@ -22,16 +22,19 @@ vad:
 
 stt:
   engine: whispercpp
-  model: base.en            # tiny.en (fast) | base.en | small.en (accurate)
-  model_path: models/whisper/ggml-base.en.bin
+  model: small.en           # tiny.en (fast) | base.en | small.en (accurate) <- chosen
+  model_path: models/whisper/ggml-small.en.bin
+  # Biases the decoder toward conversational phrasing, cutting single-phoneme
+  # mishears like "what's your aim" -> "what's your name". Keep it short.
+  initial_prompt: "A natural spoken conversation with a voice assistant named Zero."
 
 llm:
   engine: ollama
   host: http://127.0.0.1:11434
-  model: llama3.2:3b        # llama3.2:1b for speed; qwen2.5:1.5b alt
-  temperature: 0.7
-  max_tokens: 160           # short replies keep latency + speech natural
-  history_turns: 6          # rolling window kept in context
+  model: qwen2.5:3b-instruct # best 3B at concise, low-hallucination replies on Pi 5 CPU
+  temperature: 0.3           # low = factual & stable; 0.7 was too loose for a Q&A assistant
+  max_tokens: 160            # short replies keep latency + speech natural
+  history_turns: 6           # rolling window kept in context (~3 exchanges)
 
 tts:
   engine: piper             # piper (fast default) | fish (expressive)
