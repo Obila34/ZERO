@@ -1,0 +1,31 @@
+# ZERO — offline conversational voice robot (Raspberry Pi 5)
+# Pin loosely; tighten on the Pi once benchmarked.
+
+# --- Core audio I/O ---
+sounddevice>=0.4.6        # PortAudio mic capture + speaker playback
+numpy>=1.24
+soundfile>=0.12           # read/write WAV (non-verbal clips, debug dumps)
+PyYAML>=6.0               # config.yaml
+
+# --- Wake word ---
+openwakeword>=0.6.0       # always-on wake detection ("Hey Zero")
+
+# --- Voice activity / endpointing ---
+# silero-vad is pulled at runtime via torch.hub OR the standalone package below.
+# webrtcvad is a lightweight fallback that needs no torch.
+webrtcvad>=2.0.10
+
+# --- Speech to text ---
+# whisper.cpp is built natively (see scripts/setup_pi.sh). Python binding:
+pywhispercpp>=1.2.0
+
+# --- LLM ---
+# Ollama runs as a separate service; we talk to it over HTTP.
+requests>=2.31
+
+# --- Text to speech (fast mode) ---
+# Piper runs as a native binary (see setup_pi.sh); we shell out to it.
+# (no pip dep required for the binary path)
+
+# Optional: silero-vad standalone (avoids torch.hub network at runtime)
+# silero-vad>=5.1

@@ -1,0 +1,16 @@
+[project]
+name = "zero"
+version = "0.1.0"
+description = "Offline conversational voice robot for Raspberry Pi 5 (first step toward a humanoid)"
+requires-python = ">=3.10"
+readme = "README.md"
+
+[project.scripts]
+zero = "zero.main:main"
+
+[tool.setuptools.packages.find]
+include = ["zero*"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"

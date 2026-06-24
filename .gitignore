@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Models (downloaded via setup_pi.sh — too big for git)
+models/
+*.onnx
+*.pth
+*.bin
+*.gguf
+
+# Local config overrides & debug audio
+config.local.yaml
+debug_*.wav
+*.log

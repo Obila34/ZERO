@@ -1,0 +1,118 @@
+"""Voice orchestrator — the "human voice" layer that sits above a TTS engine.
+
+Responsibilities:
+  * Own the SHARED cue vocabulary (must match zero/llm/persona.py::CUES).
+  * Sentence-segment a reply so playback can start early (streaming).
+  * For the Piper path: strip cue tags, synthesize the words, and splice short
+    pre-recorded non-verbal clips (laugh/sigh/…) where a cue appeared, plus light
+    prosody from *emphasis* / punctuation.
+  * For the Fish path: the engine performs cues natively, so the orchestrator
+    just hands text straight through (translation happens in fish_engine).
+
+main.py only ever calls `synthesize(text)` and gets back (waveform, sample_rate).
+"""
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+import numpy as np
+
+from zero.tts.base import TTS
+from zero.utils.logging import get_logger
+
+log = get_logger("tts.orchestrator")
+
+# Shared cue tag -> non-verbal clip filename (Piper path).
+CUE_TO_CLIP = {
+    "[laughs]": "laugh.wav",
+    "[chuckles]": "chuckle.wav",
+    "[sighs]": "sigh.wav",
+    "[hmm]": "hmm.wav",
+    "[pause]": None,  # rendered as a short silence, no clip needed
+}
+
+_CUE_RE = re.compile(r"(\[[a-z]+\])")
+_SENTENCE_RE = re.compile(r"(.+?(?:[.!?…]+|\n|$))", re.S)
+
+
+def split_sentences(text: str) -> list[str]:
+    """Coarse sentence split for streaming TTS. Cheap and good enough for speech."""
+    out = [m.group(1).strip() for m in _SENTENCE_RE.finditer(text)]
+    return [s for s in out if s]
+
+
+def _strip_emphasis(text: str) -> str:
+    return re.sub(r"\*(\w+)\*", r"\1", text)
+
+
+class VoiceOrchestrator:
+    def __init__(self, engine_name: str, tts: TTS, nonverbals_dir: Path,
+                 pause_ms: int = 350):
+        self.engine_name = engine_name
+        self.tts = tts
+        self.sample_rate = tts.sample_rate
+        self.nonverbals_dir = Path(nonverbals_dir)
+        self.pause_ms = pause_ms
+        self._clip_cache: dict[str, np.ndarray] = {}
+
+    # -- public API ---------------------------------------------------------
+    def synthesize(self, text: str) -> np.ndarray:
+        text = text.strip()
+        if not text:
+            return np.zeros(0, dtype=np.float32)
+        if self.engine_name == "fish":
+            # Fish performs cues natively; engine handles cue translation.
+            return self.tts.synthesize(text)
+        return self._synthesize_piper(text)
+
+    # -- Piper path: split on cues, synthesize words, splice clips -----------
+    def _synthesize_piper(self, text: str) -> np.ndarray:
+        parts = _CUE_RE.split(text)
+        pieces: list[np.ndarray] = []
+        for part in parts:
+            if not part.strip():
+                continue
+            if part in CUE_TO_CLIP:
+                pieces.append(self._render_cue(part))
+            else:
+                words = _strip_emphasis(part).strip()
+                if words:
+                    pieces.append(self.tts.synthesize(words))
+        if not pieces:
+            return np.zeros(0, dtype=np.float32)
+        return np.concatenate(pieces)
+
+    def _render_cue(self, cue: str) -> np.ndarray:
+        clip_name = CUE_TO_CLIP.get(cue)
+        if clip_name is None:  # [pause]
+            return self._silence(self.pause_ms)
+        if clip_name not in self._clip_cache:
+            self._clip_cache[clip_name] = self._load_clip(clip_name)
+        return self._clip_cache[clip_name]
+
+    def _load_clip(self, name: str) -> np.ndarray:
+        path = self.nonverbals_dir / name
+        if not path.exists():
+            log.warning("non-verbal clip missing: %s (using short pause)", path)
+            return self._silence(self.pause_ms)
+        import soundfile as sf  # lazy
+
+        data, sr = sf.read(path, dtype="float32")
+        if data.ndim > 1:
+            data = data[:, 0]
+        if sr != self.sample_rate:
+            data = self._resample(data, sr, self.sample_rate)
+        return data
+
+    def _silence(self, ms: int) -> np.ndarray:
+        return np.zeros(int(self.sample_rate * ms / 1000), dtype=np.float32)
+
+    @staticmethod
+    def _resample(data: np.ndarray, src_sr: int, dst_sr: int) -> np.ndarray:
+        if src_sr == dst_sr:
+            return data
+        n_dst = int(round(len(data) * dst_sr / src_sr))
+        x_old = np.linspace(0.0, 1.0, num=len(data), endpoint=False)
+        x_new = np.linspace(0.0, 1.0, num=n_dst, endpoint=False)
+        return np.interp(x_new, x_old, data).astype(np.float32)

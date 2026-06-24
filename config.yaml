@@ -1,0 +1,56 @@
+# ZERO configuration — every engine is selectable here so the pipeline never
+# needs a code change to swap a stage (local today, cloud later).
+
+audio:
+  sample_rate: 16000        # 16 kHz mono everywhere in the pipeline
+  block_ms: 30              # frame size for capture / VAD
+  input_device: null        # null = system default; or an int index / name substring
+  output_device: null       # set via scripts/list_audio_devices.py
+
+wake:
+  engine: openwakeword
+  # openWakeWord ships pretrained words; for a true "Hey Zero" train a custom model.
+  # Start with a built-in like "hey_jarvis" to prove the pipeline, then swap.
+  model: hey_jarvis
+  threshold: 0.5
+
+vad:
+  engine: silero            # silero | webrtc
+  silence_ms: 800           # trailing silence that ends an utterance
+  max_utterance_ms: 15000   # hard cap so STT input stays bounded
+  speech_pad_ms: 200        # keep a little audio either side of speech
+
+stt:
+  engine: whispercpp
+  model: base.en            # tiny.en (fast) | base.en | small.en (accurate)
+  model_path: models/whisper/ggml-base.en.bin
+
+llm:
+  engine: ollama
+  host: http://127.0.0.1:11434
+  model: llama3.2:3b        # llama3.2:1b for speed; qwen2.5:1.5b alt
+  temperature: 0.7
+  max_tokens: 160           # short replies keep latency + speech natural
+  history_turns: 6          # rolling window kept in context
+
+tts:
+  engine: piper             # piper (fast default) | fish (expressive)
+  piper:
+    binary: piper           # native binary on PATH (see setup_pi.sh)
+    voice: models/piper/en_US-amy-medium.onnx
+    length_scale: 1.0       # base speaking rate (orchestrator nudges per-segment)
+  fish:
+    # OpenAudio S1-mini — expressive mode. PyTorch/CPU build, NOT the MLX build.
+    model_dir: models/fish/openaudio-s1-mini
+    precision: int8         # int8 | int4 | fp16  (transformer quantization)
+    # codec stays fp16 regardless (GAN — quantizing degrades audio)
+    # Inference command, finalized in the Phase-6 spike. Placeholders:
+    # {model_dir} {text} {out}. Must write a WAV to {out}. Leave null until set.
+    infer_cmd: null
+
+persona:
+  name: Zero
+  # See zero/llm/persona.py for the full system prompt; this is the short identity.
+  description: >
+    A warm, curious companion who speaks briefly and naturally, like a friend
+    chatting in person — not an assistant reading a manual.
