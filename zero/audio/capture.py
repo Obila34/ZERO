@@ -49,16 +49,39 @@ class MicCapture:
     def start(self) -> None:
         if self._stream is not None:
             return
-        self._stream = sd.InputStream(
-            samplerate=self.sample_rate,
-            blocksize=self.block_size,
-            device=self.device,
-            channels=1,
-            dtype="float32",
-            callback=self._callback,
-        )
-        self._stream.start()
-        log.info("mic started (%d Hz, %d-sample frames)", self.sample_rate, self.block_size)
+        # PortAudio's ALSA->Pulse bridge sometimes fails to start its realtime
+        # callback thread on the first try (PaErrorCode -9987, "Wait timed out").
+        # 'high' latency uses larger buffers (less RT pressure) and we retry a
+        # few times, closing the half-open stream between attempts.
+        import time as _time
+
+        last_err: Exception | None = None
+        for attempt in range(1, 4):
+            try:
+                self._stream = sd.InputStream(
+                    samplerate=self.sample_rate,
+                    blocksize=self.block_size,
+                    device=self.device,
+                    channels=1,
+                    dtype="float32",
+                    latency="high",
+                    callback=self._callback,
+                )
+                self._stream.start()
+                log.info("mic started (%d Hz, %d-sample frames)",
+                         self.sample_rate, self.block_size)
+                return
+            except sd.PortAudioError as err:
+                last_err = err
+                log.warning("mic start attempt %d/3 failed: %s", attempt, err)
+                if self._stream is not None:
+                    try:
+                        self._stream.close()
+                    except Exception:
+                        pass
+                    self._stream = None
+                _time.sleep(0.5)
+        raise RuntimeError(f"could not start mic after 3 attempts: {last_err}")
 
     def frames(self, timeout: float = 1.0) -> Iterator[np.ndarray]:
         """Yield int16 mono frames as they arrive. Blocks up to `timeout` each."""
