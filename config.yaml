@@ -18,9 +18,11 @@ wake:
 
 vad:
   engine: silero # silero | webrtc
+  threshold: 0.6 # silero speech probability to count a frame as speech (higher = stricter)
   silence_ms: 800 # trailing silence that ends an utterance
   max_utterance_ms: 15000 # hard cap so STT input stays bounded
   speech_pad_ms: 200 # keep a little audio either side of speech
+  min_speech_ms: 350 # ignore utterances with less real speech than this (kills whisper hallucinations on noise)
 
 stt:
   engine: whispercpp

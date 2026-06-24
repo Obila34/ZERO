@@ -21,9 +21,12 @@ log = get_logger("vad")
 
 class _BaseEndpointer:
     def __init__(self, sample_rate: int, silence_ms: int, max_utterance_ms: int,
-                 speech_pad_ms: int, block_ms: int):
+                 speech_pad_ms: int, block_ms: int, min_speech_ms: int = 350,
+                 threshold: float = 0.6):
         self.sample_rate = sample_rate
         self.block_ms = block_ms
+        self.threshold = threshold  # used by silero; webrtc ignores it
+        self.min_speech_blocks = max(1, min_speech_ms // block_ms)
         self.silence_blocks = max(1, silence_ms // block_ms)
         self.max_blocks = max(1, max_utterance_ms // block_ms)
         self.pad_blocks = max(0, speech_pad_ms // block_ms)
@@ -41,6 +44,7 @@ class _BaseEndpointer:
         self._reset()
         collected: list[np.ndarray] = []
         trailing_silence = 0
+        speech_blocks = 0
         started = False
         pre_speech = 0
         n = 0
@@ -53,6 +57,7 @@ class _BaseEndpointer:
             if speech:
                 started = True
                 trailing_silence = 0
+                speech_blocks += 1
             elif started:
                 trailing_silence += 1
             else:
@@ -71,6 +76,12 @@ class _BaseEndpointer:
 
         if not collected:
             return None
+        # Reject blips of noise: not enough actual speech to be a real utterance.
+        # This is what stops whisper hallucinating "Thank you" / "..." on silence.
+        if speech_blocks < self.min_speech_blocks:
+            log.info("utterance too short (%d ms speech) — ignoring",
+                     speech_blocks * self.block_ms)
+            return None
         pcm = np.concatenate(collected).astype(np.float32) / 32768.0
         return pcm
 
@@ -87,7 +98,6 @@ class SileroEndpointer(_BaseEndpointer):
         # silero-vad ships via torch.hub; cache after first download.
         model, _ = torch.hub.load("snakers4/silero-vad", "silero_vad", trust_repo=True)
         self._model = model
-        self._threshold = 0.5
         self._window = self.WINDOW if self.sample_rate == 16000 else 256
         self._buf = np.zeros(0, dtype=np.int16)
         self._last = False
@@ -110,7 +120,7 @@ class SileroEndpointer(_BaseEndpointer):
             self._buf = self._buf[self._window :]
             x = self._torch.from_numpy(chunk.astype(np.float32) / 32768.0)
             prob = float(self._model(x, self.sample_rate).item())
-            self._last = prob >= self._threshold
+            self._last = prob >= self.threshold
         return self._last
 
 

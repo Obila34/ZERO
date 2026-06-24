@@ -23,7 +23,7 @@ class State(str, Enum):
 TRANSITIONS: dict[State, set[State]] = {
     State.IDLE: {State.LISTENING},
     State.LISTENING: {State.THINKING, State.IDLE},     # IDLE = nothing said
-    State.THINKING: {State.SPEAKING, State.IDLE},      # IDLE = empty reply/error
+    State.THINKING: {State.SPEAKING, State.IDLE, State.LISTENING},  # LISTENING = empty turn in convo
     State.SPEAKING: {State.IDLE, State.LISTENING},     # LISTENING = barge-in
 }
 

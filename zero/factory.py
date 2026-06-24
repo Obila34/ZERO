@@ -36,6 +36,8 @@ def build_endpointer(cfg: Config):
         max_utterance_ms=cfg.get("vad.max_utterance_ms", 15000),
         speech_pad_ms=cfg.get("vad.speech_pad_ms", 200),
         block_ms=cfg.get("audio.block_ms", 30),
+        min_speech_ms=cfg.get("vad.min_speech_ms", 350),
+        threshold=cfg.get("vad.threshold", 0.6),
     )
 
 
