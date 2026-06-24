@@ -22,8 +22,11 @@ vad:
 
 stt:
   engine: whispercpp
-  model: small.en           # tiny.en (fast) | base.en | small.en (accurate) <- chosen
-  model_path: models/whisper/ggml-small.en.bin
+  # Whisper always runs its encoder on a fixed 30s window, so model SIZE sets the
+  # per-utterance latency floor on the Pi 5 CPU: small~14s, base~5s, tiny~3s.
+  model: base.en            # tiny.en (fastest) | base.en (balance) <- chosen | small.en (slow on Pi)
+  model_path: models/whisper/ggml-base.en.bin
+  threads: 4                # use all 4 Pi cores during transcription
   # Biases the decoder toward conversational phrasing, cutting single-phoneme
   # mishears like "what's your aim" -> "what's your name". Keep it short.
   initial_prompt: "A natural spoken conversation with a voice assistant named Zero."
@@ -39,7 +42,7 @@ llm:
 tts:
   engine: piper             # piper (fast default) | fish (expressive)
   piper:
-    binary: piper           # native binary on PATH (see setup_pi.sh)
+    binary: /home/exo/Mzee/offline_v5/piper/piper   # extracted arm64 release
     voice: models/piper/en_US-amy-medium.onnx
     length_scale: 1.0       # base speaking rate (orchestrator nudges per-segment)
   fish:

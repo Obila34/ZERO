@@ -15,13 +15,13 @@ log = get_logger("stt.whispercpp")
 
 class WhisperCppSTT(STT):
     def __init__(self, model_path: str, language: str = "en",
-                 initial_prompt: str | None = None):
+                 initial_prompt: str | None = None, threads: int = 4):
         from pywhispercpp.model import Model  # lazy
 
         self.language = language
         self.initial_prompt = initial_prompt
-        # n_threads tuned for Pi 5's 4 cores; leave one for the rest of the pipeline.
-        self._model = Model(model_path, n_threads=3, print_realtime=False,
+        # During transcription nothing else needs the CPU, so use all 4 Pi cores.
+        self._model = Model(model_path, n_threads=threads, print_realtime=False,
                             print_progress=False)
         log.info("whisper.cpp loaded (%s)", model_path)
 
