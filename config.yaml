@@ -16,7 +16,7 @@ wake:
 
 vad:
   engine: webrtc            # silero (needs torch + net) | webrtc (offline, light) <- chosen
-  silence_ms: 800           # trailing silence that ends an utterance
+  silence_ms: 500           # trailing silence that ends an utterance (lower = snappier turns)
   max_utterance_ms: 15000   # hard cap so STT input stays bounded
   speech_pad_ms: 200        # keep a little audio either side of speech
 
@@ -27,6 +27,7 @@ stt:
   model: base.en            # tiny.en (fastest) | base.en (balance) <- chosen | small.en (slow on Pi)
   model_path: models/whisper/ggml-base.en.bin
   threads: 4                # use all 4 Pi cores during transcription
+  audio_ctx: 768            # cap encoder window (0=full/30s). 768 ~halves encode for short turns
   # Biases the decoder toward conversational phrasing, cutting single-phoneme
   # mishears like "what's your aim" -> "what's your name". Keep it short.
   initial_prompt: "A natural spoken conversation with a voice assistant named Zero."

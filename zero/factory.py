@@ -48,6 +48,7 @@ def build_stt(cfg: Config) -> STT:
             model_path=str(model_path),
             initial_prompt=cfg.get("stt.initial_prompt"),
             threads=cfg.get("stt.threads", 4),
+            audio_ctx=cfg.get("stt.audio_ctx", 0),
         )
     raise ValueError(f"unknown stt engine: {engine}")
 
