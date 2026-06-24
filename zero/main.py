@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import itertools
 import sys
+import time
 
 from zero.config import load_config
 from zero.conversation import Conversation
@@ -105,8 +106,10 @@ class Zero:
             return
 
         self.convo.add_user(text)
+        self._t_reply_start = time.monotonic()  # marks end-of-STT for latency timing
         reply = self._speak_streaming(self.llm.stream(self.convo.messages()))
         self.convo.add_assistant(reply)
+        log.info("reply: %r", reply)
         self._to(State.IDLE)
 
     def _speak_streaming(self, chunks) -> str:
@@ -114,14 +117,20 @@ class Zero:
         full: list[str] = []
         buffer = ""
         spoke_any = False
+        first_token = True
 
         for chunk in itertools.chain(chunks, ["\n"]):  # sentinel flush
+            if first_token and chunk.strip():
+                log.info("LLM first token: %.2fs", time.monotonic() - self._t_reply_start)
+                first_token = False
             buffer += chunk
             sentences = split_sentences(buffer)
             # Keep the last (possibly incomplete) fragment buffered.
             complete, buffer = sentences[:-1], (sentences[-1] if sentences else "")
             for sentence in complete:
                 if not spoke_any:
+                    log.info("first audio out: %.2fs after STT",
+                             time.monotonic() - self._t_reply_start)
                     self._to(State.SPEAKING)
                     spoke_any = True
                 self._speak_one(sentence)
