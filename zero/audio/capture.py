@@ -29,6 +29,7 @@ class MicCapture:
         self.device = device
         self._q: "queue.Queue[np.ndarray]" = queue.Queue(maxsize=200)
         self._stream: sd.InputStream | None = None
+        self._dropped = 0  # frames dropped since last warning (throttled logging)
 
     def _callback(self, indata, frames, time_info, status):  # noqa: ARG002
         if status:
@@ -39,7 +40,11 @@ class MicCapture:
         try:
             self._q.put_nowait(pcm16.copy())
         except queue.Full:
-            log.warning("capture queue full — dropping frame")
+            # Expected while a downstream stage (STT/LLM/TTS) blocks the consumer.
+            # Throttle so it doesn't drown the log — one line per ~1s of drops.
+            self._dropped += 1
+            if self._dropped % 33 == 1:
+                log.debug("capture queue full — dropping frames (x%d)", self._dropped)
 
     def start(self) -> None:
         if self._stream is not None:
