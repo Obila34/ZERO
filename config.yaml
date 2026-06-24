@@ -15,7 +15,7 @@ wake:
   threshold: 0.5
 
 vad:
-  engine: silero            # silero | webrtc
+  engine: webrtc            # silero (needs torch + net) | webrtc (offline, light) <- chosen
   silence_ms: 800           # trailing silence that ends an utterance
   max_utterance_ms: 15000   # hard cap so STT input stays bounded
   speech_pad_ms: 200        # keep a little audio either side of speech
