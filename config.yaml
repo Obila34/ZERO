@@ -24,8 +24,8 @@ stt:
   engine: whispercpp
   # Whisper always runs its encoder on a fixed 30s window, so model SIZE sets the
   # per-utterance latency floor on the Pi 5 CPU: small~14s, base~5s, tiny~3s.
-  model: base.en            # tiny.en (fastest) | base.en (balance) <- chosen | small.en (slow on Pi)
-  model_path: models/whisper/ggml-base.en.bin
+  model: small.en           # tiny.en (fastest) | base.en (balance) | small.en (accurate) <- testing
+  model_path: models/whisper/ggml-small.en.bin
   threads: 4                # use all 4 Pi cores during transcription
   audio_ctx: 768            # cap encoder window (0=full/30s). 768 ~halves encode for short turns
   # Biases the decoder toward conversational phrasing, cutting single-phoneme
