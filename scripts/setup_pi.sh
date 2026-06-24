@@ -22,6 +22,10 @@ python3 -m venv "$ROOT/.venv"
 source "$ROOT/.venv/bin/activate"
 pip install --upgrade pip
 pip install -r "$ROOT/requirements.txt"
+# openWakeWord pins tflite-runtime (no wheel for Python 3.12 on ARM) — install it
+# without deps and run it on ONNX (see config: wake.inference_framework: onnx).
+pip install "openwakeword>=0.6.0" --no-deps
+python -c "import openwakeword.utils as u; u.download_models()"
 
 echo "==> Ollama + chat model"
 if ! command -v ollama >/dev/null 2>&1; then

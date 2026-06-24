@@ -21,6 +21,7 @@ def build_wake(cfg: Config) -> WakeWord:
         return OpenWakeWordEngine(
             model=cfg.get("wake.model", "hey_jarvis"),
             threshold=cfg.get("wake.threshold", 0.5),
+            inference_framework=cfg.get("wake.inference_framework", "onnx"),
         )
     raise ValueError(f"unknown wake engine: {engine}")
 

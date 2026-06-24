@@ -14,14 +14,21 @@ log = get_logger("wake.oww")
 
 
 class OpenWakeWordEngine(WakeWord):
-    def __init__(self, model: str = "hey_jarvis", threshold: float = 0.5):
+    def __init__(self, model: str = "hey_jarvis", threshold: float = 0.5,
+                 inference_framework: str = "onnx"):
         from openwakeword.model import Model  # lazy
 
         self.threshold = threshold
         self.model_name = model
-        # Pass a known keyword name or a path to a custom .onnx/.tflite model.
-        self._model = Model(wakeword_models=[model]) if model else Model()
-        log.info("openWakeWord loaded (model=%s, threshold=%.2f)", model, threshold)
+        # ONNX by default: tflite-runtime has no wheel for Python 3.12 on ARM, so
+        # we install openwakeword with --no-deps and run on onnxruntime instead.
+        kwargs = {"inference_framework": inference_framework}
+        # Pass a known keyword name or a path to a custom .onnx model.
+        if model:
+            kwargs["wakeword_models"] = [model]
+        self._model = Model(**kwargs)
+        log.info("openWakeWord loaded (model=%s, framework=%s, threshold=%.2f)",
+                 model, inference_framework, threshold)
 
     def process(self, frame: np.ndarray) -> bool:
         # openWakeWord expects int16 mono samples.
