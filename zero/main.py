@@ -113,7 +113,8 @@ class Zero:
 
         while True:
             self._to(State.LISTENING)
-            self.mic.drain()  # drop audio captured while we were speaking/thinking
+            self.mic.resume()  # re-open the mic for the user's turn
+            self.mic.drain()   # drop audio captured while we were speaking/thinking
             utterance = self.endpointer.capture(self.mic.frames(), idle_timeout_s=idle_s)
 
             if utterance is None or getattr(utterance, "size", 0) == 0:
@@ -122,6 +123,9 @@ class Zero:
                 self._to(State.IDLE)
                 return
 
+            # Mute the mic for the whole think+speak phase so ZERO can't transcribe
+            # its own voice off the BT speaker (echo).
+            self.mic.pause()
             self._to(State.THINKING)
             text = self.stt.transcribe(utterance, sr).strip()
             if not text:

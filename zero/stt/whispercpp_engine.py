@@ -5,12 +5,25 @@ scripts/setup_pi.sh into models/whisper/.
 """
 from __future__ import annotations
 
+import re
+
 import numpy as np
 
 from zero.utils.logging import get_logger
 from zero.stt.base import STT
 
 log = get_logger("stt.whispercpp")
+
+# Whisper invents non-speech cues like "(applause)", "[BLANK_AUDIO]", "(music)"
+# when fed silence or echo. Strip bracketed segments; if nothing real remains,
+# treat the whole thing as empty so it never reaches the LLM.
+_BRACKETS = re.compile(r"[\(\[][^\)\]]*[\)\]]")
+
+
+def _strip_hallucinations(text: str) -> str:
+    cleaned = _BRACKETS.sub("", text).strip(" .,!?-…")
+    # Need at least one real word (2+ letters) to count as genuine speech.
+    return cleaned if re.search(r"[A-Za-z]{2,}", cleaned) else ""
 
 
 class WhisperCppSTT(STT):
@@ -51,5 +64,9 @@ class WhisperCppSTT(STT):
             log.warning("pywhispercpp rejected audio_ctx; disabling it")
             segments = self._model.transcribe(audio, **kwargs)
         text = " ".join(seg.text for seg in segments).strip()
-        log.info("heard: %r", text)
-        return text
+        cleaned = _strip_hallucinations(text)
+        if cleaned != text:
+            log.info("heard: %r -> cleaned: %r", text, cleaned)
+        else:
+            log.info("heard: %r", text)
+        return cleaned

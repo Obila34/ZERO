@@ -21,15 +21,24 @@ log = get_logger("vad")
 
 class _BaseEndpointer:
     def __init__(self, sample_rate: int, silence_ms: int, max_utterance_ms: int,
-                 speech_pad_ms: int, block_ms: int):
+                 speech_pad_ms: int, block_ms: int, energy_threshold: float = 0.0):
         self.sample_rate = sample_rate
         self.block_ms = block_ms
         self.silence_blocks = max(1, silence_ms // block_ms)
         self.max_blocks = max(1, max_utterance_ms // block_ms)
         self.pad_blocks = max(0, speech_pad_ms // block_ms)
+        # int16 RMS a frame must exceed to count as speech. Rejects quieter
+        # background voices/room noise that the VAD alone would accept. 0 = off.
+        self.energy_threshold = energy_threshold
 
     def _is_speech(self, frame: np.ndarray) -> bool:  # pragma: no cover - overridden
         raise NotImplementedError
+
+    def _energetic(self, frame: np.ndarray) -> bool:
+        if self.energy_threshold <= 0:
+            return True
+        rms = float(np.sqrt(np.mean(frame.astype(np.float32) ** 2)))
+        return rms >= self.energy_threshold
 
     def capture(self, frames: Iterable[np.ndarray],
                 idle_timeout_s: float | None = None) -> np.ndarray | None:
@@ -43,7 +52,8 @@ class _BaseEndpointer:
         idle_limit = int(idle_timeout_s * 1000 / self.block_ms) if idle_timeout_s else None
 
         for frame in frames:
-            speech = self._is_speech(frame)
+            # Must pass BOTH the VAD and the loudness gate to count as the user.
+            speech = self._is_speech(frame) and self._energetic(frame)
 
             if speech:
                 started = True
@@ -91,12 +101,14 @@ class SileroEndpointer(_BaseEndpointer):
 
 
 class WebrtcEndpointer(_BaseEndpointer):
-    def __init__(self, **kw):
+    def __init__(self, aggressiveness: int = 3, **kw):
         super().__init__(**kw)
         import webrtcvad  # lazy
 
-        self._vad = webrtcvad.Vad(2)  # 0-3, higher = more aggressive filtering
-        log.info("webrtc VAD loaded")
+        # 0-3, higher = more aggressive at rejecting non-speech (background murmur).
+        self._vad = webrtcvad.Vad(int(aggressiveness))
+        log.info("webrtc VAD loaded (aggressiveness=%d, energy_threshold=%.0f)",
+                 aggressiveness, self.energy_threshold)
 
     def _is_speech(self, frame: np.ndarray) -> bool:
         # webrtcvad needs 10/20/30 ms int16 frames at 8/16/32/48 kHz.

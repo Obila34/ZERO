@@ -30,10 +30,20 @@ class MicCapture:
         self._q: "queue.Queue[np.ndarray]" = queue.Queue(maxsize=200)
         self._stream: sd.InputStream | None = None
         self._dropped = 0  # frames dropped since last warning (throttled logging)
+        self._paused = False  # gate capture while ZERO thinks/speaks (echo guard)
+
+    def pause(self) -> None:
+        """Stop enqueueing frames — used while ZERO speaks so it can't hear itself."""
+        self._paused = True
+
+    def resume(self) -> None:
+        self._paused = False
 
     def _callback(self, indata, frames, time_info, status):  # noqa: ARG002
         if status:
             log.debug("input status: %s", status)
+        if self._paused:
+            return  # drop audio captured while speaking/thinking
         # indata is float32 [-1, 1]; convert to int16 mono frame.
         mono = indata[:, 0] if indata.ndim > 1 else indata
         pcm16 = np.clip(mono * 32768.0, -32768, 32767).astype(np.int16)
