@@ -13,6 +13,17 @@ conversation:
   # turns). It sleeps after this much continuous silence, or on a stop phrase.
   sleep_timeout_ms: 30000
 
+  # Latency mask: a short pre-synthesized "thinking" phrase plays the instant you
+  # finish, WHILE the LLM generates in the background — so you hear something in
+  # ~1s instead of dead air. Set filler_probability to 0 to disable.
+  filler_probability: 0.9
+  fillers:
+    - "Let me think."
+    - "Hmm, good question."
+    - "Okay, one sec."
+    - "Let's see."
+    - "Right."
+
 wake:
   engine: openwakeword
   # openWakeWord ships pretrained words; for a true "Hey Zero" train a custom model.

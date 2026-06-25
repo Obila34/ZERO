@@ -10,7 +10,10 @@ generated — the main trick for keeping a fully-local pipeline feeling responsi
 from __future__ import annotations
 
 import itertools
+import queue
+import random
 import sys
+import threading
 import time
 
 from zero.config import load_config
@@ -57,8 +60,28 @@ class Zero:
         )
         self.state = State.IDLE
 
+        # Pre-synthesize "thinking" fillers so we can play them instantly (no
+        # synth cost) the moment the user finishes — masking LLM latency while
+        # the reply generates in the background. See _respond_with_filler.
+        self._filler_prob = self.cfg.get("conversation.filler_probability", 0.9)
+        self._fillers: list = []
+        phrases = self.cfg.get("conversation.fillers", [
+            "Let me think.", "Hmm, good question.", "Okay, one sec.",
+            "Let's see.", "Right.",
+        ])
+        for phrase in phrases:
+            try:
+                audio = self.voice.synthesize(phrase)
+                if getattr(audio, "size", 0):
+                    self._fillers.append(audio)
+            except Exception as e:  # pragma: no cover - never block startup on a filler
+                log.debug("filler synth failed for %r: %s", phrase, e)
+        log.info("pre-synthesized %d thinking fillers", len(self._fillers))
+
     # -- state transition helper -------------------------------------------
     def _to(self, dst: State) -> None:
+        if dst == self.state:
+            return  # already there (e.g. SPEAKING filler -> SPEAKING reply)
         if not can_transition(self.state, dst):
             log.warning("illegal transition %s -> %s", self.state, dst)
         log.debug("state: %s -> %s", self.state, dst)
@@ -140,9 +163,49 @@ class Zero:
 
             self.convo.add_user(text)
             self._t_reply_start = time.monotonic()  # end-of-STT marker for timing
-            reply = self._speak_streaming(self.llm.stream(self.convo.messages()))
+            # Kick the LLM off in the BACKGROUND so its prefill overlaps the spoken
+            # filler — the model is already generating while "Let me think." plays,
+            # so the real answer flows in with little or no added delay.
+            chunks = self._stream_in_background(self.convo.messages())
+            self._to(State.SPEAKING)
+            self._play_filler()
+            reply = self._speak_streaming(chunks)
             self.convo.add_assistant(reply)
             log.info("reply: %r", reply)
+
+    def _stream_in_background(self, messages):
+        """Start the LLM streaming on a worker thread feeding a queue, and return
+        a generator over it. Calling this begins prefill immediately (a bare
+        generator would wait until first consumed), so it overlaps the filler.
+        """
+        q: "queue.Queue" = queue.Queue()
+
+        def worker():
+            try:
+                for chunk in self.llm.stream(messages):
+                    q.put(chunk)
+            except Exception as e:  # never let the worker die silently
+                log.error("LLM stream error: %s", e)
+            finally:
+                q.put(None)  # sentinel = done
+
+        threading.Thread(target=worker, daemon=True).start()
+
+        def gen():
+            while True:
+                item = q.get()
+                if item is None:
+                    return
+                yield item
+
+        return gen()
+
+    def _play_filler(self) -> None:
+        """Play one short pre-synthesized 'thinking' filler to mask LLM latency."""
+        if not self._fillers or random.random() > self._filler_prob:
+            return
+        audio = random.choice(self._fillers)
+        self.speaker.play(audio, self.voice.sample_rate, should_stop=lambda: False)
 
     def _speak_streaming(self, chunks) -> str:
         """Speak sentences as they complete; return the full reply text."""
