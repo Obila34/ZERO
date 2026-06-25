@@ -23,17 +23,40 @@ class OllamaLLM(LLM):
         model: str = "llama3.2:3b",
         temperature: float = 0.7,
         max_tokens: int = 160,
+        keep_alive: str | int = -1,
     ):
         self.host = host.rstrip("/")
         self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
+        # -1 pins the model in RAM indefinitely so it never cold-reloads (~28s on Pi).
+        self.keep_alive = keep_alive
+
+    def warmup(self) -> None:
+        """Load the model into RAM at startup so the first real query is fast."""
+        try:
+            log.info("warming up %s (loading into RAM)...", self.model)
+            requests.post(
+                f"{self.host}/api/chat",
+                json={
+                    "model": self.model,
+                    "messages": [{"role": "user", "content": "hi"}],
+                    "stream": False,
+                    "keep_alive": self.keep_alive,
+                    "options": {"num_predict": 1},
+                },
+                timeout=180,
+            ).raise_for_status()
+            log.info("LLM warm and pinned in RAM")
+        except requests.RequestException as e:
+            log.warning("LLM warmup failed (will load on first query): %s", e)
 
     def stream(self, messages: list[Message]) -> Iterator[str]:
         payload = {
             "model": self.model,
             "messages": messages,
             "stream": True,
+            "keep_alive": self.keep_alive,
             "options": {
                 "temperature": self.temperature,
                 "num_predict": self.max_tokens,

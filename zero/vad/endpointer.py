@@ -31,14 +31,18 @@ class _BaseEndpointer:
     def _is_speech(self, frame: np.ndarray) -> bool:  # pragma: no cover - overridden
         raise NotImplementedError
 
-    def capture(self, frames: Iterable[np.ndarray]) -> np.ndarray | None:
+    def capture(self, frames: Iterable[np.ndarray],
+                idle_timeout_s: float | None = None) -> np.ndarray | None:
+        """Collect one utterance. If `idle_timeout_s` is set and no speech starts
+        within that window, return None (lets the caller sleep the conversation).
+        """
         collected: list[np.ndarray] = []
         trailing_silence = 0
         started = False
-        n = 0
+        idle_blocks_seen = 0
+        idle_limit = int(idle_timeout_s * 1000 / self.block_ms) if idle_timeout_s else None
 
         for frame in frames:
-            n += 1
             speech = self._is_speech(frame)
 
             if speech:
@@ -46,13 +50,18 @@ class _BaseEndpointer:
                 trailing_silence = 0
             elif started:
                 trailing_silence += 1
+            else:
+                # Still waiting for the user to start talking.
+                idle_blocks_seen += 1
+                if idle_limit and idle_blocks_seen >= idle_limit:
+                    return None
 
             if started:
                 collected.append(frame)
 
             if started and trailing_silence >= self.silence_blocks:
                 break
-            if n >= self.max_blocks:
+            if started and len(collected) >= self.max_blocks:
                 log.info("utterance hit max length cap")
                 break
 

@@ -8,6 +8,11 @@ audio:
                             # PipeWire grabbing the silent BT headset mic + pulse RT timeout
   output_device: pulse      # routes to the default PipeWire sink = BT speaker
 
+conversation:
+  # After waking once, ZERO stays in a flowing conversation (no wake word between
+  # turns). It sleeps after this much continuous silence, or on a stop phrase.
+  sleep_timeout_ms: 30000
+
 wake:
   engine: openwakeword
   # openWakeWord ships pretrained words; for a true "Hey Zero" train a custom model.
