@@ -1,175 +1,136 @@
 # ZERO — Offline Voice Assistant on Raspberry Pi 5
 
-**Status:** Working end-to-end, conversational. Tuning latency.
+**Status:** Working end-to-end. You can hold a real conversation. Still polishing speed.
 **Last updated:** 2026-06-25
 **Branch:** `offline_v5`
 
 ---
 
-## 1. What it is
+## 1. What we built
 
-A **fully offline** voice assistant running entirely on a Raspberry Pi 5 (16 GB) —
-no cloud, no internet at runtime. You say a wake word once, then hold a natural
-back-and-forth conversation. Everything (speech-to-text, the language model, and
-text-to-speech) runs on the Pi's CPU.
+A voice assistant that runs **completely on a small Raspberry Pi 5 computer** — no
+internet, no cloud, no big servers. You say a wake word once, then just talk to it
+like a person. It listens, understands, thinks, and talks back, all on the device.
+
+Three things happen inside it:
+1. It **hears** you and turns your speech into text.
+2. It **thinks** using a local AI model to come up with a reply.
+3. It **speaks** the reply out loud.
+
+Everything is private and offline.
 
 ---
 
-## 2. The pipeline
+## 2. How it works (the flow)
 
 ```
-You speak ─► Mic (USB) ─► Wake word ─► Voice activity detection ─► Speech-to-text
-                                                                        │
-                                                                        ▼
-            BT speaker ◄─ Text-to-speech ◄─ Language model (streamed) ◄─┘
+You talk ─► Microphone ─► "Is someone talking?" ─► Turn speech into text
+                                                          │
+                                                          ▼
+        Speaker plays it ◄─ Turn text into speech ◄─ AI writes a reply
 ```
 
-| Stage | Engine | Model | Why |
-|-------|--------|-------|-----|
-| Wake word | openWakeWord (ONNX) | `hey_jarvis` | Light, always-on; ONNX (no tflite needed on Py 3.13) |
-| Voice activity | webrtcvad | — | Ultra-light, fully offline, no PyTorch |
-| Speech-to-text | whisper.cpp | `base.en` (Q5) | Best speed/accuracy balance on Pi CPU |
-| Language model | Ollama | `qwen2.5:3b-instruct` (Q4) | Smartest 3B that stays low-latency on Pi |
-| Text-to-speech | Piper | `en_US-amy-medium` | Fast, natural, runs as a native binary |
+| Step | What it does | Tool used |
+|------|--------------|-----------|
+| Wake word | Listens for "Hey Jarvis" to start | openWakeWord |
+| Speech detection | Notices when you start/stop talking | webrtcvad |
+| Speech-to-text | Writes down what you said | Whisper (`base.en`) |
+| The "brain" | Comes up with a reply | Qwen 2.5 (3B) via Ollama |
+| Text-to-speech | Says the reply out loud | Piper voice |
 
 ---
 
-## 3. Key decisions (and why)
+## 3. The choices we made (and why)
 
-- **No giant quantized models.** The Pi is limited by CPU speed, not storage. A
-  quantized 8B model *fits* but runs at ~2 tok/s — unusable. The 3B class is the
-  sweet spot. Bigger ≠ better here.
-- **Qwen2.5-3B over Llama-3.2-3B / TinyLlama.** TinyLlama hallucinated badly; the
-  3B Qwen is concise and reliable with a tight system prompt.
-- **Ollama instead of loading the model directly.** Ollama keeps the model warm in
-  RAM between turns, which is a real latency win.
-- **Linear pipeline, not "streaming/speculative."** On a CPU-bound Pi, overlapping
-  speech-to-text + LLM + TTS concurrently starves the CPU and glitches audio. We
-  overlap only the safe, high-impact part (LLM → TTS, sentence by sentence).
-
----
-
-## 4. The engineering journey (what we hit, what we did)
-
-### 4a. Setup & environment hurdles (getting it to even run)
-
-| # | Problem | Fix |
-|---|---------|-----|
-| 1 | GitHub blocked password auth when cloning to the Pi | Used a **Personal Access Token** |
-| 2 | Working copy on the Pi got wiped; tracked files showed "deleted" | `git reset --hard origin/offline_v5` to restore |
-| 3 | Py 3.13 has no `tflite-runtime` wheel → openWakeWord wouldn't install | Force the **ONNX backend** + install with `--no-deps` |
-| 4 | `webrtcvad` import failed (`pkg_resources`) | Pin `setuptools<81` |
-| 5 | Silero VAD needed PyTorch **and** internet (breaks "offline") | Switched VAD to **webrtcvad** (light, offline) |
-| 6 | Whisper model download 404'd (`q5_0` doesn't exist) | Used the real file: `small.en-q5_1`, later `base.en` |
-| 7 | `models/` folder got deleted with the working tree | Re-downloaded Whisper + Piper voice |
-| 8 | Piper had no binary on the Pi → TTS silent | Installed the **Piper arm64 binary** |
-| 9 | Audio defaults reset on every reboot | Re-run `pactl set-default-*` each boot (persistence still TODO) |
-
-### 4b. Runtime / pipeline problems (making it work well)
-
-| # | Problem | Fix | Result |
-|---|---------|-----|--------|
-| 10 | Default ALSA device timed out (`paTimedOut`) | Capture the **USB mic directly**; retry + high latency on open | Stable mic |
-| 11 | Mic captured silence → Whisper hallucinated text | Pin PipeWire default source to the USB mic | Real transcription |
-| 12 | Capture log **flooded** "queue full" while busy | Throttled the warning to debug | Readable logs |
-| 13 | **Speech-to-text took 14.7s per phrase** | Whisper always encodes a 30s window — capped it with **`audio_ctx=768`** + 4 threads | **14.7s → ~1.5s** |
-| 14 | `base.en` vs `small.en` accuracy/speed tradeoff | Kept **`base.en`** — accurate enough and ~1.5s | Good balance |
-| 15 | **First reply froze ~28s** (cold model load) | **Warm up** the LLM at boot + `keep_alive=-1` (pin in RAM) | First reply fast |
-| 16 | It answered only ONE question per wake word | Rewrote into a **continuous conversation** (no wake word between turns; ends on "goodbye" or 30s silence) | Real multi-turn |
-| 17 | Replies too terse (`max_tokens 80`) | Raised to 140 + "2–3 natural sentences" prompt | Natural replies |
-| 18 | **~40s freezes mid-conversation** | Rolling history forced the model to re-read everything each turn. Shrank system prompt + history (6→3) + shorter replies | **40s → ~10s** |
-| 19 | It transcribed **background people & its own voice** (a backlog of noise) | **Mute mic while thinking/speaking**, drop non-speech like `(applause)`, VAD aggressiveness 3 + **loudness gate** | Stops eating the room |
-| 20 | Long silences while it "thought" | **Spoken fillers** ("Let me think.") play *while* the model generates in the background | Masks the wait |
+- **We did NOT use a huge AI model.** A bigger model is smarter but far too slow on
+  a small Pi — replies would crawl out word by word. We picked a **mid-size model**
+  that's the sweet spot: smart enough, but still quick.
+- **We picked Qwen over the alternatives.** The smallest models (like TinyLlama)
+  made things up and gave poor answers. Qwen is reliable and to-the-point.
+- **We keep the AI model "warm" in memory** so it's ready to answer instantly,
+  instead of reloading every time.
+- **We kept the design simple.** Fancier "answer before the user finishes" tricks
+  sound good on paper but overload the little Pi and make the audio stutter. Simple
+  and steady wins here.
 
 ---
 
-## 5. A few key code bits
+## 4. Everything we ran into along the way
 
-**The 30-second-window fix (the biggest latency win):**
-```python
-# zero/stt/whispercpp_engine.py — cap the encoder window for short turns
-kwargs = {"language": self.language}
-if self.audio_ctx:                 # 768 in config
-    kwargs["audio_ctx"] = self.audio_ctx
-segments = self._model.transcribe(audio, **kwargs)
-```
+Nothing here is left out — this is the full story, start to finish.
 
-**Pin the model in RAM + warm it at boot:**
-```python
-# zero/llm/ollama_engine.py
-self.keep_alive = -1               # never unload from RAM
-def warmup(self):                  # called once at startup
-    requests.post(f"{self.host}/api/chat", json={
-        "model": self.model, "messages": [{"role": "user", "content": "hi"}],
-        "keep_alive": self.keep_alive, "options": {"num_predict": 1}})
-```
+### 4a. Just getting it set up
 
-**Drop Whisper's non-speech hallucinations (background noise):**
-```python
-# "(applause)", "[BLANK_AUDIO]" -> "" so they never reach the LLM
-_BRACKETS = re.compile(r"[\(\[][^\)\]]*[\)\]]")
-def _strip_hallucinations(text):
-    cleaned = _BRACKETS.sub("", text).strip(" .,!?-…")
-    return cleaned if re.search(r"[A-Za-z]{2,}", cleaned) else ""
-```
+| # | What went wrong | What we did |
+|---|-----------------|-------------|
+| 1 | GitHub wouldn't let us copy the code to the Pi with a password | Used a secure access token instead |
+| 2 | The code folder on the Pi got wiped out | Restored it cleanly from GitHub |
+| 3 | The wake-word software refused to install (incompatible with the Pi's Python) | Installed it a different way that works |
+| 4 | The speech-detection software wouldn't start | Installed a specific older support library |
+| 5 | Our first choice for speech detection secretly needed the internet | Swapped it for a lightweight offline one |
+| 6 | A download link for the speech model was broken | Found and used the correct file |
+| 7 | The folder holding the AI models got deleted | Re-downloaded the models |
+| 8 | The assistant had no voice — the speaking software was missing | Installed the voice software |
+| 9 | The microphone and speaker settings reset every time the Pi restarts | Re-apply them on each startup (a permanent fix is still on the list) |
 
-**Overlapped fillers — generate while a filler plays (no added delay):**
-```python
-# zero/main.py
-chunks = self._stream_in_background(self.convo.messages())  # LLM starts NOW
-self._play_filler()              # "Let me think." plays over the model's prefill
-reply = self._speak_streaming(chunks)   # real answer flows straight in
-```
+### 4b. Making it actually work well
+
+| # | What went wrong | What we did | Result |
+|---|-----------------|-------------|--------|
+| 10 | The microphone kept failing to start | Pointed it straight at the USB mic and made it retry | Reliable mic |
+| 11 | It "heard" silence and invented random text | Made sure it listens to the correct microphone | Real, accurate text |
+| 12 | The logs were flooded with noise, hard to read | Quieted the spam | Clean logs |
+| 13 | **Writing down speech took ~15 seconds** | Stopped it from over-processing each clip | **15s → ~1.5s** |
+| 14 | A trade-off between speed and accuracy on the speech model | Chose the option that's accurate *and* fast | Good balance |
+| 15 | **The very first reply froze for ~28 seconds** | Load the AI model at startup and keep it ready | First reply is quick |
+| 16 | It only answered ONE question, then needed the wake word again | Rebuilt it as a flowing conversation — talk freely, it stops on "goodbye" or after a long silence | Real back-and-forth |
+| 17 | Replies were too short and clipped | Allowed slightly longer, more natural answers | Sounds human |
+| 18 | **It froze for ~40 seconds deep in a chat** | It was re-reading the whole conversation each time; trimmed how much it re-reads | **40s → ~10s** |
+| 19 | It picked up **background people and even its own voice** | Mutes the mic while it's busy, ignores crowd noise, and only listens to the closest/loudest voice (you) | Stops reacting to the room |
+| 20 | Awkward silence while it was thinking | It now says a quick "Let me think…" *while* preparing the real answer | Feels natural, no dead air |
 
 ---
 
-## 6. Current performance (on the Pi 5 CPU)
+## 5. Where it stands now (real numbers)
 
-| Metric | Number |
-|--------|--------|
-| Speech-to-text | **~1.5–2s** per turn (was 14.7s) |
-| LLM first token (warm, short context) | **~2s** |
-| LLM first token (when history is full) | **~10–17s** ← the remaining issue |
-| End-to-end feel | ~3–5s on good turns; filler masks the slow ones |
-| RAM in use | ~4.5 GB of 16 GB (lots of headroom) |
-
----
-
-## 7. Tunable knobs (all in `config.yaml`)
-
-```yaml
-stt:   { model: base.en, threads: 4, audio_ctx: 768 }
-vad:   { silence_ms: 500, aggressiveness: 3, energy_threshold: 350 }
-llm:   { model: qwen2.5:3b-instruct, temperature: 0.3, max_tokens: 140, history_turns: 3 }
-conversation: { sleep_timeout_ms: 30000, filler_probability: 0.9 }
-```
-- `energy_threshold` — raise it in noisier rooms so background voices are ignored.
-- `audio_ctx` — the speech-to-text speed lever.
-- `history_turns` — fewer = faster, less memory of the conversation.
+| Thing | Now |
+|-------|-----|
+| Time to write down your speech | **~1.5 seconds** (was 15) |
+| Time for the AI to start replying (usual) | **~2 seconds** |
+| Time for the AI to start replying (deep in a long chat) | **~10–17 seconds** ← the last rough edge |
+| Overall feel | Smooth on most turns; the "thinking" line hides the slow ones |
+| Memory used | About 1/3 of what the Pi has — plenty of room |
 
 ---
 
-## 8. Known limitations & next steps
+## 6. What's left to do
 
-| Item | Status |
-|------|--------|
-| **LLM still spikes to ~15s when history fills** | **Next:** test `qwen2.5:1.5b-instruct` — prefills ~2× faster. The real fix for raw speed. |
-| Open USB mic still catches loud background talk | Software-mitigated (gate + VAD). A **headset/directional mic** is the proper fix in noisy rooms. |
-| Audio defaults reset on reboot | Need to make the PipeWire mic/speaker defaults persistent. |
-| Wake word is "Hey Jarvis", not "Hey Zero" | Built-in model for now; a custom "Hey Zero" needs training. |
+| Item | Plan |
+|------|------|
+| **The occasional 15-second pause** deep in a chat | Try a smaller, faster AI model — about twice as fast. This is the main next step. |
+| Background noise in a busy room | We've reduced it in software; a **headset or directional mic** would fully solve it. |
+| Audio settings reset on restart | Make them stick automatically. |
+| Wake word is "Hey Jarvis", not "Hey Zero" | A custom "Hey Zero" needs extra training. |
 
 ---
 
-## 9. Run it
+## 7. How to run it
 
 ```bash
-# one-time per boot: connect speaker + set audio defaults
-bluetoothctl connect <speaker-mac>
-pactl set-default-sink   <bt-speaker>
+# once per startup: connect the speaker and set the mic/speaker
+bluetoothctl connect <speaker>
+pactl set-default-sink   <speaker>
 pactl set-default-source <usb-mic>
 
-# start
+# start the assistant
 cd ~/Mzee/offline_v5 && source .venv/bin/activate
 python -m zero.main
-# say "Hey Jarvis", then just talk. Say "goodbye" to end.
+
+# then: say "Hey Jarvis", talk normally, and say "goodbye" to end.
 ```
+
+---
+
+*In short: we took it from "can't even install" to a private, offline assistant you
+can genuinely chat with on a tiny computer — and we know exactly what the last
+speed fix is.*
