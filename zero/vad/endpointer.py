@@ -50,34 +50,43 @@ class _BaseEndpointer:
         within that window, return None (lets the caller sleep the conversation).
         """
         collected: list[np.ndarray] = []
+        preroll: list[np.ndarray] = []  # recent frames kept so we don't clip word 1
         trailing_silence = 0
         started = False
         idle_blocks_seen = 0
         idle_limit = int(idle_timeout_s * 1000 / self.block_ms) if idle_timeout_s else None
 
         for frame in frames:
-            # Must pass BOTH the VAD and the loudness gate to count as the user.
-            speech = self._is_speech(frame) and self._energetic(frame)
+            is_voice = self._is_speech(frame)  # VAD only
 
-            if speech:
-                started = True
-                trailing_silence = 0
-            elif started:
-                trailing_silence += 1
+            if not started:
+                # Keep a short lead-in so the first word isn't clipped.
+                preroll.append(frame)
+                if len(preroll) > self.pad_blocks + 1:
+                    preroll.pop(0)
+                # STARTING requires real speech AND enough loudness — this is where
+                # the loudness gate belongs (rejects quiet background onsets).
+                if is_voice and self._energetic(frame):
+                    started = True
+                    collected.extend(preroll)
+                    trailing_silence = 0
+                else:
+                    idle_blocks_seen += 1
+                    if idle_limit and idle_blocks_seen >= idle_limit:
+                        return None
             else:
-                # Still waiting for the user to start talking.
-                idle_blocks_seen += 1
-                if idle_limit and idle_blocks_seen >= idle_limit:
-                    return None
-
-            if started:
                 collected.append(frame)
-
-            if started and trailing_silence >= self.silence_blocks:
-                break
-            if started and len(collected) >= self.max_blocks:
-                log.info("utterance hit max length cap")
-                break
+                # CONTINUING uses the VAD only — quiet syllables/short pauses inside
+                # a sentence must NOT end it (that was the fragmentation bug).
+                if is_voice:
+                    trailing_silence = 0
+                else:
+                    trailing_silence += 1
+                    if trailing_silence >= self.silence_blocks:
+                        break
+                if len(collected) >= self.max_blocks:
+                    log.info("utterance hit max length cap")
+                    break
 
         if not collected:
             return None

@@ -45,7 +45,7 @@ wake:
 
 vad:
   engine: webrtc            # silero (needs torch + net) | webrtc (offline, light) <- chosen
-  silence_ms: 500           # trailing silence that ends an utterance (lower = snappier turns)
+  silence_ms: 700           # trailing silence that ends an utterance (too low cuts you off mid-sentence)
   aggressiveness: 3         # webrtc 0-3; 3 = most aggressive at rejecting background murmur
   energy_threshold: 350     # int16 RMS a single frame must exceed to count as speech
   min_utterance_rms: 0      # PROXIMITY GATE: drop a whole utterance quieter than this
