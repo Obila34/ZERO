@@ -21,15 +21,19 @@ log = get_logger("vad")
 
 class _BaseEndpointer:
     def __init__(self, sample_rate: int, silence_ms: int, max_utterance_ms: int,
-                 speech_pad_ms: int, block_ms: int, energy_threshold: float = 0.0):
+                 speech_pad_ms: int, block_ms: int, energy_threshold: float = 0.0,
+                 min_utterance_rms: float = 0.0):
         self.sample_rate = sample_rate
         self.block_ms = block_ms
         self.silence_blocks = max(1, silence_ms // block_ms)
         self.max_blocks = max(1, max_utterance_ms // block_ms)
         self.pad_blocks = max(0, speech_pad_ms // block_ms)
-        # int16 RMS a frame must exceed to count as speech. Rejects quieter
+        # int16 RMS a single frame must exceed to count as speech. Rejects quieter
         # background voices/room noise that the VAD alone would accept. 0 = off.
         self.energy_threshold = energy_threshold
+        # int16 RMS the WHOLE utterance must average — a proximity gate: your voice
+        # (close to the mic) is loud; people across the room are not. 0 = off.
+        self.min_utterance_rms = min_utterance_rms
 
     def _is_speech(self, frame: np.ndarray) -> bool:  # pragma: no cover - overridden
         raise NotImplementedError
@@ -77,8 +81,21 @@ class _BaseEndpointer:
 
         if not collected:
             return None
-        pcm = np.concatenate(collected).astype(np.float32) / 32768.0
-        return pcm
+
+        pcm_i16 = np.concatenate(collected)
+        rms = float(np.sqrt(np.mean(pcm_i16.astype(np.float32) ** 2)))
+        peak = int(np.abs(pcm_i16).max())
+        log.info("utterance: rms=%.0f peak=%d (%.1fs)", rms, peak,
+                 len(collected) * self.block_ms / 1000.0)
+
+        # Proximity gate: a whole utterance that's quiet on average is almost
+        # certainly background, not the close speaker — drop it.
+        if self.min_utterance_rms and rms < self.min_utterance_rms:
+            log.info("dropped: too quiet (rms %.0f < %.0f) — likely background",
+                     rms, self.min_utterance_rms)
+            return None
+
+        return pcm_i16.astype(np.float32) / 32768.0
 
 
 class SileroEndpointer(_BaseEndpointer):

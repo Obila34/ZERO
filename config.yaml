@@ -47,8 +47,11 @@ vad:
   engine: webrtc            # silero (needs torch + net) | webrtc (offline, light) <- chosen
   silence_ms: 500           # trailing silence that ends an utterance (lower = snappier turns)
   aggressiveness: 3         # webrtc 0-3; 3 = most aggressive at rejecting background murmur
-  energy_threshold: 350     # int16 RMS a frame must exceed to count as YOUR voice
-                            # (rejects quieter background people). 0 = off; raise if noisy.
+  energy_threshold: 350     # int16 RMS a single frame must exceed to count as speech
+  min_utterance_rms: 0      # PROXIMITY GATE: drop a whole utterance quieter than this
+                            # on average (background people are quieter than you).
+                            # 0 = off (calibrate first: run and read the "utterance:
+                            # rms=" logs for your voice vs background, then set between).
   max_utterance_ms: 15000   # hard cap so STT input stays bounded
   speech_pad_ms: 200        # keep a little audio either side of speech
 
