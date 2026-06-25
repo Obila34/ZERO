@@ -4,7 +4,7 @@ Build your voiceprint, then test that YOUR voice matches and OTHER voices don't.
 Tune the threshold here before wiring it into the assistant.
 
 Setup:
-    pip install onnxruntime sounddevice numpy kaldi-native-fbank
+    pip install onnxruntime sounddevice numpy
     # download the model (~25 MB):
     #   models/voiceid/voxceleb_ECAPA512_LM.onnx
     #   from https://huggingface.co/Wespeaker/wespeaker-ecapa-tdnn512-LM
