@@ -1,120 +1,114 @@
 # ZERO — Offline Voice Assistant on Raspberry Pi 5
 
-**Status:** Working end-to-end. You can hold a real conversation. Still polishing speed.
-**Last updated:** 2026-06-25
-**Branch:** `offline_v5`
+**Status:** Working end-to-end — you can hold a real conversation. Polishing speed.
+**Last updated:** 2026-06-25 · **Branch:** `offline_v5`
 
 ---
 
-## 1. What we built
+## Overview
 
-A voice assistant that runs **completely on a small Raspberry Pi 5 computer** — no
-internet, no cloud, no big servers. You say a wake word once, then just talk to it
-like a person. It listens, understands, thinks, and talks back, all on the device.
+ZERO is a voice assistant that runs entirely on a single Raspberry Pi 5 with no
+internet, no cloud, and no external servers — every part of it lives on the device
+itself, which keeps it completely private and able to work anywhere. The idea was
+to take the loose collection of speech, language, and audio pieces we had been
+experimenting with and turn them into one coherent product: you say a wake word
+once, and from there you simply talk to it like a person. Under the hood three
+things happen in sequence — it listens and turns your speech into text, it feeds
+that text to a local AI model that writes a reply, and it speaks the reply back out
+loud through a Bluetooth speaker. The goal throughout has been to make those three
+steps feel seamless enough that the seams disappear and it just feels like a
+conversation.
 
-Three things happen inside it:
-1. It **hears** you and turns your speech into text.
-2. It **thinks** using a local AI model to come up with a reply.
-3. It **speaks** the reply out loud.
+## The approach and the stack
 
-Everything is private and offline.
+Early on we made a deliberate decision not to chase the biggest, most powerful AI
+model we could quantize onto the Pi. A larger model is smarter, but on a small
+CPU-only computer it produces words so slowly that the experience falls apart, so
+we settled on a mid-sized model that sits in the sweet spot of being clever enough
+to hold a conversation while still being quick to respond. For the same reason we
+kept the overall design simple and linear rather than reaching for the fashionable
+"start answering before the user has finished speaking" tricks — on a device this
+small, trying to run speech recognition, the language model, and the voice all at
+once simply starves the processor and makes the audio stutter. The pieces we landed
+on are openWakeWord for the "Hey Jarvis" trigger, a lightweight voice-activity
+detector to notice when you start and stop talking, Whisper (the `base.en` model)
+to turn speech into text, Qwen 2.5 (a 3-billion-parameter model served through
+Ollama) as the brain, and Piper for the spoken voice. We chose Qwen over the
+smaller alternatives because the tiniest models tended to make things up and give
+shallow answers, whereas Qwen stays reliable and to the point.
 
----
+## Phase 1 — Getting it to run at all
 
-## 2. How it works (the flow)
+The first stretch of work was less about intelligence and more about simply getting
+every piece to install and cooperate on the Pi, and it threw up a steady run of
+obstacles. Copying the code onto the Pi failed at first because GitHub no longer
+accepts plain passwords, so we switched to a secure access token; then, partway
+through, the working copy on the Pi got wiped and every file showed as deleted,
+which we recovered by resetting it cleanly from GitHub. The wake-word software
+refused to install because it expected an older version of Python than the Pi was
+running, so we installed it a different way that sidesteps the incompatibility, and
+the voice-detection library similarly wouldn't start until we pinned one of its
+older supporting packages. We also discovered that our original choice for voice
+detection quietly depended on the internet, which broke the whole "fully offline"
+promise, so we replaced it with a lighter component that runs locally. Downloading
+the AI models brought its own snags: one model link was simply broken and pointed
+at a file that didn't exist, and at another point the entire folder holding the
+models was deleted and had to be fetched again. Finally, the assistant had no voice
+at all until we installed the missing speech software, and we found that the Pi
+forgets its microphone and speaker settings every time it restarts — for now we
+re-apply those on each startup, with a permanent fix still on the list.
 
-```
-You talk ─► Microphone ─► "Is someone talking?" ─► Turn speech into text
-                                                          │
-                                                          ▼
-        Speaker plays it ◄─ Turn text into speech ◄─ AI writes a reply
-```
+## Phase 2 — Making it work, and work well
 
-| Step | What it does | Tool used |
-|------|--------------|-----------|
-| Wake word | Listens for "Hey Jarvis" to start | openWakeWord |
-| Speech detection | Notices when you start/stop talking | webrtcvad |
-| Speech-to-text | Writes down what you said | Whisper (`base.en`) |
-| The "brain" | Comes up with a reply | Qwen 2.5 (3B) via Ollama |
-| Text-to-speech | Says the reply out loud | Piper voice |
+With everything installed, the focus shifted to the experience itself, and this is
+where the most meaningful progress happened. The microphone was unreliable at
+first and kept failing to start, so we pointed the software directly at the USB
+microphone and had it retry on the occasional hiccup; related to that, it was
+initially "hearing" silence and inventing random text, which disappeared once we
+made certain it was listening to the correct microphone. The single biggest win
+came from the speech-to-text step, which originally took around fifteen seconds for
+even a short sentence because it was over-processing every clip — once we stopped
+that waste, the same step dropped to roughly a second and a half, and we settled on
+a model setting that is both fast and accurate. On the language side, the very
+first reply used to freeze for nearly thirty seconds while the model loaded, so we
+now load it the moment the assistant starts and keep it resident in memory so it is
+always ready. Perhaps the most important change conceptually was turning ZERO from
+a one-question-at-a-time tool into a genuine conversation: previously you had to say
+the wake word before every single question, and now you say it once and simply talk,
+with the assistant bowing out only when you say "goodbye" or after a long silence.
+We also loosened the replies, which had become too short and clipped, into slightly
+longer and more natural-sounding answers.
 
----
+Two stubborn problems remained, and both were about the realities of a small device
+in a real room. Deep into a conversation the assistant would sometimes freeze for
+forty seconds, which turned out to be it re-reading the entire conversation from the
+start on every turn; trimming how much history it carries cut that dramatically. And
+because the microphone is an open webcam mic, it was picking up background people and
+even its own voice played through the speaker, creating a backlog of nonsense that
+it tried to answer — we addressed this by muting the microphone while it is busy
+thinking or speaking, ignoring crowd-type noise, and only treating the closest,
+loudest voice (yours) as real input. Finally, to mask the unavoidable thinking time
+on a small processor, ZERO now speaks a short filler like "Let me think…" the instant
+you finish, while it quietly prepares the real answer in the background, so there is
+no dead air.
 
-## 3. The choices we made (and why)
+## Where it stands now
 
-- **We did NOT use a huge AI model.** A bigger model is smarter but far too slow on
-  a small Pi — replies would crawl out word by word. We picked a **mid-size model**
-  that's the sweet spot: smart enough, but still quick.
-- **We picked Qwen over the alternatives.** The smallest models (like TinyLlama)
-  made things up and gave poor answers. Qwen is reliable and to-the-point.
-- **We keep the AI model "warm" in memory** so it's ready to answer instantly,
-  instead of reloading every time.
-- **We kept the design simple.** Fancier "answer before the user finishes" tricks
-  sound good on paper but overload the little Pi and make the audio stutter. Simple
-  and steady wins here.
+The result is a private, offline assistant you can genuinely chat with on a tiny
+computer. Writing down your speech, once a fifteen-second bottleneck, now takes about
+a second and a half. The AI usually begins replying within roughly two seconds, and
+the spoken filler smooths over the moments when it takes longer. Memory use sits at
+around a third of what the Pi has available, leaving comfortable headroom. The one
+remaining rough edge is that, deep into a long conversation, the AI can still take
+ten to seventeen seconds to begin answering, which is the next thing we intend to
+fix by testing a smaller and roughly twice-as-fast model. Beyond that, the open
+microphone could be improved further with a headset or directional mic for noisy
+rooms, the audio settings should be made to survive a restart, and the wake word —
+currently "Hey Jarvis" — could be trained into a custom "Hey Zero." In short, we
+took ZERO from "won't even install" to a working, natural, fully offline voice
+assistant, and we know exactly what the last speed fix is.
 
----
-
-## 4. Everything we ran into along the way
-
-Nothing here is left out — this is the full story, start to finish.
-
-### 4a. Just getting it set up
-
-| # | What went wrong | What we did |
-|---|-----------------|-------------|
-| 1 | GitHub wouldn't let us copy the code to the Pi with a password | Used a secure access token instead |
-| 2 | The code folder on the Pi got wiped out | Restored it cleanly from GitHub |
-| 3 | The wake-word software refused to install (incompatible with the Pi's Python) | Installed it a different way that works |
-| 4 | The speech-detection software wouldn't start | Installed a specific older support library |
-| 5 | Our first choice for speech detection secretly needed the internet | Swapped it for a lightweight offline one |
-| 6 | A download link for the speech model was broken | Found and used the correct file |
-| 7 | The folder holding the AI models got deleted | Re-downloaded the models |
-| 8 | The assistant had no voice — the speaking software was missing | Installed the voice software |
-| 9 | The microphone and speaker settings reset every time the Pi restarts | Re-apply them on each startup (a permanent fix is still on the list) |
-
-### 4b. Making it actually work well
-
-| # | What went wrong | What we did | Result |
-|---|-----------------|-------------|--------|
-| 10 | The microphone kept failing to start | Pointed it straight at the USB mic and made it retry | Reliable mic |
-| 11 | It "heard" silence and invented random text | Made sure it listens to the correct microphone | Real, accurate text |
-| 12 | The logs were flooded with noise, hard to read | Quieted the spam | Clean logs |
-| 13 | **Writing down speech took ~15 seconds** | Stopped it from over-processing each clip | **15s → ~1.5s** |
-| 14 | A trade-off between speed and accuracy on the speech model | Chose the option that's accurate *and* fast | Good balance |
-| 15 | **The very first reply froze for ~28 seconds** | Load the AI model at startup and keep it ready | First reply is quick |
-| 16 | It only answered ONE question, then needed the wake word again | Rebuilt it as a flowing conversation — talk freely, it stops on "goodbye" or after a long silence | Real back-and-forth |
-| 17 | Replies were too short and clipped | Allowed slightly longer, more natural answers | Sounds human |
-| 18 | **It froze for ~40 seconds deep in a chat** | It was re-reading the whole conversation each time; trimmed how much it re-reads | **40s → ~10s** |
-| 19 | It picked up **background people and even its own voice** | Mutes the mic while it's busy, ignores crowd noise, and only listens to the closest/loudest voice (you) | Stops reacting to the room |
-| 20 | Awkward silence while it was thinking | It now says a quick "Let me think…" *while* preparing the real answer | Feels natural, no dead air |
-
----
-
-## 5. Where it stands now (real numbers)
-
-| Thing | Now |
-|-------|-----|
-| Time to write down your speech | **~1.5 seconds** (was 15) |
-| Time for the AI to start replying (usual) | **~2 seconds** |
-| Time for the AI to start replying (deep in a long chat) | **~10–17 seconds** ← the last rough edge |
-| Overall feel | Smooth on most turns; the "thinking" line hides the slow ones |
-| Memory used | About 1/3 of what the Pi has — plenty of room |
-
----
-
-## 6. What's left to do
-
-| Item | Plan |
-|------|------|
-| **The occasional 15-second pause** deep in a chat | Try a smaller, faster AI model — about twice as fast. This is the main next step. |
-| Background noise in a busy room | We've reduced it in software; a **headset or directional mic** would fully solve it. |
-| Audio settings reset on restart | Make them stick automatically. |
-| Wake word is "Hey Jarvis", not "Hey Zero" | A custom "Hey Zero" needs extra training. |
-
----
-
-## 7. How to run it
+## Running it
 
 ```bash
 # once per startup: connect the speaker and set the mic/speaker
@@ -126,11 +120,5 @@ pactl set-default-source <usb-mic>
 cd ~/Mzee/offline_v5 && source .venv/bin/activate
 python -m zero.main
 
-# then: say "Hey Jarvis", talk normally, and say "goodbye" to end.
+# then say "Hey Jarvis", talk normally, and say "goodbye" to end.
 ```
-
----
-
-*In short: we took it from "can't even install" to a private, offline assistant you
-can genuinely chat with on a tiny computer — and we know exactly what the last
-speed fix is.*
