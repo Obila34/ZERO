@@ -4,7 +4,8 @@
 audio:
   sample_rate: 16000        # 16 kHz mono everywhere in the pipeline
   block_ms: 30              # frame size for capture / VAD
-  input_device: pulse       # PipeWire bridge (ALSA "default" times out on this Pi)
+  input_device: BRIO        # capture BRIO hardware directly (name match) — avoids
+                            # PipeWire grabbing the silent BT headset mic + pulse RT timeout
   output_device: pulse      # routes to the default PipeWire sink = BT speaker
 
 wake:
