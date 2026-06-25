@@ -21,3 +21,7 @@ debug_*.wav
 # Long-term memory store (per-device, not source)
 *.sqlite
 *.sqlite-journal
+
+# Voiceprint profile (per-device)
+voiceprint.npy
+*.npy
