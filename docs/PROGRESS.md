@@ -51,19 +51,35 @@ You speak ─► Mic (USB) ─► Wake word ─► Voice activity detection ─�
 
 ## 4. The engineering journey (what we hit, what we did)
 
+### 4a. Setup & environment hurdles (getting it to even run)
+
+| # | Problem | Fix |
+|---|---------|-----|
+| 1 | GitHub blocked password auth when cloning to the Pi | Used a **Personal Access Token** |
+| 2 | Working copy on the Pi got wiped; tracked files showed "deleted" | `git reset --hard origin/offline_v5` to restore |
+| 3 | Py 3.13 has no `tflite-runtime` wheel → openWakeWord wouldn't install | Force the **ONNX backend** + install with `--no-deps` |
+| 4 | `webrtcvad` import failed (`pkg_resources`) | Pin `setuptools<81` |
+| 5 | Silero VAD needed PyTorch **and** internet (breaks "offline") | Switched VAD to **webrtcvad** (light, offline) |
+| 6 | Whisper model download 404'd (`q5_0` doesn't exist) | Used the real file: `small.en-q5_1`, later `base.en` |
+| 7 | `models/` folder got deleted with the working tree | Re-downloaded Whisper + Piper voice |
+| 8 | Piper had no binary on the Pi → TTS silent | Installed the **Piper arm64 binary** |
+| 9 | Audio defaults reset on every reboot | Re-run `pactl set-default-*` each boot (persistence still TODO) |
+
+### 4b. Runtime / pipeline problems (making it work well)
+
 | # | Problem | Fix | Result |
 |---|---------|-----|--------|
-| 1 | Py 3.13 has no `tflite-runtime` wheel; openWakeWord wouldn't install | Force the **ONNX backend** + install with `--no-deps` | Wake word loads |
-| 2 | `webrtcvad` needs `pkg_resources` | Pin `setuptools<81` | VAD loads |
-| 3 | Default ALSA device timed out (`paTimedOut`) | Capture the **USB mic directly**; retry + high latency on open | Stable mic |
-| 4 | Mic captured silence → Whisper hallucinated | Pin PipeWire default source to the USB mic | Real transcription |
-| 5 | **Speech-to-text took 14.7s per phrase** | Whisper always encodes a 30s window — capped it with **`audio_ctx=768`** + 4 threads | **14.7s → ~1.5s** |
-| 6 | TTS silent | Installed the **Piper binary** (arm64) | It speaks |
-| 7 | **First reply froze for ~28s** (cold model load) | **Warm up** the LLM at boot + `keep_alive=-1` (pin in RAM) | First reply fast |
-| 8 | It only answered ONE question per wake word | Rewrote the loop into a **continuous conversation** (no wake word between turns; ends on "goodbye" or 30s silence) | Real multi-turn |
-| 9 | **~40s freezes mid-conversation** | The rolling history was forcing the model to re-read the whole conversation each turn. Shrank the system prompt + history (6→3 turns) + shorter replies | **40s → ~10s** on bad turns |
-| 10 | It transcribed background people & its own voice | **Mute mic while thinking/speaking**, drop non-speech like `(applause)`, VAD aggressiveness 3 + **loudness gate** | Stops eating the room |
-| 11 | Long silences while it "thought" | **Spoken fillers** ("Let me think.") play *while* the model generates in the background | Masks the wait |
+| 10 | Default ALSA device timed out (`paTimedOut`) | Capture the **USB mic directly**; retry + high latency on open | Stable mic |
+| 11 | Mic captured silence → Whisper hallucinated text | Pin PipeWire default source to the USB mic | Real transcription |
+| 12 | Capture log **flooded** "queue full" while busy | Throttled the warning to debug | Readable logs |
+| 13 | **Speech-to-text took 14.7s per phrase** | Whisper always encodes a 30s window — capped it with **`audio_ctx=768`** + 4 threads | **14.7s → ~1.5s** |
+| 14 | `base.en` vs `small.en` accuracy/speed tradeoff | Kept **`base.en`** — accurate enough and ~1.5s | Good balance |
+| 15 | **First reply froze ~28s** (cold model load) | **Warm up** the LLM at boot + `keep_alive=-1` (pin in RAM) | First reply fast |
+| 16 | It answered only ONE question per wake word | Rewrote into a **continuous conversation** (no wake word between turns; ends on "goodbye" or 30s silence) | Real multi-turn |
+| 17 | Replies too terse (`max_tokens 80`) | Raised to 140 + "2–3 natural sentences" prompt | Natural replies |
+| 18 | **~40s freezes mid-conversation** | Rolling history forced the model to re-read everything each turn. Shrank system prompt + history (6→3) + shorter replies | **40s → ~10s** |
+| 19 | It transcribed **background people & its own voice** (a backlog of noise) | **Mute mic while thinking/speaking**, drop non-speech like `(applause)`, VAD aggressiveness 3 + **loudness gate** | Stops eating the room |
+| 20 | Long silences while it "thought" | **Spoken fillers** ("Let me think.") play *while* the model generates in the background | Masks the wait |
 
 ---
 
