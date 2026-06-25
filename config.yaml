@@ -15,14 +15,26 @@ conversation:
 
   # Latency mask: a short pre-synthesized "thinking" phrase plays the instant you
   # finish, WHILE the LLM generates in the background — so you hear something in
-  # ~1s instead of dead air. Set filler_probability to 0 to disable.
+  # ~1s instead of dead air. Fillers are grouped so the RIGHT one is chosen for
+  # what you said (a question vs a quick reply vs a statement).
   filler_probability: 0.9
   fillers:
-    - "Let me think."
-    - "Hmm, good question."
-    - "Okay, one sec."
-    - "Let's see."
-    - "Right."
+    question:
+      - "Good question, let me think."
+      - "Hmm, let me think about that."
+      - "Let me think for a second."
+    default:
+      - "Okay, let me see."
+      - "Right, one moment."
+      - "Let's see."
+    ack:
+      - "Mm-hmm."
+      - "Sure."
+
+memory:
+  enabled: true              # remember durable facts across sessions (SQLite)
+  path: zero_memory.sqlite   # single file on disk; survives reboots
+  max_facts: 30              # cap injected facts so the prompt stays small/fast
 
 wake:
   engine: openwakeword
@@ -58,7 +70,11 @@ llm:
   model: qwen2.5:3b-instruct # best 3B at concise, low-hallucination replies on Pi 5 CPU
   temperature: 0.3           # low = factual & stable; 0.7 was too loose for a Q&A assistant
   max_tokens: 140            # ~2-3 natural sentences (80 was too terse)
-  history_turns: 3           # fewer turns re-read each prefill (the ~40s spike cause)
+  # Cache-friendly history: append-only most turns (fast ~2s), and only trim back
+  # to `history_turns` once it grows past `history_trim_at`. Keeps the 3B fast
+  # WITHOUT shrinking the model — the ~10-15s spikes came from trimming every turn.
+  history_turns: 3           # size we keep after a trim
+  history_trim_at: 8         # let it grow to this many turns before trimming
 
 tts:
   engine: piper             # piper (fast default) | fish (expressive)

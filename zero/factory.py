@@ -96,3 +96,13 @@ def build_voice(cfg: Config) -> VoiceOrchestrator:
     engine_name, tts = _build_tts_engine(cfg)
     nonverbals = Path(PROJECT_ROOT) / "zero" / "tts" / "nonverbals"
     return VoiceOrchestrator(engine_name=engine_name, tts=tts, nonverbals_dir=nonverbals)
+
+
+def build_memory(cfg: Config):
+    """Long-term memory store, or None if disabled in config."""
+    if not cfg.get("memory.enabled", True):
+        return None
+    from zero.memory.sqlite_memory import SqliteMemory
+
+    path = cfg.resolve_path("memory.path", "zero_memory.sqlite")
+    return SqliteMemory(path=str(path), max_facts=cfg.get("memory.max_facts", 30))

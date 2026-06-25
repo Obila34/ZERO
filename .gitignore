@@ -17,3 +17,7 @@ models/
 config.local.yaml
 debug_*.wav
 *.log
+
+# Long-term memory store (per-device, not source)
+*.sqlite
+*.sqlite-journal

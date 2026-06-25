@@ -18,7 +18,9 @@ import time
 
 from zero.config import load_config
 from zero.conversation import Conversation
-from zero.factory import build_endpointer, build_llm, build_stt, build_voice, build_wake
+from zero.factory import (
+    build_endpointer, build_llm, build_memory, build_stt, build_voice, build_wake,
+)
 from zero.llm.persona import build_system_prompt
 from zero.audio.capture import MicCapture
 from zero.audio.playback import Speaker
@@ -56,27 +58,42 @@ class Zero:
         )
         self.convo = Conversation(
             system_prompt=system_prompt,
-            history_turns=self.cfg.get("llm.history_turns", 6),
+            history_turns=self.cfg.get("llm.history_turns", 3),
+            trim_at_turns=self.cfg.get("llm.history_trim_at", 8),
         )
+        self.memory = build_memory(self.cfg)  # long-term SQLite store (or None)
         self.state = State.IDLE
 
-        # Pre-synthesize "thinking" fillers so we can play them instantly (no
-        # synth cost) the moment the user finishes — masking LLM latency while
-        # the reply generates in the background. See _respond_with_filler.
+        # Context-aware "thinking" fillers, pre-synthesized per category so we can
+        # play the RIGHT one instantly (no synth cost) while the reply generates in
+        # the background. Category is chosen from what the user just said.
         self._filler_prob = self.cfg.get("conversation.filler_probability", 0.9)
-        self._fillers: list = []
-        phrases = self.cfg.get("conversation.fillers", [
-            "Let me think.", "Hmm, good question.", "Okay, one sec.",
-            "Let's see.", "Right.",
-        ])
-        for phrase in phrases:
-            try:
-                audio = self.voice.synthesize(phrase)
-                if getattr(audio, "size", 0):
-                    self._fillers.append(audio)
-            except Exception as e:  # pragma: no cover - never block startup on a filler
-                log.debug("filler synth failed for %r: %s", phrase, e)
-        log.info("pre-synthesized %d thinking fillers", len(self._fillers))
+        self._fillers = self._presynth_fillers()
+
+    _DEFAULT_FILLERS = {
+        "question": ["Good question, let me think.", "Hmm, let me think about that.",
+                     "Let me think for a second."],
+        "default": ["Okay, let me see.", "Right, one moment.", "Let's see."],
+        "ack": ["Mm-hmm.", "Sure."],
+    }
+
+    def _presynth_fillers(self) -> dict:
+        sets = self.cfg.get("conversation.fillers", self._DEFAULT_FILLERS)
+        out: dict[str, list] = {}
+        total = 0
+        for category, phrases in sets.items():
+            audios = []
+            for phrase in phrases:
+                try:
+                    audio = self.voice.synthesize(phrase)
+                    if getattr(audio, "size", 0):
+                        audios.append(audio)
+                        total += 1
+                except Exception as e:  # never block startup on a filler
+                    log.debug("filler synth failed for %r: %s", phrase, e)
+            out[category] = audios
+        log.info("pre-synthesized %d fillers across %d categories", total, len(out))
+        return out
 
     # -- state transition helper -------------------------------------------
     def _to(self, dst: State) -> None:
@@ -130,6 +147,10 @@ class Zero:
         Ends on a stop phrase or `sleep_timeout` of silence, then returns to IDLE.
         """
         self.convo.reset()
+        # Load durable facts from past sessions and inject them ONCE (keeps the
+        # prefix stable, so the cache stays warm through the conversation).
+        if self.memory is not None:
+            self.convo.set_memory(self.memory.as_block())
         sr = self.cfg.get("audio.sample_rate", 16000)
         idle_s = self.cfg.get("conversation.sleep_timeout_ms", 30000) / 1000.0
         log.info("conversation open — just talk (say 'goodbye' to stop)")
@@ -143,7 +164,7 @@ class Zero:
             if utterance is None or getattr(utterance, "size", 0) == 0:
                 log.info("Sleeping… (no speech for %.0fs — say the wake word to talk again)",
                          idle_s)
-                self._to(State.IDLE)
+                self._end_conversation()
                 return
 
             # Mute the mic for the whole think+speak phase so ZERO can't transcribe
@@ -158,20 +179,64 @@ class Zero:
                 self._to(State.SPEAKING)
                 self._speak_one("Okay, talk to you later.")
                 log.info("Sleeping… (stop phrase)")
-                self._to(State.IDLE)
+                self._end_conversation()
                 return
+
+            self._maybe_remember(text)  # explicit "remember that ..."
 
             self.convo.add_user(text)
             self._t_reply_start = time.monotonic()  # end-of-STT marker for timing
             # Kick the LLM off in the BACKGROUND so its prefill overlaps the spoken
-            # filler — the model is already generating while "Let me think." plays,
-            # so the real answer flows in with little or no added delay.
+            # filler — the model is already generating while the filler plays, so the
+            # real answer flows in with little or no added delay.
             chunks = self._stream_in_background(self.convo.messages())
             self._to(State.SPEAKING)
-            self._play_filler()
+            self._play_filler(text)
             reply = self._speak_streaming(chunks)
             self.convo.add_assistant(reply)
             log.info("reply: %r", reply)
+
+    # -- long-term memory ---------------------------------------------------
+    def _maybe_remember(self, text: str) -> None:
+        """Explicit 'remember that ...' — store immediately so it survives even if
+        the conversation never ends cleanly."""
+        if self.memory is None:
+            return
+        low = text.lower()
+        for trigger in ("remember that ", "remember "):
+            if low.startswith(trigger):
+                fact = text[len(trigger):].strip()
+                if fact:
+                    self.memory.remember(f"note ({int(time.time())})", fact)
+                return
+
+    def _end_conversation(self) -> None:
+        """On sleep/stop: extract durable facts from the chat into long-term memory,
+        then go idle. Runs an extra (offline) LLM pass — fine, the user is done."""
+        if self.memory is not None and self.convo._history:
+            try:
+                self._extract_facts()
+            except Exception as e:  # never let memory break the loop
+                log.warning("memory extraction failed: %s", e)
+        self._to(State.IDLE)
+
+    def _extract_facts(self) -> None:
+        prompt = [
+            {"role": "system", "content": (
+                "Extract durable facts about the USER from the conversation. Output "
+                "only short 'key: value' lines for lasting facts (name, location, "
+                "job, preferences, ongoing projects, important personal details). "
+                "Use short lowercase keys. If there are no durable facts, output "
+                "exactly NONE and nothing else.")},
+            {"role": "user", "content": self.convo.transcript()},
+        ]
+        result = "".join(self.llm.stream(prompt)).strip()
+        if not result or result.upper().startswith("NONE"):
+            return
+        for line in result.splitlines():
+            if ":" in line:
+                key, _, value = line.partition(":")
+                self.memory.remember(key.strip("-• ").strip(), value)
 
     def _stream_in_background(self, messages):
         """Start the LLM streaming on a worker thread feeding a queue, and return
@@ -200,12 +265,35 @@ class Zero:
 
         return gen()
 
-    def _play_filler(self) -> None:
-        """Play one short pre-synthesized 'thinking' filler to mask LLM latency."""
-        if not self._fillers or random.random() > self._filler_prob:
+    _QUESTION_WORDS = {
+        "what", "why", "how", "when", "who", "where", "which", "whose", "can",
+        "could", "would", "do", "does", "did", "is", "are", "should", "tell",
+        "explain", "describe",
+    }
+
+    def _filler_category(self, text: str) -> str:
+        """Pick the filler that FITS what the user just said, so it sounds aware:
+        a question gets 'Good question, let me think.'; a one-word reply gets a
+        quick 'Mm-hmm.'; everything else gets a neutral 'Let's see.'"""
+        t = text.lower().strip()
+        words = t.split()
+        if t.endswith("?") or (words and words[0] in self._QUESTION_WORDS):
+            return "question"
+        if len(words) <= 2:
+            return "ack"
+        return "default"
+
+    def _play_filler(self, user_text: str) -> None:
+        """Play one pre-synthesized filler chosen to match what the user said."""
+        if random.random() > self._filler_prob:
             return
-        audio = random.choice(self._fillers)
-        self.speaker.play(audio, self.voice.sample_rate, should_stop=lambda: False)
+        category = self._filler_category(user_text)
+        audios = self._fillers.get(category) or self._fillers.get("default") or []
+        if not audios:
+            return
+        log.debug("filler category: %s", category)
+        self.speaker.play(random.choice(audios), self.voice.sample_rate,
+                          should_stop=lambda: False)
 
     def _speak_streaming(self, chunks) -> str:
         """Speak sentences as they complete; return the full reply text."""
