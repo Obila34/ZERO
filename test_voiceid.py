@@ -27,7 +27,7 @@ from zero.voiceid.speaker import SpeakerVerifier
 MODEL = "models/voiceid/voxceleb_ECAPA512_LM.onnx"
 PROFILE = Path("voiceprint.npy")
 SR = 16000
-THRESHOLD = 0.5  # tune this from the scores you see
+THRESHOLD = 0.45  # tuned: owner ~0.55-0.70, others ~0.25-0.35
 
 
 def record(seconds: float, prompt: str) -> np.ndarray:

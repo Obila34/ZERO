@@ -107,3 +107,26 @@ def build_memory(cfg: Config):
 
     path = cfg.resolve_path("memory.path", "zero_memory.sqlite")
     return SqliteMemory(path=str(path), max_facts=cfg.get("memory.max_facts", 30))
+
+
+def build_voiceid(cfg: Config):
+    """Speaker verifier + enrolled voiceprint, or (None, None) if off/missing."""
+    import numpy as np
+
+    from zero.utils.logging import get_logger
+
+    log = get_logger("voiceid")
+    if not cfg.get("voiceid.enabled", False):
+        return None, None
+
+    model = cfg.resolve_path("voiceid.model_path", "models/voiceid/voxceleb_ECAPA512_LM.onnx")
+    profile = cfg.resolve_path("voiceid.profile_path", "voiceprint.npy")
+    if not model.exists() or not profile.exists():
+        log.warning("voiceid enabled but model or voiceprint missing — disabling "
+                    "(run: python test_voiceid.py enroll)")
+        return None, None
+
+    from zero.voiceid.speaker import SpeakerVerifier
+
+    verifier = SpeakerVerifier(str(model), threshold=cfg.get("voiceid.threshold", 0.45))
+    return verifier, np.load(str(profile))

@@ -36,6 +36,14 @@ memory:
   path: zero_memory.sqlite   # single file on disk; survives reboots
   max_facts: 30              # cap injected facts so the prompt stays small/fast
 
+voiceid:
+  # "Only my voice" — verify each utterance is the enrolled owner before acting.
+  # Enroll once on the device:  python test_voiceid.py enroll
+  enabled: false             # flip to true AFTER you've enrolled + downloaded the model
+  model_path: models/voiceid/voxceleb_ECAPA512_LM.onnx
+  profile_path: voiceprint.npy
+  threshold: 0.45            # owner ~0.55-0.70, others ~0.25-0.35 (tuned on PC)
+
 wake:
   engine: openwakeword
   # openWakeWord ships pretrained words; for a true "Hey Zero" train a custom model.

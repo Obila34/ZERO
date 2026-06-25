@@ -19,7 +19,8 @@ import time
 from zero.config import load_config
 from zero.conversation import Conversation
 from zero.factory import (
-    build_endpointer, build_llm, build_memory, build_stt, build_voice, build_wake,
+    build_endpointer, build_llm, build_memory, build_stt, build_voice, build_voiceid,
+    build_wake,
 )
 from zero.llm.persona import build_system_prompt
 from zero.audio.capture import MicCapture
@@ -62,6 +63,9 @@ class Zero:
             trim_at_turns=self.cfg.get("llm.history_trim_at", 8),
         )
         self.memory = build_memory(self.cfg)  # long-term SQLite store (or None)
+        self.voiceid, self._voiceprint = build_voiceid(self.cfg)  # owner verifier (or None)
+        if self.voiceid is not None:
+            log.info("voice ID active — only the enrolled voice will be answered")
         self.state = State.IDLE
 
         # Context-aware "thinking" fillers, pre-synthesized per category so we can
@@ -171,6 +175,16 @@ class Zero:
             # its own voice off the BT speaker (echo).
             self.mic.pause()
             self._to(State.THINKING)
+
+            # "Only my voice": skip anything that isn't the enrolled owner — before
+            # STT, so we don't even transcribe other people / background voices.
+            if self.voiceid is not None:
+                score, is_owner = self.voiceid.verify(self._voiceprint, utterance)
+                if not is_owner:
+                    log.info("ignored: not the owner (voice score %.2f)", score)
+                    continue
+                log.debug("owner verified (voice score %.2f)", score)
+
             text = self.stt.transcribe(utterance, sr).strip()
             if not text:
                 continue  # misfire / noise — keep listening, stay in conversation
