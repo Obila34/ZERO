@@ -30,6 +30,37 @@ be exposed to the public internet, and no router changes are needed.
 To keep the tunnel alive across drops and reboots we use autossh (or a small
 systemd service that restarts the tunnel if it dies).
 
+## Architecture
+
+The Pi stays the thing you talk to. It handles the microphone, deciding when you
+are speaking, and playing the reply. The captured audio and the text move back and
+forth over the SSH tunnel. The GPU does the transcription and runs the language
+model.
+
+```
+  Your voice
+      |
+      v
+  +----------------------- Raspberry Pi 5 ------------------------+
+  |  mic -> wake word -> speech detection -> record the clip       |
+  |                                  |                             |
+  |                          audio out (tunnel)                    |
+  |  speaker <- Piper TTS <- reply text in (tunnel)                |
+  +----------------------|----------------------|-----------------+
+                         |   encrypted SSH      |
+                  audio  v                      ^  reply text
+  +----------------------------- GPU machine ---------------------+
+  |  Whisper large-v3-turbo:  audio  ->  transcript               |
+  |                                  |                             |
+  |  Ollama (large model):    transcript  ->  reply text          |
+  +---------------------------------------------------------------+
+```
+
+The two arrows on the tunnel are the only network traffic: audio going up, text
+coming back. Piper stays on the Pi because it is already fast there. If the tunnel
+is down, the Pi can fall back to its local Whisper and local Ollama and keep
+working on its own, just with smaller models.
+
 ## What runs where
 
 GPU machine:
@@ -80,6 +111,57 @@ Expected result: large-model transcription accuracy at roughly the speed we get
 now from base.en, because the GPU does the encode that was crushing the Pi CPU.
 
 Fallback: set the STT engine back to whispercpp with base.en for offline use.
+
+## Demonstration
+
+What it looks like to bring up and use, once both phases are in place.
+
+Start the servers on the GPU:
+
+```
+ollama serve
+python whisper_server.py --model large-v3-turbo --port 9000
+```
+
+Open the tunnel on the Pi, forwarding both ports to localhost:
+
+```
+autossh -fN -L 11435:localhost:11434 -L 9000:localhost:9000 user@gpu-host
+```
+
+Point ZERO at the tunnel in config.yaml on the Pi:
+
+```
+llm:
+  host: http://127.0.0.1:11435
+stt:
+  engine: remote
+  remote_url: http://127.0.0.1:9000
+```
+
+Start ZERO as usual:
+
+```
+python -m zero.main
+```
+
+One turn, from start to finish:
+
+1. You say "Hey Jarvis, what is the capital of France?"
+2. The Pi hears the wake word, then records your sentence, about two seconds of audio.
+3. The Pi sends that audio up the tunnel to the GPU.
+4. Whisper on the GPU returns "What is the capital of France?" in well under a second.
+5. The text goes to Ollama on the GPU, which streams back "Paris is the capital of France."
+6. The Pi passes the reply to Piper and you hear it through the speaker.
+
+Rough timing from the end of your speech to the first spoken word is about 1.5 to 2
+seconds, with large-model accuracy. For comparison, large-v3-turbo on the Pi CPU
+took 29 seconds for the transcription step alone, so the same model becomes usable
+once the GPU does that work.
+
+To prove the fallback, stop the tunnel and set `stt.engine` back to whispercpp and
+`llm.host` back to the Pi's local Ollama. ZERO keeps working offline on the smaller
+local models. Bring the tunnel back and switch the settings to return to GPU mode.
 
 ## Things to decide before building
 
