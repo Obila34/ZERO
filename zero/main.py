@@ -23,8 +23,6 @@ from zero.factory import (
     build_wake,
 )
 from zero.llm.persona import build_system_prompt
-from zero.audio.capture import MicCapture
-from zero.audio.playback import Speaker
 from zero.state import State, can_transition
 from zero.tts.orchestrator import split_sentences
 from zero.utils.logging import get_logger, setup_logging
@@ -44,6 +42,10 @@ class Zero:
         log.info("loading engines...")
         self.llm = build_llm(self.cfg)
         if not text_mode:
+            # Lazy import so text mode doesn't require sounddevice/numpy/portaudio.
+            from zero.audio.capture import MicCapture
+            from zero.audio.playback import Speaker
+
             self.mic = MicCapture(
                 sample_rate=sr,
                 block_ms=self.cfg.get("audio.block_ms", 30),
