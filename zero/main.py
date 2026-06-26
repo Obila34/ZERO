@@ -33,25 +33,27 @@ log = get_logger("main")
 
 
 class Zero:
-    def __init__(self, config_path: str | None = None):
+    def __init__(self, config_path: str | None = None, text_mode: bool = False):
         self.cfg = load_config(config_path)
+        self.text_mode = text_mode
         sr = self.cfg.get("audio.sample_rate", 16000)
 
-        # Audio I/O (one shared mic for the whole pipeline).
-        self.mic = MicCapture(
-            sample_rate=sr,
-            block_ms=self.cfg.get("audio.block_ms", 30),
-            device=self.cfg.get("audio.input_device"),
-        )
-        self.speaker = Speaker(device=self.cfg.get("audio.output_device"))
-
-        # Pipeline stages (engines chosen in config.yaml).
+        # The LLM is all text mode needs. Audio capture, wake word, STT and the
+        # voice are only built for the full voice pipeline — so text mode runs on
+        # a box with no mic/Piper/whisper installed (just to test brain + memory).
         log.info("loading engines...")
-        self.wake = build_wake(self.cfg)
-        self.endpointer = build_endpointer(self.cfg)
-        self.stt = build_stt(self.cfg)
         self.llm = build_llm(self.cfg)
-        self.voice = build_voice(self.cfg)
+        if not text_mode:
+            self.mic = MicCapture(
+                sample_rate=sr,
+                block_ms=self.cfg.get("audio.block_ms", 30),
+                device=self.cfg.get("audio.input_device"),
+            )
+            self.speaker = Speaker(device=self.cfg.get("audio.output_device"))
+            self.wake = build_wake(self.cfg)
+            self.endpointer = build_endpointer(self.cfg)
+            self.stt = build_stt(self.cfg)
+            self.voice = build_voice(self.cfg)
 
         system_prompt = build_system_prompt(
             name=self.cfg.get("persona.name", "Zero"),
@@ -63,16 +65,18 @@ class Zero:
             trim_at_turns=self.cfg.get("llm.history_trim_at", 8),
         )
         self.memory = build_memory(self.cfg)  # long-term SQLite store (or None)
-        self.voiceid, self._voiceprint = build_voiceid(self.cfg)  # owner verifier (or None)
-        if self.voiceid is not None:
-            log.info("voice ID active — only the enrolled voice will be answered")
         self.state = State.IDLE
 
-        # Context-aware "thinking" fillers, pre-synthesized per category so we can
-        # play the RIGHT one instantly (no synth cost) while the reply generates in
-        # the background. Category is chosen from what the user just said.
+        # Voice-only extras (need the voice/mic): owner verification + spoken fillers.
         self._filler_prob = self.cfg.get("conversation.filler_probability", 0.9)
-        self._fillers = self._presynth_fillers()
+        self._fillers = {}
+        if not text_mode:
+            self.voiceid, self._voiceprint = build_voiceid(self.cfg)
+            if self.voiceid is not None:
+                log.info("voice ID active — only the enrolled voice will be answered")
+            self._fillers = self._presynth_fillers()
+        else:
+            self.voiceid, self._voiceprint = None, None
 
     _DEFAULT_FILLERS = {
         "question": ["Good question, let me think.", "Hmm, let me think about that.",
@@ -107,6 +111,50 @@ class Zero:
             log.warning("illegal transition %s -> %s", self.state, dst)
         log.debug("state: %s -> %s", self.state, dst)
         self.state = dst
+
+    def _start_conversation(self) -> None:
+        """Fresh history + load long-term memory (injected once, cache-friendly)."""
+        self.convo.reset()
+        if self.memory is not None:
+            self.convo.set_memory(self.memory.as_block())
+
+    # -- text mode ----------------------------------------------------------
+    def run_text(self) -> None:
+        """Type-to-chat: tests the brain (LLM + memory + conversation) with no mic,
+        Piper or Whisper needed. Useful for validating the GPU LLM offload."""
+        warmup = getattr(self.llm, "warmup", None)
+        if callable(warmup):
+            warmup()
+        print("\nZERO text mode — type to chat. Say 'goodbye' to reset, Ctrl-C to quit.\n")
+        self._start_conversation()
+        try:
+            while True:
+                try:
+                    text = input("you> ").strip()
+                except EOFError:
+                    break
+                if not text:
+                    continue
+                if self._is_stop(text):
+                    print("zero> Okay, talk to you later.\n")
+                    self._end_conversation()       # extract facts to memory
+                    self._start_conversation()      # fresh chat, reload memory
+                    continue
+                self._maybe_remember(text)
+                self.convo.add_user(text)
+                self._t_reply_start = time.monotonic()
+                parts, first = [], True
+                for chunk in self.llm.stream(self.convo.messages()):
+                    if first and chunk.strip():
+                        print(f"  [first token: {time.monotonic()-self._t_reply_start:.2f}s]")
+                        first = False
+                    parts.append(chunk)
+                reply = "".join(parts).strip()
+                print(f"zero> {reply}\n")
+                self.convo.add_assistant(reply)
+        except KeyboardInterrupt:
+            print()
+        self._end_conversation()
 
     # -- main loop ----------------------------------------------------------
     def run(self) -> None:
@@ -350,8 +398,15 @@ class Zero:
 
 def main() -> int:
     setup_logging()
-    config_path = sys.argv[1] if len(sys.argv) > 1 else None
-    Zero(config_path).run()
+    args = sys.argv[1:]
+    text_mode = "--text" in args
+    positional = [a for a in args if not a.startswith("--")]
+    config_path = positional[0] if positional else None
+    zero = Zero(config_path, text_mode=text_mode)
+    if text_mode:
+        zero.run_text()
+    else:
+        zero.run()
     return 0
 
 
