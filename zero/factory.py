@@ -43,6 +43,13 @@ def build_endpointer(cfg: Config):
 
 def build_stt(cfg: Config) -> STT:
     engine = cfg.get("stt.engine", "whispercpp")
+    if engine == "remote":
+        from zero.stt.remote_engine import RemoteSTT
+
+        return RemoteSTT(
+            url=cfg.get("stt.remote_url", "http://127.0.0.1:9000/transcribe"),
+            timeout=cfg.get("stt.remote_timeout", 30),
+        )
     if engine == "whispercpp":
         from zero.stt.whispercpp_engine import WhisperCppSTT
 

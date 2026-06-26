@@ -64,12 +64,14 @@ vad:
   speech_pad_ms: 200        # keep a little audio either side of speech
 
 stt:
-  engine: whispercpp
-  # Whisper always runs its encoder on a fixed 30s window, so model SIZE sets the
-  # per-utterance latency floor on the Pi 5 CPU: small~14s, base~5s, tiny~3s.
-  # base.en is the CPU sweet spot (~1.5s). Tested large-v3-turbo here: 29s/clip on
-  # Pi CPU — unusable (its full large encoder is GPU-class). small.en is the only
-  # realistic accuracy step up (~5s) if ever needed.
+  # GPU offload: send audio to large-v3-turbo on the GPU (Whisper server over the
+  # SSH tunnel). Turbo-quality at ~1s, instead of 29s on the Pi CPU.
+  engine: remote                              # remote (GPU turbo) | whispercpp (local)
+  remote_url: http://127.0.0.1:9000/transcribe
+  remote_timeout: 30
+
+  # --- local fallback (engine: whispercpp) ---
+  # base.en is the CPU sweet spot (~1.5s). large-v3-turbo on the Pi CPU = 29s/clip.
   model: base.en
   model_path: models/whisper/ggml-base.en.bin
   threads: 4                # use all 4 Pi cores during transcription
