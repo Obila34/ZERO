@@ -1,73 +1,55 @@
 #!/usr/bin/env bash
-# One-shot setup for ZERO on a fresh Raspberry Pi 5 (64-bit Raspberry Pi OS).
-# Installs system audio deps, Python deps, Ollama + a chat model, whisper.cpp
-# model, and the Piper binary + voice. Fish S1-mini is fetched but its inference
-# command is finalized in the Phase-6 benchmark.
+# ZERO — one-pass setup for a fresh Raspberry Pi OS (64-bit), Pi 4 or 5.
 #
-# Usage:  bash scripts/setup_pi.sh
-set -euo pipefail
+# Installs the LOCAL voice stack: audio libs, wake word, VAD, Piper TTS, and an
+# optional local Whisper fallback. The LLM (Gemma) and STT (Whisper turbo) run on
+# the GPU over SSH tunnels — see docs/GPU_OFFLOAD_PLAN.md. Those are not installed
+# here; you open the tunnels separately.
+#
+# Usage:
+#   git clone -b offline_v5 --single-branch https://github.com/Obila34/ZERO.git
+#   cd ZERO && bash scripts/setup_pi.sh
+set -e
+cd "$(dirname "$0")/.."   # repo root
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-MODELS="$ROOT/models"
-mkdir -p "$MODELS"/{whisper,piper,fish}
+echo "== system audio libraries =="
+sudo apt update
+sudo apt install -y libportaudio2 libsndfile1 espeak-ng python3-venv
 
-echo "==> System packages"
-sudo apt-get update
-sudo apt-get install -y python3-venv python3-pip portaudio19-dev libsndfile1 \
-                        git build-essential cmake wget
-
-echo "==> Python venv + deps"
-python3 -m venv "$ROOT/.venv"
+echo "== python venv =="
+python3 -m venv .venv
 # shellcheck disable=SC1091
-source "$ROOT/.venv/bin/activate"
+source .venv/bin/activate
 pip install --upgrade pip
-pip install -r "$ROOT/requirements.txt"
 
-echo "==> Ollama + chat model"
-if ! command -v ollama >/dev/null 2>&1; then
-  curl -fsSL https://ollama.com/install.sh | sh
-fi
-ollama pull llama3.2:3b   # use llama3.2:1b on a 4 GB Pi or for lower latency
+echo "== python dependencies =="
+pip install requests PyYAML numpy sounddevice soundfile cffi onnxruntime \
+            webrtcvad scipy scikit-learn
+pip install --no-deps openwakeword       # tflite has no wheel; we run on ONNX
+pip install "setuptools<81"              # webrtcvad needs pkg_resources
+python -c "import openwakeword.utils; openwakeword.utils.download_models()"
 
-echo "==> whisper.cpp model (base.en)"
-WHISPER_BIN="$MODELS/whisper/ggml-base.en.bin"
-if [ ! -f "$WHISPER_BIN" ]; then
-  wget -O "$WHISPER_BIN" \
-    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin"
-fi
-
-echo "==> Piper binary + voice"
-# Adjust the release URL to the latest piper for linux_aarch64 if needed.
-if ! command -v piper >/dev/null 2>&1; then
-  echo "    Install the 'piper' binary on PATH (github.com/rhasspy/piper releases,"
-  echo "    linux_aarch64). Then re-run, or set tts.piper.binary to its full path."
-fi
-PIPER_VOICE="$MODELS/piper/en_US-amy-medium.onnx"
-if [ ! -f "$PIPER_VOICE" ]; then
-  BASE="https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/amy/medium"
-  wget -O "$PIPER_VOICE" "$BASE/en_US-amy-medium.onnx"
-  wget -O "$PIPER_VOICE.json" "$BASE/en_US-amy-medium.onnx.json"
+echo "== Piper TTS (voice + arm64 binary) =="
+mkdir -p models/piper
+[ -f models/piper/en_US-amy-medium.onnx ] || wget -O models/piper/en_US-amy-medium.onnx \
+  https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/amy/medium/en_US-amy-medium.onnx
+[ -f models/piper/en_US-amy-medium.onnx.json ] || wget -O models/piper/en_US-amy-medium.onnx.json \
+  https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/amy/medium/en_US-amy-medium.onnx.json
+if [ ! -x piper/piper ]; then
+  wget -O piper.tar.gz https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_linux_aarch64.tar.gz
+  tar -xzf piper.tar.gz
 fi
 
-echo "==> Fish OpenAudio S1-mini (expressive mode — PyTorch/CPU build, NOT MLX)"
-# Gated repo: run `huggingface-cli login` first if prompted.
-if [ ! -f "$MODELS/fish/openaudio-s1-mini/model.pth" ]; then
-  pip install -U "huggingface_hub[cli]"
-  huggingface-cli download fishaudio/openaudio-s1-mini \
-    --local-dir "$MODELS/fish/openaudio-s1-mini" || \
-    echo "    (skip/accept license at hf.co/fishaudio/openaudio-s1-mini, then retry)"
-fi
-cat <<'NOTE'
-
-    Phase-6 spike TODO for Fish:
-      1. Install fish-speech and confirm its inference CLI for your version.
-      2. Quantize model.pth to int8/int4 (keep codec.pth fp16).
-      3. Benchmark real-time factor + RAM on the Pi 5.
-      4. Set tts.fish.infer_cmd in config.yaml (placeholders {model_dir} {text} {out}).
-NOTE
+echo "== optional local STT fallback (whisper base.en) =="
+mkdir -p models/whisper
+[ -f models/whisper/ggml-base.en.bin ] || wget -O models/whisper/ggml-base.en.bin \
+  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en-q5_1.bin || true
+pip install pywhispercpp || true
 
 echo
-echo "==> Done. Verify audio, then run:"
-echo "    source .venv/bin/activate"
-echo "    python scripts/list_audio_devices.py --loopback"
-echo "    python -m zero.main"
+echo "Setup done. Next steps:"
+echo "  1) Open the GPU tunnels (LLM + STT):"
+echo "       ssh -fN -L 11435:localhost:11434 -L 9000:localhost:9000 <gpu-alias>"
+echo "  2) Set the mic gain (USB mic is usually card 3):  amixer -c 3 set Mic 60"
+echo "  3) Run it:  source .venv/bin/activate && python -m zero.main"
+echo "  (Brain-only test, no mic/audio needed:  python -m zero.main --text)"
