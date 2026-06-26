@@ -152,8 +152,11 @@ class Zero:
                         first = False
                     parts.append(chunk)
                 reply = "".join(parts).strip()
-                print(f"zero> {reply}\n")
-                self.convo.add_assistant(reply)
+                if reply:
+                    print(f"zero> {reply}\n")
+                    self.convo.add_assistant(reply)
+                else:
+                    print("zero> (no reply — see log; check the tunnel/model)\n")
         except KeyboardInterrupt:
             print()
         self._end_conversation()

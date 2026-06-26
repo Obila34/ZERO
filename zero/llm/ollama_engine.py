@@ -57,6 +57,9 @@ class OllamaLLM(LLM):
             "messages": messages,
             "stream": True,
             "keep_alive": self.keep_alive,
+            # Disable "thinking" on models that support it (e.g. Gemma): we want a
+            # direct spoken answer, not hidden reasoning that empties `content`.
+            "think": False,
             "options": {
                 "temperature": self.temperature,
                 "num_predict": self.max_tokens,
@@ -71,6 +74,7 @@ class OllamaLLM(LLM):
             log.error("Ollama request failed: %s", e)
             return
 
+        emitted = False
         for line in resp.iter_lines():
             if not line:
                 continue
@@ -78,8 +82,15 @@ class OllamaLLM(LLM):
                 obj = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            if "error" in obj:
+                log.error("Ollama error: %s", obj["error"])
+                return
             chunk = obj.get("message", {}).get("content", "")
             if chunk:
+                emitted = True
                 yield chunk
             if obj.get("done"):
+                if not emitted:
+                    # No content came back — log why so empty replies are visible.
+                    log.warning("empty reply (done_reason=%s)", obj.get("done_reason"))
                 break
