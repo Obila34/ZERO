@@ -52,7 +52,9 @@ async def transcribe(request: Request):
 def main() -> None:
     global _model, _lang
     ap = argparse.ArgumentParser()
-    ap.add_argument("--model", default="large-v3-turbo")
+    # deepdml CT2 turbo is a complete, reliably-downloading conversion. The bare
+    # "large-v3-turbo" alias has pulled an incomplete snapshot (missing model.bin).
+    ap.add_argument("--model", default="deepdml/faster-whisper-large-v3-turbo-ct2")
     ap.add_argument("--port", type=int, default=9000)
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--device", default="cuda")
