@@ -67,10 +67,11 @@ stt:
   engine: whispercpp
   # Whisper always runs its encoder on a fixed 30s window, so model SIZE sets the
   # per-utterance latency floor on the Pi 5 CPU: small~14s, base~5s, tiny~3s.
-  # EXPERIMENT: large-v3-turbo (Q5_0). Far more accurate, but a large encoder on
-  # Pi CPU — expect slow inference. Revert to base.en if it's unusable.
-  model: large-v3-turbo
-  model_path: models/whisper/ggml-large-v3-turbo-q5_0.bin
+  # base.en is the CPU sweet spot (~1.5s). Tested large-v3-turbo here: 29s/clip on
+  # Pi CPU — unusable (its full large encoder is GPU-class). small.en is the only
+  # realistic accuracy step up (~5s) if ever needed.
+  model: base.en
+  model_path: models/whisper/ggml-base.en.bin
   threads: 4                # use all 4 Pi cores during transcription
   audio_ctx: 768            # cap encoder window (0=full/30s). 768 ~halves encode for short turns
   # Biases the decoder toward conversational phrasing, cutting single-phoneme
@@ -79,8 +80,11 @@ stt:
 
 llm:
   engine: ollama
-  host: http://127.0.0.1:11434
-  model: qwen2.5:3b-instruct # best 3B at concise, low-hallucination replies on Pi 5 CPU
+  # GPU offload: host is the SSH tunnel to the GPU's Ollama (Pi:11435 -> node:11434).
+  # Gemma4 (8B) runs there at ~100 tok/s. Local fallback: host 127.0.0.1:11434 +
+  # model qwen2.5:3b-instruct (needs the Pi's own Ollama running).
+  host: http://127.0.0.1:11435
+  model: gemma4:latest       # 8B on the GPU via tunnel
   temperature: 0.3           # low = factual & stable; 0.7 was too loose for a Q&A assistant
   max_tokens: 140            # ~2-3 natural sentences (80 was too terse)
   # Cache-friendly history: append-only most turns (fast ~2s), and only trim back
