@@ -61,8 +61,8 @@ class VoiceOrchestrator:
         text = text.strip()
         if not text:
             return np.zeros(0, dtype=np.float32)
-        if self.engine_name == "fish":
-            # Fish performs cues natively; engine handles cue translation.
+        if self.engine_name in ("fish", "orpheus"):
+            # These perform cues natively; the engine handles cue translation.
             return self.tts.synthesize(text)
         return self._synthesize_piper(text)
 

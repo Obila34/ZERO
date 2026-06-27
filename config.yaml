@@ -96,7 +96,13 @@ llm:
   history_trim_at: 8         # let it grow to this many turns before trimming
 
 tts:
-  engine: piper             # piper (fast default) | fish (expressive)
+  engine: orpheus           # orpheus (GPU, natural) | piper (local fallback) | fish
+  orpheus:
+    # Orpheus TTS server on a GPU node, reached over an SSH tunnel (see
+    # server/orpheus_server.py). Voices: tara leah jess leo dan mia zac zoe.
+    url: http://127.0.0.1:9100/tts
+    voice: tara
+    timeout: 30
   piper:
     binary: piper/piper       # extracted arm64 release (relative to repo root)
     voice: models/piper/en_US-amy-medium.onnx

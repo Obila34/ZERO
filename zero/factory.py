@@ -79,6 +79,14 @@ def build_llm(cfg: Config) -> LLM:
 
 def _build_tts_engine(cfg: Config) -> tuple[str, TTS]:
     engine = cfg.get("tts.engine", "piper")
+    if engine == "orpheus":
+        from zero.tts.remote_engine import RemoteTTS
+
+        return "orpheus", RemoteTTS(
+            url=cfg.get("tts.orpheus.url", "http://127.0.0.1:9100/tts"),
+            voice=cfg.get("tts.orpheus.voice", "tara"),
+            timeout=cfg.get("tts.orpheus.timeout", 30),
+        )
     if engine == "piper":
         from zero.tts.piper_engine import PiperTTS
 
