@@ -97,7 +97,7 @@ llm:
 tts:
   engine: piper             # piper (fast default) | fish (expressive)
   piper:
-    binary: /home/exo/Mzee/offline_v5/piper/piper   # extracted arm64 release
+    binary: piper/piper       # extracted arm64 release (relative to repo root)
     voice: models/piper/en_US-amy-medium.onnx
     length_scale: 1.0       # base speaking rate (orchestrator nudges per-segment)
   fish:

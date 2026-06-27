@@ -83,8 +83,14 @@ def _build_tts_engine(cfg: Config) -> tuple[str, TTS]:
         from zero.tts.piper_engine import PiperTTS
 
         voice = cfg.resolve_path("tts.piper.voice")
+        binary = cfg.get("tts.piper.binary", "piper")
+        # A relative path like "piper/piper" -> resolve against the repo root so it
+        # works regardless of CWD or where the repo is cloned. A bare "piper"
+        # (on PATH) or an absolute path is left as-is.
+        if "/" in binary and not Path(binary).is_absolute():
+            binary = str(Path(PROJECT_ROOT) / binary)
         return "piper", PiperTTS(
-            binary=cfg.get("tts.piper.binary", "piper"),
+            binary=binary,
             voice=str(voice),
             length_scale=cfg.get("tts.piper.length_scale", 1.0),
         )
