@@ -99,10 +99,26 @@ def main() -> None:
     ap.add_argument("--lang", default="en", help="en (tara/leo/...) — NOT es_it")
     ap.add_argument("--n-gpu-layers", type=int, default=-1,
                     help="-1 = offload all layers to GPU (avoids CPU OOM / slow)")
+    ap.add_argument("--n-ctx", type=int, default=8192,
+                    help="cap context so the KV cache fits (default is huge -> OOM)")
     args = ap.parse_args()
+
+    # orpheus-cpp doesn't expose n_ctx and builds Llama with a giant default
+    # context (~14 GB KV cache -> OOM). TTS needs little context, so patch the
+    # Llama constructor to force a small n_ctx before orpheus-cpp builds it.
+    import llama_cpp
+
+    _orig_init = llama_cpp.Llama.__init__
+
+    def _capped_init(self, *a, **kw):
+        kw["n_ctx"] = args.n_ctx
+        return _orig_init(self, *a, **kw)
+
+    llama_cpp.Llama.__init__ = _capped_init
+
     print(f"[orpheus-cpp] loading quantized Orpheus (lang={args.lang}, "
-          f"n_gpu_layers={args.n_gpu_layers}, downloads GGUF + SNAC first run)...",
-          flush=True)
+          f"n_gpu_layers={args.n_gpu_layers}, n_ctx={args.n_ctx}, first run downloads "
+          "GGUF + SNAC)...", flush=True)
     _model = OrpheusCpp(lang=args.lang, n_gpu_layers=args.n_gpu_layers, verbose=False)
     print(f"[orpheus-cpp] ready on {args.host}:{args.port}", flush=True)
     uvicorn.run(app, host=args.host, port=args.port)
