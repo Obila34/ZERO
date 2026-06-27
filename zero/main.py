@@ -412,6 +412,12 @@ class Zero:
 
         return " ".join(full).strip()
 
+    def _speak_one(self, text: str) -> None:
+        """Synthesize + play a single fixed phrase (e.g. the goodbye line)."""
+        audio = self.voice.synthesize(text)
+        if getattr(audio, "size", 0):
+            self.speaker.play(audio, self.voice.sample_rate, should_stop=lambda: False)
+
 
 def main() -> int:
     setup_logging()
