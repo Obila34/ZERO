@@ -5,7 +5,8 @@ audio:
   sample_rate: 16000        # 16 kHz mono everywhere in the pipeline
   block_ms: 30              # frame size for capture / VAD
   input_device: Brio        # USB webcam mic (ALSA hw:3,0), matched by name
-  output_device: Headphones # 3.5mm jack (bcm2835 Headphones, ALSA hw:2,0)
+  output_device: pipewire   # routes to PipeWire's default sink = the BT speaker
+                            # (needs the pipewire-alsa package). Use Headphones for 3.5mm jack.
 
 conversation:
   # After waking once, ZERO stays in a flowing conversation (no wake word between

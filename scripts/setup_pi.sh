@@ -14,7 +14,7 @@ cd "$(dirname "$0")/.."   # repo root
 
 echo "== system audio libraries =="
 sudo apt update
-sudo apt install -y libportaudio2 libsndfile1 espeak-ng python3-venv
+sudo apt install -y libportaudio2 libsndfile1 espeak-ng python3-venv pipewire-alsa
 
 echo "== python venv =="
 python3 -m venv .venv
