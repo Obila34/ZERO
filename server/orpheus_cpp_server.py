@@ -14,16 +14,46 @@ Voices: tara leah jess leo dan mia zac zoe.
 from __future__ import annotations
 
 import argparse
+import glob
 import io
+import os
+import site
+import sys
 import time
 import wave
 
-import numpy as np
-import uvicorn
-from fastapi import FastAPI
-from fastapi.responses import Response
-from pydantic import BaseModel
-from orpheus_cpp import OrpheusCpp
+
+def _ensure_cuda_libs() -> None:
+    """llama.cpp's CUDA build needs libcudart/libcublas/etc. The pip nvidia-* wheels
+    ship them but aren't on LD_LIBRARY_PATH by default. Find every nvidia lib dir and
+    re-exec once with the path set — so you never set LD_LIBRARY_PATH by hand.
+    """
+    if os.environ.get("_ZB_CUDA_RELAUNCHED"):
+        return
+    roots = list(site.getsitepackages()) + [site.getusersitepackages()]
+    dirs: list[str] = []
+    for base in roots:
+        for so in glob.glob(os.path.join(base, "nvidia", "**", "lib", "*.so*"),
+                            recursive=True):
+            dirs.append(os.path.dirname(so))
+    dirs = sorted(set(dirs))
+    if dirs:
+        existing = os.environ.get("LD_LIBRARY_PATH", "")
+        os.environ["LD_LIBRARY_PATH"] = ":".join(dirs + ([existing] if existing else []))
+        os.environ["_ZB_CUDA_RELAUNCHED"] = "1"
+        print(f"[orpheus-cpp] added {len(dirs)} CUDA lib dir(s) to LD_LIBRARY_PATH",
+              flush=True)
+        os.execv(sys.executable, [sys.executable] + sys.argv)
+
+
+_ensure_cuda_libs()
+
+import numpy as np  # noqa: E402
+import uvicorn  # noqa: E402
+from fastapi import FastAPI  # noqa: E402
+from fastapi.responses import Response  # noqa: E402
+from pydantic import BaseModel  # noqa: E402
+from orpheus_cpp import OrpheusCpp  # noqa: E402
 
 app = FastAPI()
 _model: OrpheusCpp | None = None
@@ -66,12 +96,11 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=9100)
     ap.add_argument("--host", default="127.0.0.1")
-    ap.add_argument("--n-gpu-layers", type=int, default=-1,
-                    help="-1 = all layers on GPU (needs CUDA llama-cpp-python)")
+    ap.add_argument("--lang", default="en", help="en (tara/leo/...) — NOT es_it")
     args = ap.parse_args()
-    print("[orpheus-cpp] loading quantized Orpheus (downloads GGUF + SNAC first run)...",
-          flush=True)
-    _model = OrpheusCpp(n_gpu_layers=args.n_gpu_layers, verbose=False)
+    print(f"[orpheus-cpp] loading quantized Orpheus (lang={args.lang}, downloads "
+          "GGUF + SNAC first run)...", flush=True)
+    _model = OrpheusCpp(lang=args.lang, verbose=False)
     print(f"[orpheus-cpp] ready on {args.host}:{args.port}", flush=True)
     uvicorn.run(app, host=args.host, port=args.port)
 
