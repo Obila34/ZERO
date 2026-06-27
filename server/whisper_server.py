@@ -19,12 +19,41 @@ Notes:
 from __future__ import annotations
 
 import argparse
+import glob
 import io
+import os
+import site
+import sys
 import time
 
-import uvicorn
-from fastapi import FastAPI, Request
-from faster_whisper import WhisperModel
+
+def _ensure_cuda_libs() -> None:
+    """CTranslate2 needs libcublas/libcudnn at inference. The pip nvidia-* wheels
+    ship them, but they aren't on LD_LIBRARY_PATH by default. Find them and re-exec
+    this process once with the path set, so you never set LD_LIBRARY_PATH by hand.
+    """
+    if os.environ.get("_ZB_CUDA_RELAUNCHED"):
+        return
+    roots = list(site.getsitepackages()) + [site.getusersitepackages()]
+    dirs: list[str] = []
+    for base in roots:
+        for pattern in ("libcublas.so*", "libcudnn.so*"):
+            for f in glob.glob(os.path.join(base, "nvidia", "**", pattern), recursive=True):
+                dirs.append(os.path.dirname(f))
+    dirs = list(dict.fromkeys(dirs))
+    if dirs:
+        existing = os.environ.get("LD_LIBRARY_PATH", "")
+        os.environ["LD_LIBRARY_PATH"] = ":".join(dirs + ([existing] if existing else []))
+        os.environ["_ZB_CUDA_RELAUNCHED"] = "1"
+        print(f"[whisper] set LD_LIBRARY_PATH for CUDA libs: {':'.join(dirs)}", flush=True)
+        os.execv(sys.executable, [sys.executable] + sys.argv)
+
+
+_ensure_cuda_libs()
+
+import uvicorn  # noqa: E402  (imported after the CUDA-lib re-exec)
+from fastapi import FastAPI, Request  # noqa: E402
+from faster_whisper import WhisperModel  # noqa: E402
 
 app = FastAPI()
 _model: WhisperModel | None = None
