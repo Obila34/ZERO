@@ -66,6 +66,19 @@ class VoiceOrchestrator:
             return self.tts.synthesize(text)
         return self._synthesize_piper(text)
 
+    def synthesize_stream(self, text: str):
+        """Yield audio chunks as they're produced (real streaming for Orpheus;
+        the Piper path falls back to one chunk after splicing cue clips)."""
+        text = text.strip()
+        if not text:
+            return
+        if self.engine_name in ("fish", "orpheus"):
+            yield from self.tts.synthesize_stream(text)
+        else:
+            audio = self._synthesize_piper(text)
+            if getattr(audio, "size", 0):
+                yield audio
+
     # -- Piper path: split on cues, synthesize words, splice clips -----------
     def _synthesize_piper(self, text: str) -> np.ndarray:
         parts = _CUE_RE.split(text)

@@ -363,13 +363,14 @@ class Zero:
                           should_stop=lambda: False)
 
     def _speak_streaming(self, chunks) -> str:
-        """Speak the reply with the TTS PIPELINED: a producer thread synthesizes the
-        next sentence while the current one is still playing, so there's no gap
-        between sentences (the cause of the mid-reply pauses with a slower engine
-        like Orpheus). Returns the full reply text.
+        """Stream the reply: a producer thread turns the LLM text into sentences and
+        streams each sentence's AUDIO CHUNKS onto a queue, while a single gapless
+        output stream plays them as they arrive. First audio lands ~200ms after the
+        first sentence starts generating, and there are no inter-sentence pauses.
+        Returns the full reply text.
         """
         full: list[str] = []
-        audio_q: "queue.Queue" = queue.Queue(maxsize=4)
+        audio_q: "queue.Queue" = queue.Queue(maxsize=32)
 
         def producer():
             buffer = ""
@@ -385,32 +386,39 @@ class Zero:
                     complete, buffer = sentences[:-1], (sentences[-1] if sentences else "")
                     for sentence in complete:
                         full.append(sentence)
-                        audio = self.voice.synthesize(sentence)
-                        if audio.size:
-                            audio_q.put(audio)
+                        for piece in self.voice.synthesize_stream(sentence):
+                            audio_q.put(piece)
                 if buffer.strip():
                     full.append(buffer.strip())
-                    audio = self.voice.synthesize(buffer)
-                    if audio.size:
-                        audio_q.put(audio)
+                    for piece in self.voice.synthesize_stream(buffer):
+                        audio_q.put(piece)
             finally:
                 audio_q.put(None)  # sentinel: done
 
         threading.Thread(target=producer, daemon=True).start()
 
-        spoke_any = False
-        while True:
-            audio = audio_q.get()
-            if audio is None:
-                break
-            if not spoke_any:
-                log.info("first audio out: %.2fs after STT",
-                         time.monotonic() - self._t_reply_start)
-                self._to(State.SPEAKING)
-                spoke_any = True
-            self.speaker.play(audio, self.voice.sample_rate, should_stop=lambda: False)
+        self._spoke_any = False
 
+        def audio_gen():
+            while True:
+                piece = audio_q.get()
+                if piece is None:
+                    return
+                if not self._spoke_any:
+                    log.info("first audio out: %.2fs after STT",
+                             time.monotonic() - self._t_reply_start)
+                    self._to(State.SPEAKING)
+                    self._spoke_any = True
+                yield piece
+
+        self.speaker.play_stream(audio_gen(), self.voice.sample_rate,
+                                 should_stop=self._should_interrupt)
         return " ".join(full).strip()
+
+    def _should_interrupt(self) -> bool:
+        """Barge-in hook: True stops playback. Wired up in the barge-in step;
+        always False for now."""
+        return False
 
     def _speak_one(self, text: str) -> None:
         """Synthesize + play a single fixed phrase (e.g. the goodbye line)."""

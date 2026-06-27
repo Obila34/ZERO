@@ -12,6 +12,7 @@ from __future__ import annotations
 import io
 import re
 import wave
+from typing import Iterator
 
 import numpy as np
 import requests
@@ -45,10 +46,36 @@ class RemoteTTS(TTS):
     def __init__(self, url: str, voice: str = "tara", sample_rate: int = 24000,
                  timeout: float = 30.0):
         self.url = url
+        self.stream_url = url.replace("/tts", "/tts_stream")
         self.voice = voice
         self.sample_rate = sample_rate
         self.timeout = timeout
         log.info("remote TTS (orpheus) -> %s (voice=%s)", url, voice)
+
+    def synthesize_stream(self, text: str) -> Iterator[np.ndarray]:
+        """Yield float32 audio chunks as the server generates them — first audio
+        comes back in ~200ms instead of after the whole sentence."""
+        text = _to_orpheus(text)
+        if not text:
+            return
+        try:
+            resp = requests.post(
+                self.stream_url, json={"text": text, "voice": self.voice},
+                stream=True, timeout=self.timeout,
+            )
+            resp.raise_for_status()
+        except requests.RequestException as e:
+            log.error("remote TTS stream failed (server/tunnel up?): %s", e)
+            return
+        leftover = b""
+        for raw in resp.iter_content(chunk_size=8192):
+            if not raw:
+                continue
+            buf = leftover + raw
+            n = len(buf) - (len(buf) % 2)  # whole int16 samples only
+            leftover = buf[n:]
+            if n:
+                yield np.frombuffer(buf[:n], dtype=np.int16).astype(np.float32) / 32768.0
 
     def synthesize(self, text: str) -> np.ndarray:
         text = _to_orpheus(text)

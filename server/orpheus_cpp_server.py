@@ -51,7 +51,7 @@ _ensure_cuda_libs()
 import numpy as np  # noqa: E402
 import uvicorn  # noqa: E402
 from fastapi import FastAPI  # noqa: E402
-from fastapi.responses import Response  # noqa: E402
+from fastapi.responses import Response, StreamingResponse  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
 from orpheus_cpp import OrpheusCpp  # noqa: E402
 
@@ -89,6 +89,18 @@ def tts(req: TTSReq):
         w.writeframes(audio.tobytes())
     print(f"[orpheus-cpp] {time.time() - t:.2f}s -> {req.text[:60]!r}", flush=True)
     return Response(content=buf.getvalue(), media_type="audio/wav")
+
+
+@app.post("/tts_stream")
+def tts_stream(req: TTSReq):
+    """Stream raw int16 PCM (24 kHz mono) as Orpheus generates it — first audio in
+    ~200ms instead of waiting for the whole sentence."""
+    def gen():
+        for _sr, samples in _model.stream_tts_sync(
+            req.text, options={"voice_id": req.voice}
+        ):
+            yield np.asarray(samples, dtype=np.int16).reshape(-1).tobytes()
+    return StreamingResponse(gen(), media_type="application/octet-stream")
 
 
 def main() -> None:
