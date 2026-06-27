@@ -42,15 +42,21 @@ def health():
 @app.post("/tts")
 def tts(req: TTSReq):
     t = time.time()
-    # orpheus-cpp returns (sample_rate, int16 mono samples).
-    sr, samples = _model.tts(req.text, options={"voice_id": req.voice})
-    samples = np.asarray(samples, dtype=np.int16).reshape(-1)
+    # orpheus-cpp streams (sample_rate, int16 chunk) tuples; collect into one WAV.
+    sr = 24000
+    chunks: list[np.ndarray] = []
+    for chunk_sr, samples in _model.stream_tts_sync(
+        req.text, options={"voice_id": req.voice}
+    ):
+        sr = int(chunk_sr)
+        chunks.append(np.asarray(samples, dtype=np.int16).reshape(-1))
+    audio = np.concatenate(chunks) if chunks else np.zeros(0, dtype=np.int16)
     buf = io.BytesIO()
     with wave.open(buf, "wb") as w:
         w.setnchannels(1)
         w.setsampwidth(2)
-        w.setframerate(int(sr))
-        w.writeframes(samples.tobytes())
+        w.setframerate(sr)
+        w.writeframes(audio.tobytes())
     print(f"[orpheus-cpp] {time.time() - t:.2f}s -> {req.text[:60]!r}", flush=True)
     return Response(content=buf.getvalue(), media_type="audio/wav")
 
