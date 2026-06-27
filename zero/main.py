@@ -363,42 +363,54 @@ class Zero:
                           should_stop=lambda: False)
 
     def _speak_streaming(self, chunks) -> str:
-        """Speak sentences as they complete; return the full reply text."""
+        """Speak the reply with the TTS PIPELINED: a producer thread synthesizes the
+        next sentence while the current one is still playing, so there's no gap
+        between sentences (the cause of the mid-reply pauses with a slower engine
+        like Orpheus). Returns the full reply text.
+        """
         full: list[str] = []
-        buffer = ""
+        audio_q: "queue.Queue" = queue.Queue(maxsize=4)
+
+        def producer():
+            buffer = ""
+            first_token = True
+            try:
+                for chunk in itertools.chain(chunks, ["\n"]):  # sentinel flush
+                    if first_token and chunk.strip():
+                        log.info("LLM first token: %.2fs",
+                                 time.monotonic() - self._t_reply_start)
+                        first_token = False
+                    buffer += chunk
+                    sentences = split_sentences(buffer)
+                    complete, buffer = sentences[:-1], (sentences[-1] if sentences else "")
+                    for sentence in complete:
+                        full.append(sentence)
+                        audio = self.voice.synthesize(sentence)
+                        if audio.size:
+                            audio_q.put(audio)
+                if buffer.strip():
+                    full.append(buffer.strip())
+                    audio = self.voice.synthesize(buffer)
+                    if audio.size:
+                        audio_q.put(audio)
+            finally:
+                audio_q.put(None)  # sentinel: done
+
+        threading.Thread(target=producer, daemon=True).start()
+
         spoke_any = False
-        first_token = True
-
-        for chunk in itertools.chain(chunks, ["\n"]):  # sentinel flush
-            if first_token and chunk.strip():
-                log.info("LLM first token: %.2fs", time.monotonic() - self._t_reply_start)
-                first_token = False
-            buffer += chunk
-            sentences = split_sentences(buffer)
-            # Keep the last (possibly incomplete) fragment buffered.
-            complete, buffer = sentences[:-1], (sentences[-1] if sentences else "")
-            for sentence in complete:
-                if not spoke_any:
-                    log.info("first audio out: %.2fs after STT",
-                             time.monotonic() - self._t_reply_start)
-                    self._to(State.SPEAKING)
-                    spoke_any = True
-                self._speak_one(sentence)
-                full.append(sentence)
-
-        if buffer.strip():  # flush trailing fragment
+        while True:
+            audio = audio_q.get()
+            if audio is None:
+                break
             if not spoke_any:
+                log.info("first audio out: %.2fs after STT",
+                         time.monotonic() - self._t_reply_start)
                 self._to(State.SPEAKING)
-            self._speak_one(buffer)
-            full.append(buffer.strip())
+                spoke_any = True
+            self.speaker.play(audio, self.voice.sample_rate, should_stop=lambda: False)
 
         return " ".join(full).strip()
-
-    def _speak_one(self, sentence: str) -> None:
-        audio = self.voice.synthesize(sentence)
-        if audio.size:
-            # should_stop hook reserved for barge-in (Phase 7); always False now.
-            self.speaker.play(audio, self.voice.sample_rate, should_stop=lambda: False)
 
 
 def main() -> int:
