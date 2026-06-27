@@ -13,23 +13,14 @@ conversation:
   # turns). It sleeps after this much continuous silence, or on a stop phrase.
   sleep_timeout_ms: 30000
 
-  # Latency mask: a short pre-synthesized "thinking" phrase plays the instant you
-  # finish, WHILE the LLM generates in the background — so you hear something in
-  # ~1s instead of dead air. Fillers are grouped so the RIGHT one is chosen for
-  # what you said (a question vs a quick reply vs a statement).
-  filler_probability: 0.9
+  # Tiny neutral backchannel that fits ANY input (a committal "let me think" on a
+  # casual "how are you" breaks the illusion). Played only sometimes, just to cover
+  # the brief wait before the reply. Lower probability now the LLM is fast on GPU.
+  filler_probability: 0.5
   fillers:
-    question:
-      - "Good question, let me think."
-      - "Hmm, let me think about that."
-      - "Let me think for a second."
-    default:
-      - "Okay, let me see."
-      - "Right, one moment."
-      - "Let's see."
-    ack:
-      - "Mm-hmm."
-      - "Sure."
+    question: ["Mm.", "Okay.", "Hmm."]
+    default: ["Mm.", "Right.", "Okay."]
+    ack: ["Mm-hmm.", "Sure."]
 
 memory:
   enabled: true              # remember durable facts across sessions (SQLite)
@@ -98,8 +89,8 @@ llm:
 tts:
   engine: orpheus           # orpheus (GPU, natural) | piper (local fallback) | fish
   orpheus:
-    # Orpheus TTS server on a GPU node, reached over an SSH tunnel (see
-    # server/orpheus_server.py). Voices: tara leah jess leo dan mia zac zoe.
+    # Quantized Orpheus TTS server on the GPU node, over an SSH tunnel (see
+    # server/orpheus_cpp_server.py). Voices: tara leah jess leo dan mia zac zoe.
     url: http://127.0.0.1:9100/tts
     voice: tara
     timeout: 30
