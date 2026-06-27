@@ -46,65 +46,70 @@ class _BaseEndpointer:
 
     def capture(self, frames: Iterable[np.ndarray],
                 idle_timeout_s: float | None = None) -> np.ndarray | None:
-        """Collect one utterance. If `idle_timeout_s` is set and no speech starts
-        within that window, return None (lets the caller sleep the conversation).
+        """Collect one utterance from the owner. Returns the audio, or None only on
+        a true idle timeout (no speech for `idle_timeout_s`). A too-quiet utterance
+        (background) is NOT an idle timeout — we drop it and keep listening, so a
+        stray background blip doesn't end the conversation.
         """
-        collected: list[np.ndarray] = []
-        preroll: list[np.ndarray] = []  # recent frames kept so we don't clip word 1
-        trailing_silence = 0
-        started = False
-        idle_blocks_seen = 0
         idle_limit = int(idle_timeout_s * 1000 / self.block_ms) if idle_timeout_s else None
+        idle_blocks_seen = 0
+        frames_iter = iter(frames)
 
-        for frame in frames:
-            is_voice = self._is_speech(frame)  # VAD only
+        while True:
+            collected: list[np.ndarray] = []
+            preroll: list[np.ndarray] = []  # lead-in so the first word isn't clipped
+            trailing_silence = 0
+            started = False
 
-            if not started:
-                # Keep a short lead-in so the first word isn't clipped.
-                preroll.append(frame)
-                if len(preroll) > self.pad_blocks + 1:
-                    preroll.pop(0)
-                # STARTING requires real speech AND enough loudness — this is where
-                # the loudness gate belongs (rejects quiet background onsets).
-                if is_voice and self._energetic(frame):
-                    started = True
-                    collected.extend(preroll)
-                    trailing_silence = 0
+            for frame in frames_iter:
+                is_voice = self._is_speech(frame)  # VAD only
+
+                if not started:
+                    preroll.append(frame)
+                    if len(preroll) > self.pad_blocks + 1:
+                        preroll.pop(0)
+                    # STARTING needs real speech AND enough loudness (rejects quiet
+                    # background onsets).
+                    if is_voice and self._energetic(frame):
+                        started = True
+                        collected.extend(preroll)
+                        trailing_silence = 0
+                    else:
+                        idle_blocks_seen += 1
+                        if idle_limit and idle_blocks_seen >= idle_limit:
+                            return None
                 else:
-                    idle_blocks_seen += 1
-                    if idle_limit and idle_blocks_seen >= idle_limit:
-                        return None
-            else:
-                collected.append(frame)
-                # CONTINUING uses the VAD only — quiet syllables/short pauses inside
-                # a sentence must NOT end it (that was the fragmentation bug).
-                if is_voice:
-                    trailing_silence = 0
-                else:
-                    trailing_silence += 1
-                    if trailing_silence >= self.silence_blocks:
+                    collected.append(frame)
+                    # CONTINUING uses the VAD only — quiet syllables/short pauses
+                    # inside a sentence must NOT end it (the fragmentation bug).
+                    if is_voice:
+                        trailing_silence = 0
+                    else:
+                        trailing_silence += 1
+                        if trailing_silence >= self.silence_blocks:
+                            break
+                    if len(collected) >= self.max_blocks:
+                        log.info("utterance hit max length cap")
                         break
-                if len(collected) >= self.max_blocks:
-                    log.info("utterance hit max length cap")
-                    break
 
-        if not collected:
-            return None
+            if not collected:
+                return None  # frames exhausted
 
-        pcm_i16 = np.concatenate(collected)
-        rms = float(np.sqrt(np.mean(pcm_i16.astype(np.float32) ** 2)))
-        peak = int(np.abs(pcm_i16).max())
-        log.info("utterance: rms=%.0f peak=%d (%.1fs)", rms, peak,
-                 len(collected) * self.block_ms / 1000.0)
+            pcm_i16 = np.concatenate(collected)
+            rms = float(np.sqrt(np.mean(pcm_i16.astype(np.float32) ** 2)))
+            peak = int(np.abs(pcm_i16).max())
+            log.info("utterance: rms=%.0f peak=%d (%.1fs)", rms, peak,
+                     len(collected) * self.block_ms / 1000.0)
 
-        # Proximity gate: a whole utterance that's quiet on average is almost
-        # certainly background, not the close speaker — drop it.
-        if self.min_utterance_rms and rms < self.min_utterance_rms:
-            log.info("dropped: too quiet (rms %.0f < %.0f) — likely background",
-                     rms, self.min_utterance_rms)
-            return None
+            # Proximity gate: a whole utterance that's quiet on average is almost
+            # certainly background. Drop it and KEEP LISTENING (don't sleep).
+            if self.min_utterance_rms and rms < self.min_utterance_rms:
+                log.info("dropped: too quiet (rms %.0f < %.0f) — still listening",
+                         rms, self.min_utterance_rms)
+                idle_blocks_seen = 0  # there was activity; give a fresh idle window
+                continue
 
-        return pcm_i16.astype(np.float32) / 32768.0
+            return pcm_i16.astype(np.float32) / 32768.0
 
 
 class SileroEndpointer(_BaseEndpointer):
