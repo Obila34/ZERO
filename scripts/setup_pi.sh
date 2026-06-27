@@ -24,7 +24,7 @@ pip install --upgrade pip
 
 echo "== python dependencies =="
 pip install requests PyYAML numpy sounddevice soundfile cffi onnxruntime \
-            webrtcvad scipy scikit-learn
+            webrtcvad scipy scikit-learn tqdm
 pip install --no-deps openwakeword       # tflite has no wheel; we run on ONNX
 pip install "setuptools<81"              # webrtcvad needs pkg_resources
 python -c "import openwakeword.utils; openwakeword.utils.download_models()"
@@ -50,6 +50,6 @@ echo
 echo "Setup done. Next steps:"
 echo "  1) Open the GPU tunnels (LLM + STT):"
 echo "       ssh -fN -L 11435:localhost:11434 -L 9000:localhost:9000 <gpu-alias>"
-echo "  2) Set the mic gain (USB mic is usually card 3):  amixer -c 3 set Mic 60"
+echo "  2) Set the mic gain as a PERCENT (ranges vary by card):  amixer -c 3 set Mic 60%"
 echo "  3) Run it:  source .venv/bin/activate && python -m zero.main"
 echo "  (Brain-only test, no mic/audio needed:  python -m zero.main --text)"
