@@ -97,10 +97,13 @@ def main() -> None:
     ap.add_argument("--port", type=int, default=9100)
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--lang", default="en", help="en (tara/leo/...) — NOT es_it")
+    ap.add_argument("--n-gpu-layers", type=int, default=-1,
+                    help="-1 = offload all layers to GPU (avoids CPU OOM / slow)")
     args = ap.parse_args()
-    print(f"[orpheus-cpp] loading quantized Orpheus (lang={args.lang}, downloads "
-          "GGUF + SNAC first run)...", flush=True)
-    _model = OrpheusCpp(lang=args.lang, verbose=False)
+    print(f"[orpheus-cpp] loading quantized Orpheus (lang={args.lang}, "
+          f"n_gpu_layers={args.n_gpu_layers}, downloads GGUF + SNAC first run)...",
+          flush=True)
+    _model = OrpheusCpp(lang=args.lang, n_gpu_layers=args.n_gpu_layers, verbose=False)
     print(f"[orpheus-cpp] ready on {args.host}:{args.port}", flush=True)
     uvicorn.run(app, host=args.host, port=args.port)
 
