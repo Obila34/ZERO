@@ -107,6 +107,84 @@ tts:
     # {model_dir} {text} {out}. Must write a WAV to {out}. Leave null until set.
     infer_cmd: null
 
+vision:
+  # ZERO's eyes. The camera + YOLO11n + color loop runs continuously in the
+  # background (perception is never on the critical path); the wake word that
+  # starts a conversation makes ZERO *attend* to what it's already seeing.
+  enabled: false            # flip to true once a camera + requirements-vision.txt
+                            # are installed. Off = voice-only (unchanged pipeline).
+
+  # Set true ONLY if llm.model is a vision-capable build (e.g. a multimodal Gemma
+  # 3 / Qwen2-VL). Then the keyframe itself is handed to the LLM on visual turns.
+  # If false, ZERO still "sees" via detection + GPU depth facts as text — just no
+  # raw-image understanding. Verify with: ollama show <model> (look for "vision").
+  multimodal: false
+
+  max_items: 6              # most objects mentioned in one scene description
+  detect_interval_s: 0.0    # min seconds between detections (0 = as fast as the
+                            # Pi CPU allows; raise to cap CPU/heat, e.g. 0.2 = ~5/s)
+
+  camera:
+    index: 0                # /dev/video0 (the Brio webcam doubles as mic + camera)
+    width: 640              # stream geometry — small so YOLO11n keeps up on the Pi
+    height: 480
+    request_fps: 30
+
+  detect:
+    model_path: yolo11n.pt  # bundled at the repo root for offline use
+    confidence: 0.35
+    iou: 0.45
+    device: cpu             # 'cpu' (Pi) | 'cuda' | a Hailo/accelerator device
+    imgsz: 640
+    classes:                # COCO classes to keep (empty list = all). People +
+                            # common indoor objects.
+      - person
+      - backpack
+      - umbrella
+      - handbag
+      - bottle
+      - cup
+      - bowl
+      - banana
+      - apple
+      - orange
+      - chair
+      - couch
+      - potted plant
+      - bed
+      - dining table
+      - tv
+      - laptop
+      - mouse
+      - keyboard
+      - cell phone
+      - book
+      - clock
+      - vase
+      - scissors
+      - teddy bear
+
+  color:
+    top_n: 5                # only name the N largest boxes (color is the costly bit)
+    center_crop: 0.6
+    min_saturation: 50
+    min_value: 40
+    white_value: 200
+    min_colorful_ratio: 0.10
+    min_pixels: 50
+
+  gpu:
+    # Grounded distance + bearing come from the GPU vision server (Depth Anything
+    # V2), reached over the SAME SSH tunnel as Whisper/Orpheus — just add
+    # -L 8000:localhost:8000. Disable to run eyes fully local (no distances).
+    enabled: true
+    url: http://127.0.0.1:8000
+    health_path: /health
+    facts_path: /facts
+    health_timeout_s: 5.0   # snappy so fallback to local-only is quick
+    facts_timeout_s: 15.0
+    jpeg_quality: 80        # keyframe JPEG quality sent up the tunnel
+
 persona:
   name: Zero
   # See zero/llm/persona.py for the full system prompt; this is the short identity.

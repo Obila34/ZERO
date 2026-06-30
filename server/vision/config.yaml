@@ -1,0 +1,50 @@
+# Zero Vision — GPU server configuration.
+# Nothing in the server code is hardcoded; every tunable lives here.
+
+server:
+  host: 0.0.0.0              # bind all interfaces; the Pi reaches it via ssh -L
+  port: 8000                # GPU-side port (right side of the ssh -L forward)
+  log_level: info
+
+# ── CP4: monocular depth (Depth Anything V2) ───────────────────────────────
+depth:
+  # Default is a METRIC indoor checkpoint, so per-object medians come out in
+  # meters (see server/depth/depth_anything.py). Swap to Base/Large for quality,
+  # or to a relative checkpoint (and set metric:false) if you have no choice.
+  model: depth-anything/Depth-Anything-V2-Metric-Indoor-Small-hf
+  metric: true              # true: predicted_depth is meters; false: relative
+  relative_scale: 1.0       # only used when metric:false (pseudo-meters, approx.)
+  max_depth_m: 20.0         # clamp model noise (sky/edges) to a sane indoor range
+
+# ── CP4: detections + depth -> grounded scene facts ────────────────────────
+facts:
+  bbox_center_crop: 0.6     # use central 60% of each box for the depth median
+  center_bearing_deg: 12    # |horizontal angle| below this -> "center"
+  vertical_bearing: false   # also emit "high"/"low" alongside left/center/right
+  vertical_deg: 18          # |vertical angle| beyond this -> high/low
+  min_valid_pixels: 10      # fewer valid depth samples in a box -> no distance
+
+camera:
+  # Intrinsics describe the *camera that captured the frame*. Run
+  # calibration/calibrate.py on the camera node, then COPY intrinsics.json here.
+  # Path is relative to this config file. Missing/placeholder -> FOV fallback.
+  intrinsics_path: ../calibration/intrinsics.json
+  fallback_hfov_deg: 70     # horizontal FOV used only when intrinsics are absent
+
+# ── CP5: local VLM brain (writes the spoken reply, grounded in the facts) ──
+vlm:
+  model: Qwen/Qwen2-VL-2B-Instruct   # default chat VLM; or vikhyatk/moondream2
+  backend: qwen             # 'qwen' | 'moondream'  (selects the wrapper path)
+  quantization: none        # 'none' | '4bit' | '8bit'  (4bit/8bit need bitsandbytes + CUDA)
+  max_new_tokens: 96        # replies are 1-2 sentences; keep generation short
+  temperature: 0.2          # low -> stays close to the grounded facts (0 = greedy)
+  max_history_turns: 6      # rolling {user,assistant} turns kept for follow-ups
+  send_image: true          # attach the frame too (facts are always included)
+
+runtime:
+  device: auto              # 'auto' | 'cuda' | 'cpu'
+  cache_dir: .cache         # HuggingFace / model weights cache
+
+debug:
+  enabled: false            # save a colorized depth map per /facts request
+  dir: debug                # relative to server/; written as depth_latest.png

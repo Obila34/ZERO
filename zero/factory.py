@@ -130,6 +130,71 @@ def build_memory(cfg: Config):
     return SqliteMemory(path=str(path), max_facts=cfg.get("memory.max_facts", 30))
 
 
+def build_vision(cfg: Config):
+    """Build the always-on Eyes (camera + YOLO + color + GPU client), or None.
+
+    Returns None when vision is disabled in config, or when the optional camera
+    stack (OpenCV / Ultralytics) isn't installed — ZERO then runs voice-only.
+    """
+    from zero.utils.logging import get_logger
+
+    log = get_logger("vision")
+    if not cfg.get("vision.enabled", False):
+        return None
+    try:
+        from zero.vision.camera import CameraStream
+        from zero.vision.color_namer import ColorNamer
+        from zero.vision.detector import Detector
+        from zero.vision.eyes import Eyes
+        from zero.vision.gpu_client import VisionClient
+    except ImportError as e:  # pragma: no cover - package import should not fail
+        log.warning("vision enabled but import failed — running voice-only: %s", e)
+        return None
+
+    cam = CameraStream(
+        index=cfg.get("vision.camera.index", 0),
+        width=cfg.get("vision.camera.width", 640),
+        height=cfg.get("vision.camera.height", 480),
+        request_fps=cfg.get("vision.camera.request_fps", 30),
+    )
+    model_path = cfg.resolve_path("vision.detect.model_path", "yolo11n.pt")
+    detector = Detector(
+        model_path=str(model_path),
+        confidence=cfg.get("vision.detect.confidence", 0.35),
+        iou=cfg.get("vision.detect.iou", 0.45),
+        device=cfg.get("vision.detect.device", "cpu"),
+        imgsz=cfg.get("vision.detect.imgsz", 640),
+        classes=cfg.get("vision.detect.classes"),
+    )
+    namer = ColorNamer(
+        center_crop=cfg.get("vision.color.center_crop", 0.6),
+        min_saturation=cfg.get("vision.color.min_saturation", 50),
+        min_value=cfg.get("vision.color.min_value", 40),
+        white_value=cfg.get("vision.color.white_value", 200),
+        min_colorful_ratio=cfg.get("vision.color.min_colorful_ratio", 0.10),
+        min_pixels=cfg.get("vision.color.min_pixels", 50),
+    )
+    client = None
+    if cfg.get("vision.gpu.enabled", True):
+        client = VisionClient(
+            url=cfg.get("vision.gpu.url", "http://127.0.0.1:8000"),
+            health_path=cfg.get("vision.gpu.health_path", "/health"),
+            facts_path=cfg.get("vision.gpu.facts_path", "/facts"),
+            health_timeout_s=cfg.get("vision.gpu.health_timeout_s", 5.0),
+            facts_timeout_s=cfg.get("vision.gpu.facts_timeout_s", 15.0),
+            jpeg_quality=cfg.get("vision.gpu.jpeg_quality", 80),
+        )
+    return Eyes(
+        cam, detector, namer, client,
+        color_top_n=cfg.get("vision.color.top_n", 5),
+        max_items=cfg.get("vision.max_items", 6),
+        use_gpu=cfg.get("vision.gpu.enabled", True),
+        multimodal=cfg.get("vision.multimodal", False),
+        jpeg_quality=cfg.get("vision.gpu.jpeg_quality", 80),
+        detect_interval_s=cfg.get("vision.detect_interval_s", 0.0),
+    )
+
+
 def build_voiceid(cfg: Config):
     """Speaker verifier + enrolled voiceprint, or (None, None) if off/missing."""
     import numpy as np

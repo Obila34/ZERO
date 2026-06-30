@@ -19,8 +19,8 @@ import time
 from zero.config import load_config
 from zero.conversation import Conversation
 from zero.factory import (
-    build_endpointer, build_llm, build_memory, build_stt, build_voice, build_voiceid,
-    build_wake,
+    build_endpointer, build_llm, build_memory, build_stt, build_vision, build_voice,
+    build_voiceid, build_wake,
 )
 from zero.llm.persona import build_system_prompt
 from zero.state import State, can_transition
@@ -56,6 +56,11 @@ class Zero:
             self.endpointer = build_endpointer(self.cfg)
             self.stt = build_stt(self.cfg)
             self.voice = build_voice(self.cfg)
+            # Eyes: always-on camera + detection (or None if vision disabled /
+            # the camera stack isn't installed). Started in run().
+            self.eyes = build_vision(self.cfg)
+        else:
+            self.eyes = None
 
         system_prompt = build_system_prompt(
             name=self.cfg.get("persona.name", "Zero"),
@@ -168,6 +173,14 @@ class Zero:
         if callable(warmup):
             warmup()
         self.mic.start()
+        # Open the eyes BEFORE the wake loop so perception is already running when
+        # the user speaks — the scene is pre-computed, never on the critical path.
+        if self.eyes is not None:
+            try:
+                self.eyes.start()
+            except Exception as e:  # a missing camera must not stop voice working
+                log.warning("could not start eyes — running voice-only: %s", e)
+                self.eyes = None
         log.info("ZERO ready. Say the wake word to start talking. (Ctrl-C to quit)")
         try:
             while True:
@@ -178,6 +191,8 @@ class Zero:
             log.info("shutting down")
         finally:
             self.mic.stop()
+            if self.eyes is not None:
+                self.eyes.stop()
 
     def _wait_for_wake(self) -> None:
         self._to(State.IDLE)
@@ -251,17 +266,68 @@ class Zero:
 
             self._maybe_remember(text)  # explicit "remember that ..."
 
-            self.convo.add_user(text)
+            # Fold in what ZERO currently sees. Ambient awareness (the local
+            # "in view: ..." line) is attached to the user turn every time;
+            # grounded depth/bearing facts + the keyframe are added only when the
+            # question is visual, so pure-chat turns stay as fast as before.
+            aug_text, image_b64 = self._augment_with_vision(text)
+            self.convo.add_user(aug_text)
             self._t_reply_start = time.monotonic()  # end-of-STT marker for timing
+            messages = self.convo.messages()
+            if image_b64:
+                # Attach the keyframe to THIS turn only (not stored in history, so
+                # the cached prefix and future turns stay image-free and small).
+                messages = [*messages[:-1], {**messages[-1], "images": [image_b64]}]
             # Kick the LLM off in the BACKGROUND so its prefill overlaps the spoken
             # filler — the model is already generating while the filler plays, so the
             # real answer flows in with little or no added delay.
-            chunks = self._stream_in_background(self.convo.messages())
+            chunks = self._stream_in_background(messages)
             self._to(State.SPEAKING)
             self._play_filler(text)
             reply = self._speak_streaming(chunks)
             self.convo.add_assistant(reply)
             log.info("reply: %r", reply)
+
+    # -- vision -------------------------------------------------------------
+    # Words that signal the user is asking about what ZERO can SEE. On these we
+    # pay for GPU depth/bearing facts + (if multimodal) the keyframe; everything
+    # else is a pure-chat turn and skips vision entirely for speed.
+    _VISUAL_WORDS = {
+        "see", "seeing", "look", "looking", "looks", "watch", "show", "showing",
+        "this", "that", "these", "those", "here", "there", "front", "behind",
+        "color", "colour", "holding", "wearing", "hand", "object", "thing",
+        "room", "around", "left", "right", "near", "far", "distance", "away",
+        "many", "count", "where", "who", "recognize", "read", "picture", "camera",
+    }
+
+    def _is_visual(self, text: str) -> bool:
+        t = text.lower()
+        words = {w.strip(" .!?,;:'\"") for w in t.split()}
+        return bool(words & self._VISUAL_WORDS)
+
+    def _augment_with_vision(self, text: str) -> tuple[str, str | None]:
+        """Return (user_text_for_llm, keyframe_b64_or_None).
+
+        Ambient awareness is attached every turn; grounded facts + keyframe only
+        when the utterance is visual. Never raises — vision is best-effort.
+        """
+        if self.eyes is None:
+            return text, None
+        try:
+            if self._is_visual(text):
+                ctx = self.eyes.visual_context(question=text)
+                desc, image_b64 = ctx.text, ctx.image_b64
+            else:
+                desc, image_b64 = self.eyes.local_context(), None
+        except Exception as e:  # vision must never break a conversation turn
+            log.debug("vision augmentation failed: %s", e)
+            return text, None
+        if not desc:
+            return text, image_b64
+        # Inject as a parenthetical the model treats as live perception, not as
+        # something the user said. The persona prompt explains the convention.
+        aug = f"{text}\n\n(You can currently see: {desc}.)"
+        return aug, image_b64
 
     # -- long-term memory ---------------------------------------------------
     def _maybe_remember(self, text: str) -> None:

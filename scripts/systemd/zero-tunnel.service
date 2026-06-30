@@ -1,0 +1,16 @@
+[Unit]
+Description=ZERO SSH tunnel Pi -> GPU (LLM/STT/TTS/Vision)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=CHANGEME
+Environment=GPU_HOST=user@gpu-box
+Environment=AUTOSSH_GATETIME=0
+ExecStart=/home/CHANGEME/ZERO/scripts/pi_tunnel.sh
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

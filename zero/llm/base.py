@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Iterator
+from typing import Any, Iterator
 
-# A message is {"role": "system"|"user"|"assistant", "content": str}
-Message = dict[str, str]
+# A message is {"role": "system"|"user"|"assistant", "content": str}.
+# A user turn MAY also carry "images": [base64_jpeg, ...] for a multimodal model
+# (e.g. a vision-capable Gemma) — Ollama accepts these on the message directly.
+Message = dict[str, Any]
 
 
 class LLM(ABC):

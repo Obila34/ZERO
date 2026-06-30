@@ -1,0 +1,25 @@
+# Zero Vision — GPU server dependencies.
+# Install:  python -m venv .venv && source .venv/bin/activate && pip install -r server/requirements.txt
+fastapi>=0.110
+uvicorn[standard]>=0.29
+pydantic>=2.6
+pyyaml>=6.0
+
+# ── CP4: depth + scene facts ───────────────────────────────────────────────
+# Install the CUDA torch build matching your driver from https://pytorch.org
+# (plain `torch` pulls CPU-only wheels — they work but are slow).
+torch>=2.2
+transformers>=4.49      # Depth Anything V2 (CP4) + Qwen2-VL (CP5)
+pillow>=10.0            # image-processor backend for transformers
+opencv-python-headless>=4.8
+numpy>=1.24
+
+# ── CP5: local VLM brain ───────────────────────────────────────────────────
+# transformers (pinned above) provides Qwen2VLForConditionalGeneration;
+# accelerate handles device placement (required for quantized / device_map loads).
+accelerate>=0.30
+# Optional: 4-bit / 8-bit quantization to fit the VLM alongside depth in 12-16GB.
+# CUDA-only; uncomment on the GPU box.
+# bitsandbytes>=0.43
+# Moondream2 backend (vlm.backend: moondream) additionally needs:
+# einops>=0.7

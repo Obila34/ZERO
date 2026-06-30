@@ -1,0 +1,12 @@
+# ZERO — Pi-side VISION extras (the eyes). Install on the Pi in addition to
+# requirements.txt, only if you enable vision (vision.enabled: true):
+#
+#   pip install -r requirements-vision.txt
+#
+# The GPU vision server has its own deps (torch + transformers) in
+# server/vision/requirements.txt — install those on the GPU node, not the Pi.
+
+opencv-python>=4.8        # camera capture, color (HSV), JPEG encode
+ultralytics>=8.3.0        # YOLO11n local object detection
+pydantic>=2.0             # the vision wire schema (Detection / SceneFact / ...)
+# numpy + requests already come from the base requirements.txt

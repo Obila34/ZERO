@@ -1,0 +1,113 @@
+"""Threaded camera capture for the always-on eyes.
+
+``CameraStream`` opens the USB camera once and pulls frames in a background
+thread, always keeping only the *latest* frame. Readers never block on the driver
+and never process a stale backlog — they take whatever the most recent grab
+produced. Frames are converted BGR->RGB and downscaled to the configured stream
+resolution so YOLO11n keeps up on the Pi 5 CPU.
+
+cv2/numpy are imported lazily so a box without a camera (text mode, the GPU node)
+can import the package without pulling in OpenCV.
+"""
+from __future__ import annotations
+
+import sys
+import threading
+import time
+from typing import Optional
+
+from zero.utils.logging import get_logger
+
+log = get_logger("vision.camera")
+
+
+class CameraStream:
+    def __init__(self, index: int = 0, width: int = 640, height: int = 480,
+                 request_fps: int = 30):
+        self._index = int(index)
+        self._width = int(width)
+        self._height = int(height)
+        self._request_fps = int(request_fps)
+
+        self._capture = None
+        self._thread: Optional[threading.Thread] = None
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+
+        self._frame = None           # latest RGB frame (np.ndarray)
+        self._frame_id = 0
+        self._last_read_id = -1
+
+    def start(self) -> "CameraStream":
+        if self._thread is not None:
+            return self  # already started
+        import cv2
+
+        backend = cv2.CAP_V4L2 if sys.platform.startswith("linux") else cv2.CAP_ANY
+        cap = cv2.VideoCapture(self._index, backend)
+        if not cap.isOpened():
+            raise RuntimeError(
+                f"Could not open camera index {self._index}. Check the USB "
+                f"connection and that nothing else holds /dev/video{self._index}."
+            )
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, self._width)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self._height)
+        cap.set(cv2.CAP_PROP_FPS, self._request_fps)
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # shallow buffer = freshest frame
+        self._capture = cap
+
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._loop, name="CameraStream",
+                                        daemon=True)
+        self._thread.start()
+        log.info("camera %d open @ %dx%d", self._index, self._width, self._height)
+        return self
+
+    def _loop(self) -> None:
+        import cv2
+
+        while not self._stop.is_set():
+            ok, frame_bgr = self._capture.read()
+            if not ok or frame_bgr is None:
+                time.sleep(0.005)  # transient grab failure: back off and retry
+                continue
+            h, w = frame_bgr.shape[:2]
+            if (w, h) != (self._width, self._height):
+                frame_bgr = cv2.resize(frame_bgr, (self._width, self._height),
+                                       interpolation=cv2.INTER_AREA)
+            frame = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+            with self._lock:
+                self._frame = frame
+                self._frame_id += 1
+
+    def read(self):
+        """Return the latest RGB frame (a copy), or None if none yet."""
+        with self._lock:
+            if self._frame is None:
+                return None
+            self._last_read_id = self._frame_id
+            return self._frame.copy()
+
+    def read_new(self, timeout: float = 1.0):
+        """Block up to ``timeout`` seconds for a frame newer than the last read."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            with self._lock:
+                if self._frame is not None and self._frame_id != self._last_read_id:
+                    self._last_read_id = self._frame_id
+                    return self._frame.copy()
+            time.sleep(0.002)
+        return self.read()
+
+    @property
+    def resolution(self) -> tuple[int, int]:
+        return (self._width, self._height)
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=2.0)
+            self._thread = None
+        if self._capture is not None:
+            self._capture.release()
+            self._capture = None

@@ -1,0 +1,15 @@
+[Unit]
+Description=ZERO conversational robot (Pi main loop)
+After=network-online.target zero-tunnel.service sound.target
+Wants=network-online.target zero-tunnel.service
+
+[Service]
+Type=simple
+User=CHANGEME
+WorkingDirectory=/home/CHANGEME/ZERO
+ExecStart=/home/CHANGEME/ZERO/.venv/bin/python -m zero.main
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

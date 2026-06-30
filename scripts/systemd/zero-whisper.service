@@ -1,0 +1,15 @@
+[Unit]
+Description=ZERO Whisper STT server (GPU)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=CHANGEME
+WorkingDirectory=/home/CHANGEME/ZERO
+ExecStart=/home/CHANGEME/ZERO/.venv/bin/python server/whisper_server.py --model large-v3-turbo --port 9000
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
