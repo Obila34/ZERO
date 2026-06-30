@@ -131,11 +131,11 @@ vision:
     request_fps: 30
 
   detect:
-    model_path: yolo11n.pt  # bundled at the repo root for offline use
+    model_path: yolo11n.onnx  # ONNX (NMS baked in) — runs on onnxruntime, NO torch
     confidence: 0.35
-    iou: 0.45
-    device: cpu             # 'cpu' (Pi) | 'cuda' | a Hailo/accelerator device
-    imgsz: 640
+    iou: 0.45               # informational: NMS is already inside the ONNX graph
+    device: cpu             # 'cpu' (Pi) | 'cuda' (onnxruntime CUDA EP, if present)
+    imgsz: 640              # must match what export_yolo_onnx.py used
     classes:                # COCO classes to keep (empty list = all). People +
                             # common indoor objects.
       - person

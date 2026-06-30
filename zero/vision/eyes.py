@@ -14,7 +14,7 @@ Per turn the orchestrator calls:
   + the keyframe JPEG for a multimodal LLM. Used on visual turns. Degrades to the
   local detections if the GPU/tunnel is down.
 
-cv2/numpy/ultralytics are only touched once ``start()`` runs, so importing this
+cv2/numpy/onnxruntime are only touched once ``start()`` runs, so importing this
 module is cheap and safe on a node without them.
 """
 from __future__ import annotations

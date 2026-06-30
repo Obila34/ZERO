@@ -22,7 +22,7 @@ IDLE ──(wake word)──> LISTENING ──(end of speech)──> THINKING �
 | LLM        | Ollama + Llama 3.2 3B       | `zero/llm/ollama_engine.py`         |
 | TTS (fast) | Piper + orchestrator        | `zero/tts/piper_engine.py`          |
 | TTS (expr.)| Fish OpenAudio S1-mini      | `zero/tts/fish_engine.py`           |
-| Vision     | YOLO11n + Depth Anything V2 | `zero/vision/` · `server/vision/`   |
+| Vision     | YOLO11n (ONNX) + Depth Anything V2 | `zero/vision/` · `server/vision/` |
 
 ### Eyes (vision)
 
@@ -39,8 +39,10 @@ opens a conversation makes ZERO *attend* to what it's been seeing all along.
   prompt and SQLite memory the conversation already uses.
 
 Off by default. Turn on with `vision.enabled: true` in `config.yaml` after
-`pip install -r requirements-vision.txt`. Falls back to local detections (no
-distances) if the GPU is unreachable. See [`docs/VISION.md`](docs/VISION.md).
+`pip install -r requirements-vision.txt` (light: OpenCV + onnxruntime, **no
+torch** — YOLO11n runs as the bundled `yolo11n.onnx`). Falls back to local
+detections (no distances) if the GPU is unreachable. See
+[`docs/VISION.md`](docs/VISION.md).
 
 ### Two-tier voice
 

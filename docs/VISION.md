@@ -69,10 +69,14 @@ a vision-capable Gemma is plenty, and using it as the single brain saves VRAM.
 
 ### Pi
 ```bash
-pip install -r requirements-vision.txt      # opencv + ultralytics + pydantic
+pip install -r requirements-vision.txt      # opencv + onnxruntime + pydantic (NO torch)
 # edit config.yaml:  vision.enabled: true   (and multimodal: true if the LLM sees)
 ```
-`yolo11n.pt` is bundled at the repo root, so detection works fully offline.
+YOLO11n runs through **ONNX Runtime** (the same runtime the wake word uses), so
+the Pi needs no torch/CUDA/ultralytics — those drag ~2 GB of unusable NVIDIA
+wheels onto ARM. The model ships as `yolo11n.onnx` (NMS baked in) at the repo
+root, so detection works fully offline. Regenerate it with
+`python scripts/export_yolo_onnx.py` on any box that has ultralytics.
 
 ### GPU
 ```bash
@@ -105,4 +109,8 @@ FOV fallback until you copy a real `intrinsics.json` next to `server/vision/`
   a JPEG up the tunnel + image prefill is the most expensive part.
 - `vision.detect_interval_s` caps how often YOLO runs (raise it to lower Pi CPU
   load/heat; 0 = as fast as the CPU allows).
-- A Hailo-8L AI HAT can offload detection from the Pi CPU (`detect.device`).
+- A Hailo-8L AI HAT can offload detection from the Pi CPU.
+
+> **Never `pip install torch`/`ultralytics` on the Pi.** On ARM they pull in the
+> full NVIDIA CUDA stack (cuBLAS, cuDNN, NCCL, … ~2 GB) that the Pi can't use and
+> will fill the SD card. Detection is ONNX-only on the Pi by design.

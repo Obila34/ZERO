@@ -157,7 +157,7 @@ def build_vision(cfg: Config):
         height=cfg.get("vision.camera.height", 480),
         request_fps=cfg.get("vision.camera.request_fps", 30),
     )
-    model_path = cfg.resolve_path("vision.detect.model_path", "yolo11n.pt")
+    model_path = cfg.resolve_path("vision.detect.model_path", "yolo11n.onnx")
     detector = Detector(
         model_path=str(model_path),
         confidence=cfg.get("vision.detect.confidence", 0.35),
