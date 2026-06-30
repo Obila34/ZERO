@@ -16,6 +16,11 @@ conversation:
   # turns). It sleeps after this much continuous silence, or on a stop phrase.
   sleep_timeout_ms: 30000
 
+  # Barge-in: while ZERO is speaking, the mic stays live and listens for the wake
+  # word — say it again to cut the reply off and talk. Echo-safe (ZERO never says
+  # its own wake word). Set false to disable.
+  barge_in: true
+
   # Tiny neutral backchannel that fits ANY input (a committal "let me think" on a
   # casual "how are you" breaks the illusion). Played only sometimes, just to cover
   # the brief wait before the reply. Lower probability now the LLM is fast on GPU.
@@ -29,6 +34,8 @@ memory:
   enabled: true              # remember durable facts across sessions (SQLite)
   path: zero_memory.sqlite   # single file on disk; survives reboots
   max_facts: 30              # cap injected facts so the prompt stays small/fast
+  recent_episodes: 3         # one-line summaries of recent conversations injected at
+                             # the start, so ZERO recalls the ARC of past chats (0 = off)
 
 voiceid:
   # "Only my voice" — verify each utterance is the enrolled owner before acting.
@@ -82,7 +89,8 @@ llm:
   host: http://127.0.0.1:11435
   model: gemma4:latest       # 8B on the GPU via tunnel
   temperature: 0.3           # low = factual & stable; 0.7 was too loose for a Q&A assistant
-  max_tokens: 140            # ~2-3 natural sentences (80 was too terse)
+  max_tokens: 100            # ~1-2 spoken sentences — snappier replies, fewer pauses
+                             # (caps runaway answers; raise if you want longer ones)
   # Cache-friendly history: append-only most turns (fast ~2s), and only trim back
   # to `history_turns` once it grows past `history_trim_at`. Keeps the 3B fast
   # WITHOUT shrinking the model — the ~10-15s spikes came from trimming every turn.

@@ -86,8 +86,9 @@ can perform.
 | Speech to text | ~1s, large-v3-turbo on the GPU |
 | Brain | Gemma 4 (8B) on the GPU, first token ~0.6s |
 | Voice | Orpheus, streamed, first audio ~1s |
-| Memory | persists across sessions (SQLite) |
+| Memory | persists across sessions (SQLite): durable facts + per-conversation episode summaries |
 | Conversation | wake once, free back-and-forth, stops on "goodbye" |
+| Barge-in | say the wake word again while it's talking to cut it off and take your turn |
 
 ## What's left
 

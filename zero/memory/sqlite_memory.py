@@ -22,18 +22,29 @@ log = get_logger("memory")
 
 
 class SqliteMemory:
-    def __init__(self, path: str, max_facts: int = 30):
+    def __init__(self, path: str, max_facts: int = 30, recent_episodes: int = 3):
         self.max_facts = max_facts
+        self.recent_episodes_n = recent_episodes
         self._db = sqlite3.connect(path, check_same_thread=False)
         self._db.execute(
             "CREATE TABLE IF NOT EXISTS memory("
             "key TEXT PRIMARY KEY, value TEXT, updated_at REAL)"
         )
+        # Episodic memory: one short summary per past conversation, so ZERO recalls
+        # the ARC of what you've talked about, not just isolated key/value facts.
+        self._db.execute(
+            "CREATE TABLE IF NOT EXISTS episodes("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, summary TEXT, created_at REAL)"
+        )
         self._db.commit()
-        log.info("memory store ready (%s, %d facts)", path, self.count())
+        log.info("memory store ready (%s, %d facts, %d episodes)",
+                 path, self.count(), self.episode_count())
 
     def count(self) -> int:
         return self._db.execute("SELECT COUNT(*) FROM memory").fetchone()[0]
+
+    def episode_count(self) -> int:
+        return self._db.execute("SELECT COUNT(*) FROM episodes").fetchone()[0]
 
     def remember(self, key: str, value: str) -> None:
         key = key.strip().lower()[:60]
@@ -56,18 +67,49 @@ class SqliteMemory:
         ).fetchall()
         return {k: v for k, v in rows}
 
+    def add_episode(self, summary: str) -> None:
+        """Store a one-line summary of a finished conversation."""
+        summary = (summary or "").strip()[:300]
+        if not summary:
+            return
+        self._db.execute(
+            "INSERT INTO episodes(summary, created_at) VALUES(?, ?)",
+            (summary, time.time()),
+        )
+        self._db.commit()
+        log.info("episode saved: %s", summary)
+
+    def recent_episodes(self, n: int | None = None) -> list[str]:
+        """The most recent conversation summaries, oldest-first for readability."""
+        n = self.recent_episodes_n if n is None else n
+        if n <= 0:
+            return []
+        rows = self._db.execute(
+            "SELECT summary FROM episodes ORDER BY created_at DESC LIMIT ?", (n,)
+        ).fetchall()
+        return [r[0] for r in reversed(rows)]
+
     def as_block(self) -> str:
         """Compact block for the system prompt; empty string if nothing known."""
+        parts: list[str] = []
         facts = self.facts()
-        if not facts:
-            return ""
-        lines = "\n".join(f"- {k}: {v}" for k, v in facts.items())
-        return (
-            "What you remember about the user from past chats (use it naturally, "
-            "don't recite it back):\n" + lines
-        )
+        if facts:
+            lines = "\n".join(f"- {k}: {v}" for k, v in facts.items())
+            parts.append(
+                "What you remember about the user from past chats (use it "
+                "naturally, don't recite it back):\n" + lines
+            )
+        episodes = self.recent_episodes()
+        if episodes:
+            lines = "\n".join(f"- {s}" for s in episodes)
+            parts.append(
+                "Recent conversations you've had with them (so you can pick up "
+                "where you left off):\n" + lines
+            )
+        return "\n\n".join(parts)
 
     def forget_all(self) -> None:
         self._db.execute("DELETE FROM memory")
+        self._db.execute("DELETE FROM episodes")
         self._db.commit()
         log.info("memory cleared")

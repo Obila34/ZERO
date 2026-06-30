@@ -127,7 +127,11 @@ def build_memory(cfg: Config):
     from zero.memory.sqlite_memory import SqliteMemory
 
     path = cfg.resolve_path("memory.path", "zero_memory.sqlite")
-    return SqliteMemory(path=str(path), max_facts=cfg.get("memory.max_facts", 30))
+    return SqliteMemory(
+        path=str(path),
+        max_facts=cfg.get("memory.max_facts", 30),
+        recent_episodes=cfg.get("memory.recent_episodes", 3),
+    )
 
 
 def build_vision(cfg: Config):

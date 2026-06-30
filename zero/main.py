@@ -74,6 +74,7 @@ class Zero:
         )
         self.memory = build_memory(self.cfg)  # long-term SQLite store (or None)
         self.state = State.IDLE
+        self._interrupt = False  # set by the barge-in monitor to stop playback
 
         # Voice-only extras (need the voice/mic): owner verification + spoken fillers.
         self._filler_prob = self.cfg.get("conversation.filler_probability", 0.9)
@@ -352,6 +353,10 @@ class Zero:
                 self._extract_facts()
             except Exception as e:  # never let memory break the loop
                 log.warning("memory extraction failed: %s", e)
+            try:
+                self._summarize_session()  # episodic memory of the conversation arc
+            except Exception as e:
+                log.warning("session summary failed: %s", e)
         self._to(State.IDLE)
 
     def _extract_facts(self) -> None:
@@ -371,6 +376,21 @@ class Zero:
             if ":" in line:
                 key, _, value = line.partition(":")
                 self.memory.remember(key.strip("-• ").strip(), value)
+
+    def _summarize_session(self) -> None:
+        """Write a one-line summary of the conversation into episodic memory, so
+        next time ZERO can recall the ARC of past chats, not just isolated facts."""
+        prompt = [
+            {"role": "system", "content": (
+                "Summarize this conversation in ONE short sentence — what you and "
+                "the user talked about or what happened — from your point of view "
+                "as the assistant. No preamble, just the sentence. If nothing of "
+                "substance was said, output exactly NONE.")},
+            {"role": "user", "content": self.convo.transcript()},
+        ]
+        summary = "".join(self.llm.stream(prompt)).strip()
+        if summary and not summary.upper().startswith("NONE"):
+            self.memory.add_episode(summary)
 
     def _stream_in_background(self, messages):
         """Start the LLM streaming on a worker thread feeding a queue, and return
@@ -478,14 +498,55 @@ class Zero:
                     self._spoke_any = True
                 yield piece
 
-        self.speaker.play_stream(audio_gen(), self.voice.sample_rate,
-                                 should_stop=self._should_interrupt)
+        # Barge-in: keep the mic live during playback and listen for the wake word.
+        # Saying it again cuts ZERO off mid-reply (echo-safe: ZERO never says its
+        # own wake word, so its voice off the speaker won't false-trigger).
+        monitor = self._start_bargein()
+        try:
+            self.speaker.play_stream(audio_gen(), self.voice.sample_rate,
+                                     should_stop=self._should_interrupt)
+        finally:
+            self._stop_bargein(monitor)
+        if self._interrupt:
+            log.info("barge-in: stopped speaking to listen")
         return " ".join(full).strip()
 
     def _should_interrupt(self) -> bool:
-        """Barge-in hook: True stops playback. Wired up in the barge-in step;
-        always False for now."""
-        return False
+        """Barge-in hook: True stops playback the instant the wake word fires."""
+        return self._interrupt
+
+    def _start_bargein(self):
+        """Run the wake detector on the live mic during playback. Returns a stop
+        Event (or None if barge-in is off / no mic)."""
+        self._interrupt = False
+        if self.text_mode or not self.cfg.get("conversation.barge_in", True):
+            return None
+        self.mic.resume()
+        self.mic.drain()   # drop the tail of our own audio captured a moment ago
+        self.wake.reset()
+        stop = threading.Event()
+
+        def monitor():
+            for frame in self.mic.frames():
+                if stop.is_set():
+                    return
+                try:
+                    if self.wake.process(frame):
+                        self._interrupt = True
+                        return
+                except Exception as e:  # never let the monitor crash playback
+                    log.debug("barge-in monitor error: %s", e)
+                    return
+
+        threading.Thread(target=monitor, name="bargein", daemon=True).start()
+        return stop
+
+    def _stop_bargein(self, stop) -> None:
+        if stop is None:
+            return
+        stop.set()
+        # Re-mute the mic; the conversation loop re-opens it for the next turn.
+        self.mic.pause()
 
     def _speak_one(self, text: str) -> None:
         """Synthesize + play a single fixed phrase (e.g. the goodbye line)."""
