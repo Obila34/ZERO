@@ -5,6 +5,9 @@ audio:
   sample_rate: 16000        # 16 kHz mono everywhere in the pipeline
   block_ms: 30              # frame size for capture / VAD
   input_device: Brio        # USB webcam mic (ALSA hw:3,0), matched by name
+  input_gain: 1.0           # software boost for quiet mics. The BRIO captures very
+                            # low even at max hardware gain (peak ~0.03) — set ~10-14
+                            # so the wake word + STT get a usable level. 1.0 = off.
   output_device: pipewire   # routes to PipeWire's default sink = the BT speaker
                             # (needs the pipewire-alsa package). Use Headphones for 3.5mm jack.
 

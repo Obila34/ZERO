@@ -50,6 +50,7 @@ class Zero:
                 sample_rate=sr,
                 block_ms=self.cfg.get("audio.block_ms", 30),
                 device=self.cfg.get("audio.input_device"),
+                gain=self.cfg.get("audio.input_gain", 1.0),
             )
             self.speaker = Speaker(device=self.cfg.get("audio.output_device"))
             self.wake = build_wake(self.cfg)

@@ -23,10 +23,15 @@ class MicCapture:
         sample_rate: int = 16000,
         block_ms: int = 30,
         device: int | str | None = None,
+        gain: float = 1.0,
     ):
         self.sample_rate = sample_rate
         self.block_size = int(sample_rate * block_ms / 1000)
         self.device = device
+        # Software input gain. Some USB/webcam mics (e.g. the Logitech BRIO)
+        # capture very quietly (peak ~0.03), too low for the wake word / STT.
+        # Multiply each frame by this before int16 conversion. 1.0 = unchanged.
+        self.gain = float(gain) if gain else 1.0
         self._q: "queue.Queue[np.ndarray]" = queue.Queue(maxsize=200)
         self._stream: sd.InputStream | None = None
         self._dropped = 0  # frames dropped since last warning (throttled logging)
@@ -46,6 +51,8 @@ class MicCapture:
             return  # drop audio captured while speaking/thinking
         # indata is float32 [-1, 1]; convert to int16 mono frame.
         mono = indata[:, 0] if indata.ndim > 1 else indata
+        if self.gain != 1.0:
+            mono = mono * self.gain  # boost a quiet mic (clipped on the next line)
         pcm16 = np.clip(mono * 32768.0, -32768, 32767).astype(np.int16)
         try:
             self._q.put_nowait(pcm16.copy())
