@@ -23,11 +23,12 @@ log = get_logger("vision.camera")
 
 class CameraStream:
     def __init__(self, index: int = 0, width: int = 640, height: int = 480,
-                 request_fps: int = 30):
+                 request_fps: int = 30, mjpg: bool = True):
         self._index = int(index)
         self._width = int(width)
         self._height = int(height)
         self._request_fps = int(request_fps)
+        self._mjpg = bool(mjpg)
 
         self._capture = None
         self._thread: Optional[threading.Thread] = None
@@ -50,17 +51,41 @@ class CameraStream:
                 f"Could not open camera index {self._index}. Check the USB "
                 f"connection and that nothing else holds /dev/video{self._index}."
             )
+        # MJPG FIRST: USB webcams (e.g. the Logitech BRIO) usually can't sustain
+        # raw YUYV at 640x480/30 over USB bandwidth, so read() silently returns
+        # nothing. MJPG is compressed and negotiates reliably. Set the fourcc
+        # before the resolution.
+        if self._mjpg:
+            cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, self._width)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self._height)
         cap.set(cv2.CAP_PROP_FPS, self._request_fps)
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # shallow buffer = freshest frame
+
+        # Warm up: cameras commonly drop the first frames while exposure/format
+        # settle. Read a few before declaring the stream healthy, so we can warn
+        # loudly (with the actual format) if nothing ever arrives.
+        warm = None
+        for _ in range(30):
+            ok, warm = cap.read()
+            if ok and warm is not None:
+                break
+            time.sleep(0.03)
+        if warm is None:
+            fourcc = int(cap.get(cv2.CAP_PROP_FOURCC))
+            cc = "".join(chr((fourcc >> 8 * i) & 0xFF) for i in range(4))
+            log.warning("camera %d opened but produced NO frame in warmup "
+                        "(fourcc=%r). Try a different vision.camera.index, or set "
+                        "vision.camera.mjpg: false.", self._index, cc)
         self._capture = cap
 
         self._stop.clear()
         self._thread = threading.Thread(target=self._loop, name="CameraStream",
                                         daemon=True)
         self._thread.start()
-        log.info("camera %d open @ %dx%d", self._index, self._width, self._height)
+        log.info("camera %d open @ %dx%d (mjpg=%s, warmup=%s)", self._index,
+                 self._width, self._height, self._mjpg,
+                 "ok" if warm is not None else "no-frame")
         return self
 
     def _loop(self) -> None:

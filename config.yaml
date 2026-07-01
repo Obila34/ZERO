@@ -140,6 +140,9 @@ vision:
     width: 640              # stream geometry — small so YOLO11n keeps up on the Pi
     height: 480
     request_fps: 30
+    mjpg: true              # request MJPG from the camera. USB webcams (BRIO) can't
+                            # sustain raw YUYV at this res/fps and return no frames;
+                            # MJPG fixes it. Set false only if your camera lacks MJPG.
 
   detect:
     model_path: yolo11n.onnx  # ONNX (NMS baked in) — runs on onnxruntime, NO torch

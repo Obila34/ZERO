@@ -160,6 +160,7 @@ def build_vision(cfg: Config):
         width=cfg.get("vision.camera.width", 640),
         height=cfg.get("vision.camera.height", 480),
         request_fps=cfg.get("vision.camera.request_fps", 30),
+        mjpg=cfg.get("vision.camera.mjpg", True),
     )
     model_path = cfg.resolve_path("vision.detect.model_path", "yolo11n.onnx")
     detector = Detector(
