@@ -12,6 +12,8 @@ models/
 *.pth
 *.bin
 *.gguf
+# ...except the bundled YOLO11n weights, which ship with the repo for offline use.
+!yolo11n.onnx
 
 # Local config overrides & debug audio
 config.local.yaml
