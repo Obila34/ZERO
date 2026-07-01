@@ -90,11 +90,30 @@ class CameraStream:
         log.info("camera %d open @ %dx%d (mjpg=%s)", self._index, self._width,
                  self._height, self._mjpg)
 
+        fails = 0
+        got_any = False
         while not self._stop.is_set():
             ok, frame_bgr = cap.read()
             if not ok or frame_bgr is None:
+                fails += 1
+                # If the device won't deliver frames shortly after opening — usually
+                # because a previous run left it busy (V4L2 recovers slowly after a
+                # hard kill) — close and re-open to self-heal. Retry a few times.
+                if not got_any and fails in (100, 300, 700, 1500):
+                    log.warning("camera %d: no frames yet (x%d) — re-opening...",
+                                self._index, fails)
+                    try:
+                        cap.release()
+                        time.sleep(0.3)
+                        cap = self._open()
+                        self._capture = cap
+                    except Exception as e:
+                        log.warning("camera %d re-open failed: %s", self._index, e)
+                        time.sleep(0.5)
                 time.sleep(0.005)  # transient grab failure: back off and retry
                 continue
+            fails = 0
+            got_any = True
             h, w = frame_bgr.shape[:2]
             if (w, h) != (self._width, self._height):
                 frame_bgr = cv2.resize(frame_bgr, (self._width, self._height),
