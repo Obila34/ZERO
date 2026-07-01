@@ -93,16 +93,21 @@ class Eyes:
 
     # ── perception loop ──────────────────────────────────────────────────────
     def _loop(self) -> None:
+        self._detect_errors = 0
         while not self._stop.is_set():
             frame = self._camera.read_new(timeout=1.0)
             if frame is None:
                 continue
+            detections: list = []
             try:
                 detections = self._detector.detect(frame)
                 self._fill_colors(frame, detections)
-            except Exception as e:  # never let a bad frame kill the eyes
-                log.debug("detect failed on a frame: %s", e)
-                continue
+            except Exception as e:  # detection failed, but we still SAW the frame
+                self._detect_errors += 1
+                if self._detect_errors <= 3 or self._detect_errors % 30 == 0:
+                    log.warning("detection failed (x%d): %s", self._detect_errors, e)
+            # Always publish the frame + whatever detections we got, so a broken
+            # detector never makes it look like the camera is blind.
             self._scene.update(detections, frame_rgb=frame)
             if self._detect_interval > 0:
                 time.sleep(self._detect_interval)
