@@ -89,7 +89,7 @@ llm:
   host: http://127.0.0.1:11435
   model: gemma4:latest       # 8B on the GPU via tunnel
   temperature: 0.3           # low = factual & stable; 0.7 was too loose for a Q&A assistant
-  max_tokens: 100            # ~1-2 spoken sentences — snappier replies, fewer pauses
+  max_tokens: 500            # ~1-2 spoken sentences — snappier replies, fewer pauses
                              # (caps runaway answers; raise if you want longer ones)
   # Cache-friendly history: append-only most turns (fast ~2s), and only trim back
   # to `history_turns` once it grows past `history_trim_at`. Keeps the 3B fast
@@ -129,9 +129,9 @@ vision:
   # 3 / Qwen2-VL). Then the keyframe itself is handed to the LLM on visual turns.
   # If false, ZERO still "sees" via detection + GPU depth facts as text — just no
   # raw-image understanding. Verify with: ollama show <model> (look for "vision").
-  multimodal: false
+  multimodal: true
 
-  max_items: 6              # most objects mentioned in one scene description
+  max_items: 10              # most objects mentioned in one scene description
   detect_interval_s: 0.0    # min seconds between detections (0 = as fast as the
                             # Pi CPU allows; raise to cap CPU/heat, e.g. 0.2 = ~5/s)
 
