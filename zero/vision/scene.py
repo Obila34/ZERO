@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -29,20 +30,48 @@ class Snapshot:
 
 
 class SceneState:
-    def __init__(self) -> None:
+    def __init__(self, frame_buffer: int = 8) -> None:
         self._lock = threading.Lock()
         self._detections: list[Detection] = []
         self._frame = None
         self._timestamp = 0.0
         self._frame_index = 0
+        # A short rolling buffer of recent (frame, timestamp) pairs so a visual
+        # turn can sample 2-3 frames across the last ~second and SEE motion (a
+        # raised hand, someone mid-turn) instead of a single frozen pose.
+        self._frames: deque = deque(maxlen=max(1, int(frame_buffer)))
 
     def update(self, detections: list[Detection], frame_rgb=None) -> None:
         with self._lock:
             self._detections = [d.model_copy(deep=True) for d in detections]
+            self._timestamp = time.time()
             if frame_rgb is not None:
                 self._frame = frame_rgb  # already a private copy from the loop
-            self._timestamp = time.time()
+                self._frames.append((frame_rgb, self._timestamp))
             self._frame_index += 1
+
+    def recent_frames(self, n: int = 2, within_s: float = 1.0) -> list:
+        """Up to ``n`` recent frames sampled evenly across the last ``within_s``
+        seconds (oldest -> newest). Returns copies; ``[]`` if nothing seen yet.
+        """
+        n = max(1, int(n))
+        with self._lock:
+            buf = list(self._frames)
+        if not buf:
+            return []
+        now = time.time()
+        windowed = [(f, t) for (f, t) in buf if now - t <= within_s] or buf[-1:]
+        if len(windowed) <= n:
+            chosen = windowed
+        elif n == 1:
+            chosen = windowed[-1:]
+        else:
+            # Evenly spaced indices across the window (dedup keeps it robust for
+            # tiny buffers), so the frames span the motion rather than clustering.
+            last = len(windowed) - 1
+            idxs = sorted({round(i * last / (n - 1)) for i in range(n)})
+            chosen = [windowed[i] for i in idxs]
+        return [f.copy() for (f, _t) in chosen]
 
     def snapshot(self) -> Snapshot:
         with self._lock:

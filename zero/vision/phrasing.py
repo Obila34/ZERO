@@ -30,6 +30,25 @@ def _plural(label: str, n: int) -> str:
     return _ARTICLE_PLURAL.get(label, label + "s")
 
 
+def detector_hint(detections: Sequence[Detection], max_items: int = 10) -> str:
+    """Counts + labels only ("3 people, a cup, a laptop"), or '' if empty.
+
+    This is the *hint* handed to the vision LLM alongside the actual frames — a
+    nudge so it doesn't undercount, never spoken verbatim. Deliberately carries
+    NO distances, bearings or pixel-sampled colors: those read as clinical, and
+    the model sees the real colors/positions in the image itself.
+    """
+    if not detections:
+        return ""
+    counts: Counter = Counter(d.label for d in detections)
+    parts: list[str] = []
+    for label, n in counts.most_common(max_items):
+        noun = _plural(label, n)
+        qty = "a" if n == 1 else str(n)
+        parts.append(f"{qty} {noun}")
+    return ", ".join(parts)
+
+
 def local_summary(detections: Sequence[Detection], max_items: int = 6) -> str:
     """Compact GPU-free description of the current scene, or '' if empty."""
     if not detections:

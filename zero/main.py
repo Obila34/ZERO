@@ -269,18 +269,14 @@ class Zero:
 
             self._maybe_remember(text)  # explicit "remember that ..."
 
-            # Fold in what ZERO currently sees. Ambient awareness (the local
-            # "in view: ..." line) is attached to the user turn every time;
-            # grounded depth/bearing facts + the keyframe are added only when the
-            # question is visual, so pure-chat turns stay as fast as before.
-            aug_text, image_b64 = self._augment_with_vision(text)
-            self.convo.add_user(aug_text)
+            # Store the RAW utterance so history stays clean and cache-friendly.
+            self.convo.add_user(text)
             self._t_reply_start = time.monotonic()  # end-of-STT marker for timing
-            messages = self.convo.messages()
-            if image_b64:
-                # Attach the keyframe to THIS turn only (not stored in history, so
-                # the cached prefix and future turns stay image-free and small).
-                messages = [*messages[:-1], {**messages[-1], "images": [image_b64]}]
+            # Fold in what ZERO currently sees as an EPHEMERAL note on THIS turn
+            # only — the note + keyframes are attached to the outgoing copy of the
+            # messages, never saved to history, so the cached prefix and future
+            # turns stay clean and image-free.
+            messages = self._attach_vision(self.convo.messages(), text)
             # Kick the LLM off in the BACKGROUND so its prefill overlaps the spoken
             # filler — the model is already generating while the filler plays, so the
             # real answer flows in with little or no added delay.
@@ -293,8 +289,8 @@ class Zero:
 
     # -- vision -------------------------------------------------------------
     # Words that signal the user is asking about what ZERO can SEE. On these we
-    # pay for GPU depth/bearing facts + (if multimodal) the keyframe; everything
-    # else is a pure-chat turn and skips vision entirely for speed.
+    # hand the multimodal LLM a few recent keyframes so it can actually look;
+    # every other turn just carries the cheap text detector hint.
     _VISUAL_WORDS = {
         "see", "seeing", "look", "looking", "looks", "watch", "show", "showing",
         "this", "that", "these", "those", "here", "there", "front", "behind",
@@ -308,29 +304,40 @@ class Zero:
         words = {w.strip(" .!?,;:'\"") for w in t.split()}
         return bool(words & self._VISUAL_WORDS)
 
-    def _augment_with_vision(self, text: str) -> tuple[str, str | None]:
-        """Return (user_text_for_llm, keyframe_b64_or_None).
+    def _look(self, text: str) -> tuple[str, list[str]]:
+        """Ephemeral (note, keyframes) for this turn — never persisted, never raises.
 
-        Ambient awareness is attached every turn; grounded facts + keyframe only
-        when the utterance is visual. Never raises — vision is best-effort.
+        Ambient turns get only the cheap text hint; visual turns also pull a few
+        recent keyframes so the multimodal LLM can actually see.
         """
         if self.eyes is None:
-            return text, None
+            return "", []
         try:
             if self._is_visual(text):
                 ctx = self.eyes.visual_context(question=text)
-                desc, image_b64 = ctx.text, ctx.image_b64
-            else:
-                desc, image_b64 = self.eyes.local_context(), None
+                return ctx.text, ctx.images
+            return self.eyes.local_context(), []
         except Exception as e:  # vision must never break a conversation turn
-            log.debug("vision augmentation failed: %s", e)
-            return text, None
-        if not desc:
-            return text, image_b64
-        # Inject as a parenthetical the model treats as live perception, not as
-        # something the user said. The persona prompt explains the convention.
-        aug = f"{text}\n\n(You can currently see: {desc}.)"
-        return aug, image_b64
+            log.debug("vision look failed: %s", e)
+            return "", []
+
+    def _attach_vision(self, messages: list, text: str) -> list:
+        """Attach the live-sight note + keyframes to the FINAL user message of a
+        throwaway copy of ``messages``. The persona prompt ("Your eyes") tells the
+        model to treat the parenthetical as its own perception, not user text.
+        """
+        note, images = self._look(text)
+        if not (note or images):
+            return messages
+        last = dict(messages[-1])
+        if note:
+            last["content"] = (
+                f"{last['content']}\n\n"
+                f"(Right now, through your camera, you can see: {note}.)"
+            )
+        if images:
+            last["images"] = images  # THIS turn only — not stored in history
+        return [*messages[:-1], last]
 
     # -- long-term memory ---------------------------------------------------
     def _maybe_remember(self, text: str) -> None:

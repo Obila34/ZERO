@@ -131,9 +131,15 @@ vision:
   # raw-image understanding. Verify with: ollama show <model> (look for "vision").
   multimodal: true
 
-  max_items: 10              # most objects mentioned in one scene description
+  max_items: 10              # most objects named in the detector HINT (counts only)
   detect_interval_s: 0.0    # min seconds between detections (0 = as fast as the
                             # Pi CPU allows; raise to cap CPU/heat, e.g. 0.2 = ~5/s)
+
+  # On a visual turn ZERO hands the multimodal LLM a few RECENT frames (not one
+  # frozen pose) so it can see motion/action — a raised hand, someone mid-turn.
+  frames_per_look: 2        # keyframes sent per visual turn (2-3 shows motion; 1 =
+                            # single frame). Each is a small JPEG over the tunnel.
+  look_window_s: 1.0        # sample those frames from roughly the last N seconds.
 
   camera:
     index: 0                # /dev/video0 (the Brio webcam doubles as mic + camera)
@@ -179,7 +185,10 @@ vision:
       - teddy bear
 
   color:
-    top_n: 5                # only name the N largest boxes (color is the costly bit)
+    top_n: 0                # 0 = skip pixel color-naming entirely. The multimodal
+                            # LLM reads real colors off the frame, and pixel-sampled
+                            # names ("blue person") were the clinical-sounding source.
+                            # Raise only if you run text-only (no keyframes to the LLM).
     center_crop: 0.6
     min_saturation: 50
     min_value: 40
@@ -188,10 +197,12 @@ vision:
     min_pixels: 50
 
   gpu:
-    # Grounded distance + bearing come from the GPU vision server (Depth Anything
-    # V2), reached over the SAME SSH tunnel as Whisper/Orpheus — just add
-    # -L 8000:localhost:8000. Disable to run eyes fully local (no distances).
-    enabled: true
+    # Grounded distance + bearing from the GPU vision server (Depth Anything V2).
+    # OFF by default now: distances/bearings read as clinical and are no longer on
+    # the speech path — the multimodal LLM sees position straight from the frames.
+    # The server code stays in server/vision/ for optional/experimental use; flip
+    # this back on only if you deliberately want depth facts again.
+    enabled: false
     url: http://127.0.0.1:8000
     health_path: /health
     facts_path: /facts

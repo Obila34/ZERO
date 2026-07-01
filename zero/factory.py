@@ -197,6 +197,8 @@ def build_vision(cfg: Config):
         multimodal=cfg.get("vision.multimodal", False),
         jpeg_quality=cfg.get("vision.gpu.jpeg_quality", 80),
         detect_interval_s=cfg.get("vision.detect_interval_s", 0.0),
+        frames_per_look=cfg.get("vision.frames_per_look", 2),
+        look_window_s=cfg.get("vision.look_window_s", 1.0),
     )
 
 

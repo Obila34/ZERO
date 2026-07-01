@@ -8,11 +8,12 @@ so there is no camera spin-up or detection latency on the critical path.
 
 Per turn the orchestrator calls:
 
-* ``local_context()`` — instant, GPU-free "in view: ..." line for ambient
+* ``local_context()`` — instant, GPU-free hint ("3 people, a cup") for ambient
   awareness, safe to attach to every turn.
-* ``visual_context(question)`` — snapshot + (optionally) GPU depth/bearing facts
-  + the keyframe JPEG for a multimodal LLM. Used on visual turns. Degrades to the
-  local detections if the GPU/tunnel is down.
+* ``visual_context(question)`` — the same detector hint plus 2-3 recent keyframes
+  for the multimodal LLM to actually *see*. The model reads real colors, actions
+  and positions off the frames; the hint only stops it undercounting. No depth /
+  bearing / coordinate facts reach the speech path — those read as clinical.
 
 cv2/numpy/onnxruntime are only touched once ``start()`` runs, so importing this
 module is cheap and safe on a node without them.
@@ -22,7 +23,7 @@ from __future__ import annotations
 import base64
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 from zero.utils.logging import get_logger
@@ -39,9 +40,8 @@ log = get_logger("vision.eyes")
 @dataclass
 class VisualContext:
     """What the orchestrator injects into a turn."""
-    text: str = ""               # grounded/local description for the prompt
-    image_b64: Optional[str] = None  # keyframe JPEG (only when multimodal + visual)
-    grounded: bool = False       # True if GPU depth/bearing facts were used
+    text: str = ""                       # detector hint ("3 people, a cup")
+    images: list[str] = field(default_factory=list)  # recent keyframe JPEGs (b64)
 
 
 class Eyes:
@@ -49,7 +49,8 @@ class Eyes:
                  color_namer: ColorNamer, client: Optional[VisionClient] = None,
                  *, color_top_n: int = 5, max_items: int = 6,
                  use_gpu: bool = True, multimodal: bool = False,
-                 jpeg_quality: int = 80, detect_interval_s: float = 0.0):
+                 jpeg_quality: int = 80, detect_interval_s: float = 0.0,
+                 frames_per_look: int = 2, look_window_s: float = 1.0):
         self._camera = camera
         self._detector = detector
         self._color = color_namer
@@ -60,6 +61,8 @@ class Eyes:
         self._multimodal = bool(multimodal)
         self._jpeg_quality = int(jpeg_quality)
         self._detect_interval = float(detect_interval_s)
+        self._frames_per_look = max(1, int(frames_per_look))
+        self._look_window_s = float(look_window_s)
 
         self._scene = SceneState()
         self._thread: Optional[threading.Thread] = None
@@ -126,38 +129,26 @@ class Eyes:
 
     # ── per-turn context ─────────────────────────────────────────────────────
     def local_context(self) -> str:
-        """Instant, GPU-free 'in view: ...' line (or '' if nothing/never ran)."""
+        """Instant, GPU-free detector hint ('3 people, a cup'), or '' if empty."""
         snap = self._scene.snapshot()
-        return phrasing.local_summary(snap.detections, self._max_items)
+        return phrasing.detector_hint(snap.detections, self._max_items)
 
     def visual_context(self, question: str = "") -> VisualContext:
-        """Build grounded context for a visual turn: GPU facts + keyframe.
+        """Context for a visual turn: the detector hint + a few recent keyframes.
 
-        Falls back to the local detection summary if the GPU is down or there is
-        no usable frame yet.
+        The frames let the multimodal LLM see real colors, actions and layout;
+        the hint just keeps it from undercounting. No GPU depth/bearing facts —
+        those read as clinical and are no longer on the speech path.
         """
         snap = self._scene.snapshot()
-        image_b64 = None
-        if self._multimodal and snap.frame_rgb is not None:
-            image_b64 = self._encode(snap.frame_rgb)
-
-        # Try grounded depth/bearing facts from the GPU.
-        if self._client is not None and self._use_gpu and snap.frame_rgb is not None:
-            try:
-                facts = self._client.get_facts(snap.frame_rgb, snap.detections,
-                                               question=question)
-                self._gpu_ok = True
-                line = phrasing.facts_line(facts, self._max_items)
-                if line:
-                    return VisualContext(text=line, image_b64=image_b64, grounded=True)
-            except RuntimeError as e:
-                self._gpu_ok = False
-                log.warning("GPU facts failed, using local detections: %s", e)
-
-        # Local fallback: detections + colors, no distance.
+        images: list[str] = []
+        if self._multimodal:
+            frames = self._scene.recent_frames(self._frames_per_look,
+                                               self._look_window_s)
+            images = [b for b in (self._encode(f) for f in frames) if b]
         return VisualContext(
-            text=phrasing.local_summary(snap.detections, self._max_items),
-            image_b64=image_b64, grounded=False,
+            text=phrasing.detector_hint(snap.detections, self._max_items),
+            images=images,
         )
 
     def _encode(self, frame_rgb) -> Optional[str]:
