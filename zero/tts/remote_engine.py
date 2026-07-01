@@ -68,14 +68,20 @@ class RemoteTTS(TTS):
             log.error("remote TTS stream failed (server/tunnel up?): %s", e)
             return
         leftover = b""
-        for raw in resp.iter_content(chunk_size=8192):
-            if not raw:
-                continue
-            buf = leftover + raw
-            n = len(buf) - (len(buf) % 2)  # whole int16 samples only
-            leftover = buf[n:]
-            if n:
-                yield np.frombuffer(buf[:n], dtype=np.int16).astype(np.float32) / 32768.0
+        try:
+            for raw in resp.iter_content(chunk_size=8192):
+                if not raw:
+                    continue
+                buf = leftover + raw
+                n = len(buf) - (len(buf) % 2)  # whole int16 samples only
+                leftover = buf[n:]
+                if n:
+                    yield np.frombuffer(buf[:n], dtype=np.int16).astype(np.float32) / 32768.0
+        except requests.RequestException as e:
+            # The stream can drop mid-reply (server hiccup / tunnel blip). Stop
+            # cleanly so the producer thread doesn't crash and hang the turn.
+            log.error("remote TTS stream dropped mid-reply: %s", e)
+            return
 
     def synthesize(self, text: str) -> np.ndarray:
         text = _to_orpheus(text)
