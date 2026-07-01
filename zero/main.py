@@ -208,7 +208,8 @@ class Zero:
     # Stop phrases that end the conversation and return to wake-word mode.
     _STOP_PHRASES = (
         "goodbye", "good bye", "go to sleep", "stop listening", "stop talking",
-        "that's all", "thats all", "see you later", "bye zero", "shut down",
+        "that's all", "thats all", "see you later", "bye zero", "bye jarvis",
+        "bye for now", "talk later", "shut down",
     )
 
     def _is_stop(self, text: str) -> bool:
