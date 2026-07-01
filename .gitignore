@@ -27,3 +27,4 @@ debug_*.wav
 # Voiceprint profile (per-device)
 voiceprint.npy
 *.npy
+!yolo11s.onnx
