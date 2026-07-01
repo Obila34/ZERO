@@ -6,6 +6,20 @@ server:
   port: 8000                # GPU-side port (right side of the ssh -L forward)
   log_level: info
 
+# ── Streaming perception (continuous YOLO + tracking on the GPU) ────────────
+# The Pi streams frames to /ingest; this runs the detector+tracker every frame on
+# the GPU and keeps a live scene. Use a big model here — the GPU can handle it.
+stream:
+  model: yolo11l.pt         # l = good speed/accuracy on a GPU; yolo11x.pt for max.
+                            # Ultralytics auto-downloads the weights on first run.
+  device: "0"               # CUDA device id (or "cpu"). Keep it OFF the Pi.
+  tracker: bytetrack.yaml   # object permanence across frames (track ids)
+  confidence: 0.35
+  iou: 0.45
+  imgsz: 640
+  color_top_n: 6            # HSV-name only the N largest boxes per frame (cost)
+  classes: []               # [] = all 80 COCO classes; or a subset to focus
+
 # ── CP4: monocular depth (Depth Anything V2) ───────────────────────────────
 depth:
   # Default is a METRIC indoor checkpoint, so per-object medians come out in

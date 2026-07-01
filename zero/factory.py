@@ -185,10 +185,16 @@ def build_vision(cfg: Config):
             url=cfg.get("vision.gpu.url", "http://127.0.0.1:8000"),
             health_path=cfg.get("vision.gpu.health_path", "/health"),
             facts_path=cfg.get("vision.gpu.facts_path", "/facts"),
+            ingest_path=cfg.get("vision.gpu.ingest_path", "/ingest"),
             health_timeout_s=cfg.get("vision.gpu.health_timeout_s", 5.0),
             facts_timeout_s=cfg.get("vision.gpu.facts_timeout_s", 15.0),
+            ingest_timeout_s=cfg.get("vision.gpu.ingest_timeout_s", 10.0),
             jpeg_quality=cfg.get("vision.gpu.jpeg_quality", 80),
         )
+    mode = cfg.get("vision.mode", "local")
+    if mode == "stream" and client is None:
+        log.warning("vision.mode=stream needs vision.gpu.enabled — falling back to local")
+        mode = "local"
     return Eyes(
         cam, detector, namer, client,
         color_top_n=cfg.get("vision.color.top_n", 5),
@@ -197,6 +203,8 @@ def build_vision(cfg: Config):
         multimodal=cfg.get("vision.multimodal", False),
         jpeg_quality=cfg.get("vision.gpu.jpeg_quality", 80),
         detect_interval_s=cfg.get("vision.detect_interval_s", 0.0),
+        mode=mode,
+        stream_fps=cfg.get("vision.stream_fps", 10.0),
     )
 
 

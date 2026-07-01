@@ -32,15 +32,19 @@ try:
     from depth.depth_anything import DepthEstimator
     from facts.intrinsics import Intrinsics, load_intrinsics
     from facts.spatial import to_scene_facts
-    from shared.schemas import AnalyzeRequest, AnalyzeResponse
+    from shared.schemas import (AnalyzeRequest, AnalyzeResponse, IngestRequest,
+                                SceneResponse)
+    from stream import LiveDetector, LiveScene
     from vlm.model import VLM
 except ImportError:  # pragma: no cover - import path fallback
-    from server.config import load_config
-    from server.depth.depth_anything import DepthEstimator
-    from server.facts.intrinsics import Intrinsics, load_intrinsics
-    from server.facts.spatial import to_scene_facts
-    from server.shared.schemas import AnalyzeRequest, AnalyzeResponse
-    from server.vlm.model import VLM
+    from server.vision.config import load_config
+    from server.vision.depth.depth_anything import DepthEstimator
+    from server.vision.facts.intrinsics import Intrinsics, load_intrinsics
+    from server.vision.facts.spatial import to_scene_facts
+    from server.vision.shared.schemas import (AnalyzeRequest, AnalyzeResponse,
+                                              IngestRequest, SceneResponse)
+    from server.vision.stream import LiveDetector, LiveScene
+    from server.vision.vlm.model import VLM
 
 import cv2
 from fastapi import FastAPI, HTTPException
@@ -55,6 +59,8 @@ app = FastAPI(title="Zero Vision GPU service", version="0.5-cp5")
 # the first /analyze call. Both are cached for the process lifetime.
 _DEPTH: Optional[DepthEstimator] = None
 _VLM: Optional[VLM] = None
+_LIVE_DETECTOR: Optional[LiveDetector] = None
+_LIVE_SCENE = LiveScene()  # always-fresh scene from the streamed video
 
 
 def _depth() -> DepthEstimator:
@@ -62,6 +68,13 @@ def _depth() -> DepthEstimator:
     if _DEPTH is None:
         _DEPTH = DepthEstimator(CONFIG)
     return _DEPTH
+
+
+def _live_detector() -> LiveDetector:
+    global _LIVE_DETECTOR
+    if _LIVE_DETECTOR is None:
+        _LIVE_DETECTOR = LiveDetector(CONFIG)
+    return _LIVE_DETECTOR
 
 
 def _vlm() -> VLM:
@@ -136,6 +149,36 @@ def _save_depth_debug(depth_map: np.ndarray) -> None:
 def health() -> dict:
     gpu, vram_gb = gpu_status()
     return {"status": "ok", "gpu": gpu, "vram_gb": vram_gb}
+
+
+@app.post("/ingest", response_model=SceneResponse)
+def ingest(req: IngestRequest) -> SceneResponse:
+    """Continuous streaming perception: one video frame in -> current scene out.
+
+    Runs YOLO + tracker on the GPU (fast) and updates the live scene, returning
+    the tracked detections so the Pi always holds a fresh view. Depth is only run
+    when ``want_facts`` is set (it's the expensive step), so the stream stays fast.
+    """
+    frame = _decode_frame(req.image_jpeg_b64)
+    detections = _live_detector().track(frame)
+    _LIVE_SCENE.update(detections, frame_bgr=frame)
+
+    facts = []
+    if req.want_facts and detections:
+        height, width = frame.shape[:2]
+        depth_map = _depth().estimate(frame)
+        intrinsics = _intrinsics_for(width, height)
+        facts = to_scene_facts(frame, detections, depth_map, intrinsics,
+                               CONFIG.get("facts", {}))
+    _dets, _frame, idx, age = _LIVE_SCENE.snapshot()
+    return SceneResponse(detections=detections, facts=facts, frame_index=idx, age_s=age)
+
+
+@app.get("/scene", response_model=SceneResponse)
+def scene() -> SceneResponse:
+    """The current live scene (no new frame) — what the GPU is seeing right now."""
+    dets, _frame, idx, age = _LIVE_SCENE.snapshot()
+    return SceneResponse(detections=dets, facts=[], frame_index=idx, age_s=age)
 
 
 def _compute_facts(req: AnalyzeRequest):

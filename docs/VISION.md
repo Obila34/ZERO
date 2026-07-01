@@ -114,3 +114,44 @@ FOV fallback until you copy a real `intrinsics.json` next to `server/vision/`
 > **Never `pip install torch`/`ultralytics` on the Pi.** On ARM they pull in the
 > full NVIDIA CUDA stack (cuBLAS, cuDNN, NCCL, … ~2 GB) that the Pi can't use and
 > will fill the SD card. Detection is ONNX-only on the Pi by design.
+
+## Streaming perception (continuous, GPU) — "the human eye"
+
+By default vision runs **local** (YOLO11n/s on the Pi CPU). For continuous,
+high-accuracy perception, switch to **stream** mode: the Pi pushes video frames to
+the GPU, which runs a big **YOLO11l/x + ByteTrack tracker** on every frame and
+keeps a live scene. Because detection is continuous on the GPU, the scene is always
+fresh — vision is zero-latency on the conversation's critical path (the eyes are
+already open when you ask).
+
+```
+Pi: camera -> JPEG -> POST /ingest (10 fps) -> stores the returned scene
+GPU: /ingest -> YOLO11l + tracker (persistent ids) -> live scene ; depth on demand (/facts)
+```
+
+Tracking gives **object permanence** (stable ids across frames) — the basis for
+"someone just walked in" events later.
+
+### Enable it
+GPU (`server/vision/`): `pip install -r requirements.txt` now also pulls
+`ultralytics` + `lap`. Pick the model in `server/vision/config.yaml → stream.model`
+(`yolo11l.pt` default, `yolo11x.pt` for max). It auto-downloads on first frame and
+runs on `stream.device` (CUDA `"0"`). Restart the vision server.
+
+Pi (`config.local.yaml`):
+```yaml
+vision:
+  enabled: true
+  mode: stream          # was local
+  stream_fps: 10        # frames/sec pushed to the GPU
+  camera: { index: 0 }
+```
+
+The Pi no longer needs the local YOLO in stream mode, but keeps it as an automatic
+**fallback**: if the stream drops, it falls back to local nano detection so it's
+never fully blind. Distances still come from the GPU depth model (`/facts`) on
+visual turns.
+
+> GPU load: `yolo11l` at ~10 fps is light next to Gemma/Whisper/Orpheus. If you see
+> the other services stutter (e.g. Orpheus timeouts), lower `stream_fps`, use
+> `yolo11l` (not `x`), or focus `stream.classes` to fewer objects.

@@ -31,6 +31,18 @@ class Detection(BaseModel):
     color: Optional[str] = Field(
         None, description="Dominant color word from HSV naming (CP1), if known."
     )
+    track_id: Optional[int] = Field(
+        None, description="Persistent tracker id across frames (object permanence)."
+    )
+
+
+class IngestRequest(BaseModel):
+    """Pi -> GPU: one streamed video frame for continuous perception."""
+
+    image_jpeg_b64: str = Field(..., description="JPEG-encoded frame, base64.")
+    want_facts: bool = Field(
+        False, description="Also run depth on this frame and return distances."
+    )
 
 
 class AnalyzeRequest(BaseModel):
@@ -63,6 +75,15 @@ class AnalyzeResponse(BaseModel):
 
     facts: list[SceneFact] = Field(default_factory=list)
     reply: str = Field(..., description="Sentence the Pi speaks via Piper TTS.")
+
+
+class SceneResponse(BaseModel):
+    """GPU -> Pi: the current live scene from the streaming detector/tracker."""
+
+    detections: list[Detection] = Field(default_factory=list)
+    facts: list[SceneFact] = Field(default_factory=list)
+    frame_index: int = 0
+    age_s: float = 0.0
 
 
 if __name__ == "__main__":

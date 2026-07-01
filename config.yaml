@@ -131,9 +131,17 @@ vision:
   # raw-image understanding. Verify with: ollama show <model> (look for "vision").
   multimodal: false
 
+  # How perception runs:
+  #   local  — YOLO on the Pi CPU (offline, always works, limited to nano/small).
+  #   stream — the Pi streams video to the GPU, which runs a big YOLO11l/x + tracker
+  #            continuously and returns the live scene. Faster/accurate, needs the
+  #            tunnel + the GPU vision server. Falls back to local if the stream drops.
+  mode: local
+  stream_fps: 10            # (stream mode) frames/sec pushed to the GPU
+
   max_items: 6              # most objects mentioned in one scene description
-  detect_interval_s: 0.0    # min seconds between detections (0 = as fast as the
-                            # Pi CPU allows; raise to cap CPU/heat, e.g. 0.2 = ~5/s)
+  detect_interval_s: 0.0    # (local mode) min seconds between detections (0 = as fast
+                            # as the Pi CPU allows; raise to cap CPU/heat, e.g. 0.2 = ~5/s)
 
   camera:
     index: 0                # /dev/video0 (the Brio webcam doubles as mic + camera)

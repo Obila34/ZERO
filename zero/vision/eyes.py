@@ -45,11 +45,12 @@ class VisualContext:
 
 
 class Eyes:
-    def __init__(self, camera: CameraStream, detector: Detector,
-                 color_namer: ColorNamer, client: Optional[VisionClient] = None,
+    def __init__(self, camera: CameraStream, detector: Optional[Detector],
+                 color_namer: Optional[ColorNamer], client: Optional[VisionClient] = None,
                  *, color_top_n: int = 5, max_items: int = 6,
                  use_gpu: bool = True, multimodal: bool = False,
-                 jpeg_quality: int = 80, detect_interval_s: float = 0.0):
+                 jpeg_quality: int = 80, detect_interval_s: float = 0.0,
+                 mode: str = "local", stream_fps: float = 10.0):
         self._camera = camera
         self._detector = detector
         self._color = color_namer
@@ -60,6 +61,10 @@ class Eyes:
         self._multimodal = bool(multimodal)
         self._jpeg_quality = int(jpeg_quality)
         self._detect_interval = float(detect_interval_s)
+        # "local": YOLO on the Pi. "stream": push frames to the GPU which runs the
+        # big YOLO+tracker continuously and returns the live scene.
+        self._mode = str(mode)
+        self._stream_period = 1.0 / stream_fps if stream_fps > 0 else 0.0
 
         self._scene = SceneState()
         self._thread: Optional[threading.Thread] = None
@@ -98,6 +103,12 @@ class Eyes:
             frame = self._camera.read_new(timeout=1.0)
             if frame is None:
                 continue
+            if self._mode == "stream":
+                self._perceive_stream(frame)
+                if self._stream_period > 0:
+                    time.sleep(self._stream_period)
+                continue
+            # ── local mode: YOLO on the Pi ──
             detections: list = []
             try:
                 detections = self._detector.detect(frame)
@@ -112,7 +123,33 @@ class Eyes:
             if self._detect_interval > 0:
                 time.sleep(self._detect_interval)
 
+    def _perceive_stream(self, frame) -> None:
+        """Stream mode: push the frame to the GPU, store the tracked scene it
+        returns. The GPU runs the big YOLO+tracker; the Pi just captures/uploads."""
+        try:
+            resp = self._client.ingest(frame, want_facts=False)
+            self._scene.update(list(resp.detections), frame_rgb=frame)
+            self._gpu_ok = True
+        except RuntimeError as e:
+            self._stream_errors = getattr(self, "_stream_errors", 0) + 1
+            if self._stream_errors <= 3 or self._stream_errors % 50 == 0:
+                log.warning("stream ingest failed (x%d): %s", self._stream_errors, e)
+            self._gpu_ok = False
+            # Fall back to local detection if we have a detector, so a dropped
+            # stream doesn't blind ZERO entirely.
+            if self._detector is not None:
+                try:
+                    dets = self._detector.detect(frame)
+                    self._fill_colors(frame, dets)
+                    self._scene.update(dets, frame_rgb=frame)
+                    return
+                except Exception:
+                    pass
+            self._scene.update([], frame_rgb=frame)
+
     def _fill_colors(self, frame_rgb, detections) -> None:
+        if self._color is None:
+            return
         # Only name the N largest boxes — color is the costly per-object step.
         ordered = sorted(
             detections,

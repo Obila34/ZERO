@@ -5,6 +5,12 @@ uvicorn[standard]>=0.29
 pydantic>=2.6
 pyyaml>=6.0
 
+# ── Streaming perception: continuous YOLO + tracking on the GPU ─────────────
+# Big model (yolo11l/x) runs on the GPU via /ingest. On the GPU box ultralytics
+# pulling torch is fine (unlike the Pi). bytetrack tracker ships with ultralytics.
+ultralytics>=8.3.0
+lap>=0.5.12             # linear-assignment backend the tracker uses
+
 # ── CP4: depth + scene facts ───────────────────────────────────────────────
 # Install the CUDA torch build matching your driver from https://pytorch.org
 # (plain `torch` pulls CPU-only wheels — they work but are slow).

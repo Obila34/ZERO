@@ -14,7 +14,8 @@ import base64
 import requests
 
 from zero.utils.logging import get_logger
-from zero.vision.schemas import AnalyzeRequest, AnalyzeResponse, Detection, SceneFact
+from zero.vision.schemas import (AnalyzeRequest, AnalyzeResponse, Detection,
+                                 IngestRequest, SceneResponse, SceneFact)
 
 log = get_logger("vision.client")
 
@@ -22,13 +23,16 @@ log = get_logger("vision.client")
 class VisionClient:
     def __init__(self, url: str = "http://127.0.0.1:8000",
                  health_path: str = "/health", facts_path: str = "/facts",
+                 ingest_path: str = "/ingest",
                  health_timeout_s: float = 5.0, facts_timeout_s: float = 15.0,
-                 jpeg_quality: int = 80):
+                 ingest_timeout_s: float = 10.0, jpeg_quality: int = 80):
         self.base = url.rstrip("/")
         self.health_path = health_path
         self.facts_path = facts_path
+        self.ingest_path = ingest_path
         self.health_timeout = float(health_timeout_s)
         self.facts_timeout = float(facts_timeout_s)
+        self.ingest_timeout = float(ingest_timeout_s)
         self.jpeg_quality = int(jpeg_quality)
 
     def check_health(self) -> dict:
@@ -76,3 +80,20 @@ class VisionClient:
         except ValueError as exc:
             raise RuntimeError(f"GPU /facts returned an unparseable body: {exc}") from exc
         return parsed.facts
+
+    def ingest(self, frame_rgb, want_facts: bool = False) -> SceneResponse:
+        """Stream one frame to ``/ingest``; get back the current live scene
+        (tracked detections + colors, and distances if ``want_facts``)."""
+        url = self.base + self.ingest_path
+        request = IngestRequest(
+            image_jpeg_b64=self._encode_frame_rgb(frame_rgb), want_facts=want_facts,
+        )
+        try:
+            resp = requests.post(url, json=request.model_dump(),
+                                 timeout=self.ingest_timeout)
+            resp.raise_for_status()
+            return SceneResponse.model_validate(resp.json())
+        except requests.RequestException as exc:
+            raise RuntimeError(f"GPU /ingest request to {url} failed ({exc}).") from exc
+        except ValueError as exc:
+            raise RuntimeError(f"GPU /ingest returned an unparseable body: {exc}") from exc
