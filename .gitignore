@@ -28,3 +28,6 @@ debug_*.wav
 voiceprint.npy
 *.npy
 !yolo11s.onnx
+
+# YOLO source weights (build artifacts; we ship the exported .onnx only)
+*.pt
