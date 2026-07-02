@@ -163,6 +163,20 @@ def build_vision(cfg: Config):
         mjpg=cfg.get("vision.camera.mjpg", True),
     )
     model_path = cfg.resolve_path("vision.detect.model_path", "yolo11n.onnx")
+    # Optional explicit open-vocabulary names file; otherwise the detector
+    # auto-loads a sibling "<model>.names.json" or falls back to COCO-80.
+    names = None
+    names_cfg = cfg.get("vision.detect.names_path")
+    if names_cfg:
+        import json
+
+        names_path = cfg.resolve_path("vision.detect.names_path", names_cfg)
+        try:
+            names = json.loads(Path(names_path).read_text(encoding="utf-8"))
+            log.info("open-vocab names loaded (%d) from %s", len(names), names_path)
+        except (ValueError, OSError) as e:
+            log.warning("could not load names_path %s — using model default: %s",
+                        names_path, e)
     detector = Detector(
         model_path=str(model_path),
         confidence=cfg.get("vision.detect.confidence", 0.35),
@@ -170,6 +184,7 @@ def build_vision(cfg: Config):
         device=cfg.get("vision.detect.device", "cpu"),
         imgsz=cfg.get("vision.detect.imgsz", 640),
         classes=cfg.get("vision.detect.classes"),
+        names=names,
     )
     namer = ColorNamer(
         center_crop=cfg.get("vision.color.center_crop", 0.6),
@@ -185,8 +200,10 @@ def build_vision(cfg: Config):
             url=cfg.get("vision.gpu.url", "http://127.0.0.1:8000"),
             health_path=cfg.get("vision.gpu.health_path", "/health"),
             facts_path=cfg.get("vision.gpu.facts_path", "/facts"),
+            analyze_path=cfg.get("vision.gpu.analyze_path", "/analyze"),
             health_timeout_s=cfg.get("vision.gpu.health_timeout_s", 5.0),
             facts_timeout_s=cfg.get("vision.gpu.facts_timeout_s", 15.0),
+            analyze_timeout_s=cfg.get("vision.gpu.analyze_timeout_s", 30.0),
             jpeg_quality=cfg.get("vision.gpu.jpeg_quality", 80),
         )
     return Eyes(
@@ -199,6 +216,7 @@ def build_vision(cfg: Config):
         detect_interval_s=cfg.get("vision.detect_interval_s", 0.0),
         frames_per_look=cfg.get("vision.frames_per_look", 2),
         look_window_s=cfg.get("vision.look_window_s", 1.0),
+        vlm_fallback=cfg.get("vision.gpu.vlm_fallback", False),
     )
 
 

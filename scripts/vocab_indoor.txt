@@ -1,0 +1,215 @@
+# Open-vocabulary prompt list for a YOLO-World export (Option 2).
+# One object name (or short phrase) per line; '#' starts a comment.
+# Feed to: python scripts/export_yolo_onnx.py yolov8s-worldv2.pt 640 --vocab scripts/vocab_indoor.txt
+#
+# This is a starting household/office vocabulary — edit freely. Every line here
+# becomes a nameable class; keep it to a few hundred words for good accuracy.
+
+# People & pets
+person
+child
+baby
+dog
+cat
+
+# Seating & furniture
+chair
+office chair
+armchair
+couch
+stool
+bench
+table
+desk
+coffee table
+dining table
+shelf
+bookshelf
+cabinet
+drawer
+wardrobe
+bed
+mattress
+pillow
+blanket
+curtain
+rug
+mirror
+picture frame
+clock
+lamp
+floor lamp
+ceiling fan
+
+# Kitchen & dining
+cup
+mug
+glass
+water bottle
+wine glass
+plate
+bowl
+fork
+knife
+spoon
+pot
+pan
+kettle
+teapot
+coffee maker
+blender
+toaster
+microwave
+oven
+stove
+refrigerator
+dishwasher
+sink
+cutting board
+jar
+can
+food container
+
+# Food & drink
+banana
+apple
+orange
+lemon
+tomato
+bread
+sandwich
+pizza
+cake
+donut
+egg
+bottle of water
+soda can
+coffee
+
+# Electronics & office
+laptop
+desktop computer
+computer monitor
+keyboard
+mouse
+cell phone
+smartphone
+tablet
+television
+remote control
+speaker
+headphones
+earbuds
+camera
+webcam
+microphone
+router
+power strip
+charger
+cable
+usb drive
+hard drive
+printer
+game controller
+smart watch
+calculator
+
+# Stationery & books
+book
+notebook
+magazine
+newspaper
+pen
+pencil
+marker
+scissors
+stapler
+tape
+folder
+envelope
+sticky note
+ruler
+eraser
+paper
+whiteboard
+
+# Bags & wearables
+backpack
+handbag
+purse
+suitcase
+wallet
+umbrella
+hat
+cap
+glasses
+sunglasses
+watch
+shoe
+sneaker
+boot
+sock
+jacket
+shirt
+scarf
+glove
+tie
+belt
+
+# Bathroom & personal
+toothbrush
+toothpaste
+soap
+shampoo
+towel
+hairbrush
+comb
+razor
+hair dryer
+tissue box
+toilet paper
+lotion
+medicine bottle
+
+# Tools & household
+hammer
+screwdriver
+wrench
+pliers
+drill
+tape measure
+flashlight
+battery
+light bulb
+key
+lock
+broom
+mop
+bucket
+trash can
+box
+basket
+candle
+matches
+lighter
+
+# Plants & decor
+potted plant
+flower
+vase
+succulent
+cactus
+
+# Toys & misc
+teddy bear
+doll
+toy car
+ball
+board game
+puzzle
+guitar
+ukulele
+keyboard piano
+skateboard
+bicycle
+helmet

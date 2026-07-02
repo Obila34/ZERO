@@ -28,6 +28,10 @@ debug_*.wav
 voiceprint.npy
 *.npy
 !yolo11s.onnx
+# ...and the open-vocabulary YOLO-World export (built via
+# scripts/export_yolo_onnx.py --vocab). Its .names.json is tracked too (not
+# matched by any ignore rule) so class ids map back to words on the Pi.
+!yolov8s-worldv2.onnx
 
 # YOLO source weights (build artifacts; we ship the exported .onnx only)
 *.pt

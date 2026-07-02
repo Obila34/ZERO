@@ -95,13 +95,41 @@ GPU_HOST=user@gpu-box bash scripts/pi_tunnel.sh
 Then `python -m zero.main` and say "Hey Jarvis". For always-on across reboots,
 use the units in [`scripts/systemd/`](../scripts/systemd/README.md).
 
+## Identifying more objects
+
+There are three levers, in increasing ambition:
+
+1. **See all 80 COCO classes.** Set `vision.detect.classes: []` (empty = keep all)
+   and point `model_path` at `yolo11s.onnx` — bigger than `yolo11n`, better on
+   small/cluttered objects, same 80-word vocabulary. Both are the defaults now.
+2. **Open vocabulary (YOLO-World) — name *arbitrary* objects.** Export a
+   YOLO-World checkpoint with your own prompt list; the class ids then index into
+   *your* words instead of COCO-80:
+   ```bash
+   pip install ultralytics onnx clip
+   python scripts/export_yolo_onnx.py yolov8s-worldv2.pt 640 \
+       --vocab scripts/vocab_indoor.txt
+   # -> yolov8s-worldv2.onnx  +  yolov8s-worldv2.names.json
+   ```
+   Point `vision.detect.model_path` at the new `.onnx`. The detector auto-loads
+   the sibling `.names.json` (no torch on the Pi), so ids map back to words.
+   Edit [`scripts/vocab_indoor.txt`](../scripts/vocab_indoor.txt) to taste.
+3. **Long-tail via the GPU VLM.** For anything even an open vocab misses, the
+   Qwen2-VL server (`server/vision/vlm/`) can describe the frame in free text. If
+   your main LLM is multimodal it already does this from the keyframes. If it is
+   *not* (`multimodal: false`), set `vision.gpu.enabled: true` and
+   `vision.gpu.vlm_fallback: true`: visual turns then call `/analyze` so ZERO can
+   still name objects it has no detector class for.
+
 ## Config
 
 Everything is under `vision:` in [`config.yaml`](../config.yaml): enable flag,
-`multimodal`, camera geometry, the YOLO class list, color thresholds, and the GPU
-endpoint. Accuracy of distances depends on camera intrinsics — the server uses a
-FOV fallback until you copy a real `intrinsics.json` next to `server/vision/`
-(see the calibration script in the original Zero_Vision project).
+`multimodal`, camera geometry, the YOLO class list (`classes: []` = all;
+`names_path` for an open-vocab export), color thresholds, and the GPU endpoint
+(`analyze_path` + `vlm_fallback` for the VLM long-tail). Accuracy of distances
+depends on camera intrinsics — the server uses a FOV fallback until you copy a
+real `intrinsics.json` next to `server/vision/` (see the calibration script in
+the original Zero_Vision project).
 
 ## Tuning latency
 

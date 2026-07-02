@@ -11,6 +11,8 @@ None for ``ColorNamer`` to fill. cv2/numpy/onnxruntime are imported lazily.
 """
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Optional
 
 from zero.utils.logging import get_logger
@@ -18,6 +20,27 @@ from zero.vision.coco import COCO_NAMES
 from zero.vision.schemas import Detection
 
 log = get_logger("vision.detect")
+
+
+def _sidecar_names(model_path: str) -> Optional[list[str]]:
+    """Load class names from a sibling ``<model>.names.json``, if present.
+
+    An open-vocabulary (YOLO-World) export writes this file so the ONNX graph's
+    integer class ids map back to the prompt words — see
+    ``scripts/export_yolo_onnx.py``. Returns None for a plain COCO model.
+    """
+    sidecar = Path(model_path).with_suffix("").with_suffix(".names.json")
+    if not sidecar.exists():
+        return None
+    try:
+        names = json.loads(sidecar.read_text(encoding="utf-8"))
+    except (ValueError, OSError) as exc:
+        log.warning("ignoring bad names sidecar %s: %s", sidecar, exc)
+        return None
+    if isinstance(names, list) and names:
+        log.info("open-vocab names loaded (%d classes) from %s", len(names), sidecar)
+        return [str(n) for n in names]
+    return None
 
 
 class Detector:
@@ -31,7 +54,10 @@ class Detector:
         self._device = str(device)
         self._imgsz = int(imgsz)
         self._wanted = {str(c).lower() for c in (classes or [])}
-        self._names = list(names) if names else COCO_NAMES
+        # Names precedence: explicit arg > sibling .names.json (open-vocab export)
+        # > the built-in COCO-80 list.
+        self._names = (list(names) if names
+                       else _sidecar_names(self._model_path) or COCO_NAMES)
         self._session = None
         self._input_name = None
 

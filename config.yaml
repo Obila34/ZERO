@@ -131,7 +131,7 @@ vision:
   # raw-image understanding. Verify with: ollama show <model> (look for "vision").
   multimodal: true
 
-  max_items: 10              # most objects named in the detector HINT (counts only)
+  max_items: 15              # most objects named in the detector HINT (counts only)
   detect_interval_s: 0.0    # min seconds between detections (0 = as fast as the
                             # Pi CPU allows; raise to cap CPU/heat, e.g. 0.2 = ~5/s)
 
@@ -151,38 +151,25 @@ vision:
                             # MJPG fixes it. Set false only if your camera lacks MJPG.
 
   detect:
-    model_path: yolo11n.onnx  # ONNX (NMS baked in) — runs on onnxruntime, NO torch
+    # yolo11s is markedly more accurate than yolo11n on small/cluttered objects —
+    # same COCO-80 vocabulary, but detects more of them, more reliably. Swap back
+    # to yolo11n.onnx if the Pi CPU can't keep up.
+    model_path: yolo11s.onnx  # ONNX (NMS baked in) — runs on onnxruntime, NO torch
     confidence: 0.35
     iou: 0.45               # informational: NMS is already inside the ONNX graph
     device: cpu             # 'cpu' (Pi) | 'cuda' (onnxruntime CUDA EP, if present)
     imgsz: 640              # must match what export_yolo_onnx.py used
-    classes:                # COCO classes to keep (empty list = all). People +
-                            # common indoor objects.
-      - person
-      - backpack
-      - umbrella
-      - handbag
-      - bottle
-      - cup
-      - bowl
-      - banana
-      - apple
-      - orange
-      - chair
-      - couch
-      - potted plant
-      - bed
-      - dining table
-      - tv
-      - laptop
-      - mouse
-      - keyboard
-      - cell phone
-      - book
-      - clock
-      - vase
-      - scissors
-      - teddy bear
+    classes: []             # COCO classes to keep. [] = keep ALL 80 (recommended:
+                            # "identify many objects"). List specific names to
+                            # filter, e.g. [person, cup, laptop].
+
+    # ── Open vocabulary (YOLO-World) ─────────────────────────────────────────
+    # To go BEYOND the 80 COCO classes, export a YOLO-World model with a custom
+    # prompt vocabulary (scripts/export_yolo_onnx.py --vocab scripts/vocab_indoor.txt)
+    # and point model_path at it. The exporter writes a sibling "<model>.names.json"
+    # holding the prompt words; the detector auto-loads it (no config needed), but
+    # you can force a specific list here:
+    names_path:             # e.g. yolo_world.names.json — blank = auto-detect / COCO-80
 
   color:
     top_n: 0                # 0 = skip pixel color-naming entirely. The multimodal
@@ -206,9 +193,17 @@ vision:
     url: http://127.0.0.1:8000
     health_path: /health
     facts_path: /facts
+    analyze_path: /analyze  # long-tail naming: the Qwen2-VL VLM (server/vision/vlm)
+                            # describes objects the COCO/YOLO-World detector can't.
     health_timeout_s: 5.0   # snappy so fallback to local-only is quick
     facts_timeout_s: 15.0
+    analyze_timeout_s: 30.0 # the VLM is heavier than depth-only /facts
     jpeg_quality: 80        # keyframe JPEG quality sent up the tunnel
+
+    # When multimodal:false (the main LLM can't see), route VISUAL turns to the GPU
+    # VLM so ZERO can still name arbitrary objects from the frame. Ignored when the
+    # main LLM is multimodal (it already sees the keyframes directly).
+    vlm_fallback: false
 
 persona:
   name: Zero

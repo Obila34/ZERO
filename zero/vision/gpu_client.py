@@ -10,6 +10,7 @@ local-only (detections + color) answer instead of hanging.
 from __future__ import annotations
 
 import base64
+from typing import Optional
 
 import requests
 
@@ -22,13 +23,16 @@ log = get_logger("vision.client")
 class VisionClient:
     def __init__(self, url: str = "http://127.0.0.1:8000",
                  health_path: str = "/health", facts_path: str = "/facts",
+                 analyze_path: str = "/analyze",
                  health_timeout_s: float = 5.0, facts_timeout_s: float = 15.0,
-                 jpeg_quality: int = 80):
+                 analyze_timeout_s: float = 30.0, jpeg_quality: int = 80):
         self.base = url.rstrip("/")
         self.health_path = health_path
         self.facts_path = facts_path
+        self.analyze_path = analyze_path
         self.health_timeout = float(health_timeout_s)
         self.facts_timeout = float(facts_timeout_s)
+        self.analyze_timeout = float(analyze_timeout_s)
         self.jpeg_quality = int(jpeg_quality)
 
     def check_health(self) -> dict:
@@ -76,3 +80,33 @@ class VisionClient:
         except ValueError as exc:
             raise RuntimeError(f"GPU /facts returned an unparseable body: {exc}") from exc
         return parsed.facts
+
+    def analyze(self, frame_rgb, detections: list[Detection], question: str = "",
+                history: Optional[list[dict]] = None) -> str:
+        """POST keyframe + detections + question to ``/analyze``; return the VLM's
+        natural-language reply.
+
+        This is the long-tail path: the GPU Qwen2-VL can name objects the local
+        COCO/YOLO-World detector never knew. Raises ``RuntimeError`` on any
+        failure so the caller can fall back to the detector-only answer.
+        """
+        url = self.base + self.analyze_path
+        request = AnalyzeRequest(
+            image_jpeg_b64=self._encode_frame_rgb(frame_rgb),
+            detections=list(detections),
+            question=question,
+            history=list(history or []),
+        )
+        try:
+            resp = requests.post(url, json=request.model_dump(),
+                                 timeout=self.analyze_timeout)
+            resp.raise_for_status()
+        except requests.RequestException as exc:
+            raise RuntimeError(
+                f"GPU /analyze request to {url} failed ({exc})."
+            ) from exc
+        try:
+            parsed = AnalyzeResponse.model_validate(resp.json())
+        except ValueError as exc:
+            raise RuntimeError(f"GPU /analyze returned an unparseable body: {exc}") from exc
+        return parsed.reply

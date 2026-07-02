@@ -50,7 +50,8 @@ class Eyes:
                  *, color_top_n: int = 5, max_items: int = 6,
                  use_gpu: bool = True, multimodal: bool = False,
                  jpeg_quality: int = 80, detect_interval_s: float = 0.0,
-                 frames_per_look: int = 2, look_window_s: float = 1.0):
+                 frames_per_look: int = 2, look_window_s: float = 1.0,
+                 vlm_fallback: bool = False):
         self._camera = camera
         self._detector = detector
         self._color = color_namer
@@ -63,6 +64,7 @@ class Eyes:
         self._detect_interval = float(detect_interval_s)
         self._frames_per_look = max(1, int(frames_per_look))
         self._look_window_s = float(look_window_s)
+        self._vlm_fallback = bool(vlm_fallback)
 
         self._scene = SceneState()
         self._thread: Optional[threading.Thread] = None
@@ -146,10 +148,36 @@ class Eyes:
             frames = self._scene.recent_frames(self._frames_per_look,
                                                self._look_window_s)
             images = [b for b in (self._encode(f) for f in frames) if b]
-        return VisualContext(
-            text=phrasing.detector_hint(snap.detections, self._max_items),
-            images=images,
-        )
+        text = phrasing.detector_hint(snap.detections, self._max_items)
+        # Long-tail naming: when the main LLM can't see (multimodal off) but the
+        # GPU VLM is reachable, ask it to describe the frame so ZERO can still name
+        # objects outside the detector's vocabulary. Never on the multimodal path
+        # (the LLM already sees the frames) and never fatal to the turn.
+        if not self._multimodal and self._vlm_fallback:
+            described = self.describe(question)
+            if described:
+                text = f"{text}; {described}" if text else described
+        return VisualContext(text=text, images=images)
+
+    def describe(self, question: str = "") -> Optional[str]:
+        """Ask the GPU VLM (Qwen2-VL) to describe the current keyframe in words.
+
+        This is the open-ended fallback for objects the local detector can't name.
+        Returns the VLM sentence, or None if the GPU is unavailable / it fails —
+        vision must never break a turn.
+        """
+        if self._client is None or not self._gpu_ok:
+            return None
+        snap = self._scene.snapshot()
+        frame = snap.frame_rgb
+        if frame is None:
+            return None
+        try:
+            reply = self._client.analyze(frame, snap.detections, question=question)
+            return reply.strip() or None
+        except Exception as e:
+            log.debug("VLM describe failed: %s", e)
+            return None
 
     def _encode(self, frame_rgb) -> Optional[str]:
         try:
