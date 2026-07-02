@@ -43,7 +43,10 @@ class SceneState:
 
     def update(self, detections: list[Detection], frame_rgb=None) -> None:
         with self._lock:
-            self._detections = [d.model_copy(deep=True) for d in detections]
+            # The perception loop builds a FRESH detections list every frame and
+            # never mutates it after publishing, so storing by reference is safe —
+            # and deep-copying pydantic models 30x/s was real CPU on the Pi.
+            self._detections = list(detections)
             self._timestamp = time.time()
             if frame_rgb is not None:
                 self._frame = frame_rgb  # already a private copy from the loop
@@ -76,8 +79,10 @@ class SceneState:
     def snapshot(self) -> Snapshot:
         with self._lock:
             frame = None if self._frame is None else self._frame.copy()
+            # Shallow list copy: readers treat detections as read-only, and the
+            # writer replaces (never mutates) the published list.
             return Snapshot(
-                detections=[d.model_copy(deep=True) for d in self._detections],
+                detections=list(self._detections),
                 frame_rgb=frame,
                 timestamp=self._timestamp,
                 frame_index=self._frame_index,

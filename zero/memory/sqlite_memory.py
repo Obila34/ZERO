@@ -22,9 +22,15 @@ log = get_logger("memory")
 
 
 class SqliteMemory:
-    def __init__(self, path: str, max_facts: int = 30, recent_episodes: int = 3):
+    def __init__(self, path: str, max_facts: int = 30, recent_episodes: int = 3,
+                 max_stored_facts: int = 200, max_stored_episodes: int = 100):
         self.max_facts = max_facts
         self.recent_episodes_n = recent_episodes
+        # Hard caps on what's STORED (not just injected) — without them the tables
+        # grow forever: every "remember that ..." creates a unique timestamped key
+        # and every conversation adds an episode. Oldest entries are pruned first.
+        self.max_stored_facts = max(max_facts, int(max_stored_facts))
+        self.max_stored_episodes = max(recent_episodes, int(max_stored_episodes))
         self._db = sqlite3.connect(path, check_same_thread=False)
         self._db.execute(
             "CREATE TABLE IF NOT EXISTS memory("
@@ -57,6 +63,12 @@ class SqliteMemory:
             "updated_at=excluded.updated_at",
             (key, value, time.time()),
         )
+        # Prune the least-recently-updated facts past the storage cap.
+        self._db.execute(
+            "DELETE FROM memory WHERE key NOT IN ("
+            "SELECT key FROM memory ORDER BY updated_at DESC LIMIT ?)",
+            (self.max_stored_facts,),
+        )
         self._db.commit()
         log.info("remembered: %s -> %s", key, value)
 
@@ -75,6 +87,12 @@ class SqliteMemory:
         self._db.execute(
             "INSERT INTO episodes(summary, created_at) VALUES(?, ?)",
             (summary, time.time()),
+        )
+        # Prune the oldest episodes past the storage cap.
+        self._db.execute(
+            "DELETE FROM episodes WHERE id NOT IN ("
+            "SELECT id FROM episodes ORDER BY id DESC LIMIT ?)",
+            (self.max_stored_episodes,),
         )
         self._db.commit()
         log.info("episode saved: %s", summary)

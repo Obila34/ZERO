@@ -45,13 +45,18 @@ class VisualContext:
 
 
 class Eyes:
+    _PREVIEW_WIN = "ZERO - what the camera sees"
+
     def __init__(self, camera: CameraStream, detector: Detector,
                  color_namer: ColorNamer, client: Optional[VisionClient] = None,
                  *, color_top_n: int = 5, max_items: int = 6,
                  use_gpu: bool = True, multimodal: bool = False,
                  jpeg_quality: int = 80, detect_interval_s: float = 0.0,
                  frames_per_look: int = 2, look_window_s: float = 1.0,
-                 vlm_fallback: bool = False):
+                 vlm_fallback: bool = False,
+                 preview: bool = False, preview_scale: float = 1.0,
+                 preview_mode: str = "auto", preview_host: str = "127.0.0.1",
+                 preview_port: int = 8008):
         self._camera = camera
         self._detector = detector
         self._color = color_namer
@@ -65,6 +70,12 @@ class Eyes:
         self._frames_per_look = max(1, int(frames_per_look))
         self._look_window_s = float(look_window_s)
         self._vlm_fallback = bool(vlm_fallback)
+        self._preview = bool(preview)
+        self._preview_scale = max(0.1, float(preview_scale))
+        self._preview_mode = str(preview_mode)
+        self._preview_host = str(preview_host)
+        self._preview_port = int(preview_port)
+        self._preview_sink = None  # built in start() if preview is on
 
         self._scene = SceneState()
         self._thread: Optional[threading.Thread] = None
@@ -84,6 +95,14 @@ class Eyes:
                 self._gpu_ok = False
                 log.warning("GPU vision server unreachable — distances disabled "
                             "(local detections still work): %s", e)
+        if self._preview:
+            from zero.vision.preview import build_preview
+
+            self._preview_sink = build_preview(
+                self._preview_mode, title=self._PREVIEW_WIN,
+                scale=self._preview_scale, host=self._preview_host,
+                port=self._preview_port, jpeg_quality=self._jpeg_quality,
+            )
         self._stop.clear()
         self._thread = threading.Thread(target=self._loop, name="Eyes", daemon=True)
         self._thread.start()
@@ -95,6 +114,9 @@ class Eyes:
             self._thread.join(timeout=2.0)
             self._thread = None
         self._camera.stop()
+        if self._preview_sink is not None:
+            self._preview_sink.close()
+            self._preview_sink = None
 
     # ── perception loop ──────────────────────────────────────────────────────
     def _loop(self) -> None:
@@ -114,6 +136,8 @@ class Eyes:
             # Always publish the frame + whatever detections we got, so a broken
             # detector never makes it look like the camera is blind.
             self._scene.update(detections, frame_rgb=frame)
+            if self._preview_sink is not None and self._preview_sink.ok:
+                self._preview_sink.show(frame, detections)
             if self._detect_interval > 0:
                 time.sleep(self._detect_interval)
 
@@ -130,6 +154,14 @@ class Eyes:
                 det.color = None
 
     # ── per-turn context ─────────────────────────────────────────────────────
+    def visible_labels(self) -> set[str]:
+        """Lowercased labels of the objects currently detected. Cheap (one
+        snapshot read) — used to route a turn to the visual path when the user
+        names something ZERO can literally see right now ('what color is the
+        cup?'), which no fixed word list could enumerate."""
+        snap = self._scene.snapshot()
+        return {d.label.lower() for d in snap.detections}
+
     def local_context(self) -> str:
         """Instant, GPU-free detector hint ('3 people, a cup'), or '' if empty."""
         snap = self._scene.snapshot()

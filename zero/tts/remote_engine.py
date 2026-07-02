@@ -17,7 +17,7 @@ from typing import Iterator
 import numpy as np
 import requests
 
-from zero.tts.base import TTS
+from zero.tts.base import TTS, resample_linear
 from zero.utils.logging import get_logger
 
 log = get_logger("tts.remote")
@@ -98,9 +98,13 @@ class RemoteTTS(TTS):
             return np.zeros(0, dtype=np.float32)
         try:
             with wave.open(io.BytesIO(resp.content), "rb") as w:
-                self.sample_rate = w.getframerate()
+                server_rate = w.getframerate()
                 pcm = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16)
         except (wave.Error, EOFError) as e:
             log.error("remote TTS returned bad audio: %s", e)
             return np.zeros(0, dtype=np.float32)
-        return pcm.astype(np.float32) / 32768.0
+        audio = pcm.astype(np.float32) / 32768.0
+        # Resample to the advertised rate rather than mutating self.sample_rate —
+        # the orchestrator/playback captured that rate at startup, and changing it
+        # mid-session would silently pitch-shift everything already queued.
+        return resample_linear(audio, server_rate, self.sample_rate)

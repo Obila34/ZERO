@@ -18,7 +18,7 @@ from pathlib import Path
 
 import numpy as np
 
-from zero.tts.base import TTS
+from zero.tts.base import TTS, resample_linear
 from zero.utils.logging import get_logger
 
 log = get_logger("tts.orchestrator")
@@ -115,17 +115,8 @@ class VoiceOrchestrator:
         if data.ndim > 1:
             data = data[:, 0]
         if sr != self.sample_rate:
-            data = self._resample(data, sr, self.sample_rate)
+            data = resample_linear(data, sr, self.sample_rate)
         return data
 
     def _silence(self, ms: int) -> np.ndarray:
         return np.zeros(int(self.sample_rate * ms / 1000), dtype=np.float32)
-
-    @staticmethod
-    def _resample(data: np.ndarray, src_sr: int, dst_sr: int) -> np.ndarray:
-        if src_sr == dst_sr:
-            return data
-        n_dst = int(round(len(data) * dst_sr / src_sr))
-        x_old = np.linspace(0.0, 1.0, num=len(data), endpoint=False)
-        x_new = np.linspace(0.0, 1.0, num=n_dst, endpoint=False)
-        return np.interp(x_new, x_old, data).astype(np.float32)

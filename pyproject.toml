@@ -4,6 +4,29 @@ version = "0.1.0"
 description = "Offline conversational voice robot for Raspberry Pi 5 (first step toward a humanoid)"
 requires-python = ">=3.10"
 readme = "README.md"
+# Mirrors requirements.txt (kept for the Pi setup scripts) — keep the two in sync.
+dependencies = [
+    "sounddevice>=0.4.6",
+    "numpy>=1.24",
+    "soundfile>=0.12",
+    "PyYAML>=6.0",
+    "openwakeword>=0.6.0",
+    "webrtcvad>=2.0.10",
+    "pywhispercpp>=1.2.0",
+    "requests>=2.31",
+]
+
+[project.optional-dependencies]
+# The eyes (vision.enabled: true) — mirrors requirements-vision.txt.
+vision = [
+    "opencv-python>=4.8",
+    "onnxruntime>=1.16",
+    "pydantic>=2.0",
+]
+dev = [
+    "pytest>=7.0",
+    "ruff>=0.4",
+]
 
 [project.scripts]
 zero = "zero.main:main"
@@ -14,3 +37,15 @@ include = ["zero*"]
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+# Conservative: syntax errors + pyflakes (undefined names, unused imports, etc.)
+select = ["E9", "F"]
+ignore = ["E731"]  # lambdas are used deliberately for lazy engine builders

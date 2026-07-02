@@ -56,7 +56,12 @@ class Conversation:
         # Only trim once we've grown past the trigger — keeps most turns append-only
         # (cache hit) and pays the expensive re-read only occasionally.
         if len(self._history) > self.trim_at_messages:
-            self._history = self._history[-self.target_messages:]
+            trimmed = self._history[-self.target_messages:]
+            # Keep the window aligned to a user turn — a history that opens with a
+            # dangling assistant message reads as replying to nothing.
+            if trimmed and trimmed[0]["role"] == "assistant":
+                trimmed = trimmed[1:]
+            self._history = trimmed
 
     def reset(self) -> None:
         self._history.clear()

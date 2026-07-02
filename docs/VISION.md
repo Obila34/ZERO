@@ -121,6 +121,25 @@ There are three levers, in increasing ambition:
    `vision.gpu.vlm_fallback: true`: visual turns then call `/analyze` so ZERO can
    still name objects it has no detector class for.
 
+## Seeing what the camera sees
+
+Set `vision.preview: true` and you get a live view of the feed with detection
+boxes drawn on it. It picks the right surface automatically (`preview_mode: auto`):
+
+- **Desktop / Pi with a monitor** → an OpenCV window (press `q` to close it; ZERO
+  keeps running).
+- **Headless Pi over SSH** → an **MJPEG stream in your browser**. No X-forwarding,
+  no extra dependencies (stdlib HTTP), and it works with the headless opencv build.
+  Force it with `preview_mode: web`; change the port with `preview_port`.
+
+By default the stream binds to `127.0.0.1` (private), so view it over an SSH
+tunnel: `ssh -L 8008:localhost:8008 pi@<host>`, then browse `http://localhost:8008/`.
+To expose it directly on the LAN instead (unauthenticated — trusted home network
+only), set `preview_host: 0.0.0.0` and browse `http://<pi-ip>:8008/`.
+
+To eyeball the camera **without** the whole voice stack (mic/wake word/LLM), run
+`python scripts/camera_preview.py` — same preview, camera + detector only.
+
 ## Config
 
 Everything is under `vision:` in [`config.yaml`](../config.yaml): enable flag,

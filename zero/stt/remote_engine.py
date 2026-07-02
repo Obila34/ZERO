@@ -46,8 +46,11 @@ class RemoteSTT(STT):
             )
             resp.raise_for_status()
             text = (resp.json().get("text") or "").strip()
-        except requests.RequestException as e:
-            log.error("remote STT failed (is the tunnel/server up?): %s", e)
-            return ""
+        except (requests.RequestException, ValueError) as e:
+            # Raise instead of returning "" — the caller must be able to tell a
+            # dead tunnel from silence, so it can fail over to a local engine.
+            raise RuntimeError(
+                f"remote STT failed (is the tunnel/server up?): {e}"
+            ) from e
         log.info("heard: %r", text)
         return text

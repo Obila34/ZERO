@@ -41,25 +41,36 @@ def build_endpointer(cfg: Config):
     )
 
 
+def _build_whispercpp(cfg: Config) -> STT:
+    from zero.stt.whispercpp_engine import WhisperCppSTT
+
+    model_path = cfg.resolve_path("stt.model_path", "models/whisper/ggml-base.en.bin")
+    return WhisperCppSTT(
+        model_path=str(model_path),
+        initial_prompt=cfg.get("stt.initial_prompt"),
+        threads=cfg.get("stt.threads", 4),
+        audio_ctx=cfg.get("stt.audio_ctx", 0),
+    )
+
+
 def build_stt(cfg: Config) -> STT:
     engine = cfg.get("stt.engine", "whispercpp")
     if engine == "remote":
+        from zero.stt.fallback import FallbackSTT
         from zero.stt.remote_engine import RemoteSTT
 
-        return RemoteSTT(
+        remote = RemoteSTT(
             url=cfg.get("stt.remote_url", "http://127.0.0.1:9000/transcribe"),
             timeout=cfg.get("stt.remote_timeout", 30),
         )
+        # Optional local failover so a dropped tunnel doesn't leave ZERO deaf.
+        # The local engine is built lazily on the first remote failure.
+        builder = None
+        if cfg.get("stt.fallback") == "whispercpp":
+            builder = lambda: _build_whispercpp(cfg)  # noqa: E731
+        return FallbackSTT(remote, builder)
     if engine == "whispercpp":
-        from zero.stt.whispercpp_engine import WhisperCppSTT
-
-        model_path = cfg.resolve_path("stt.model_path", "models/whisper/ggml-base.en.bin")
-        return WhisperCppSTT(
-            model_path=str(model_path),
-            initial_prompt=cfg.get("stt.initial_prompt"),
-            threads=cfg.get("stt.threads", 4),
-            audio_ctx=cfg.get("stt.audio_ctx", 0),
-        )
+        return _build_whispercpp(cfg)
     raise ValueError(f"unknown stt engine: {engine}")
 
 
@@ -77,31 +88,42 @@ def build_llm(cfg: Config) -> LLM:
     raise ValueError(f"unknown llm engine: {engine}")
 
 
+def _build_piper(cfg: Config) -> TTS:
+    from zero.tts.piper_engine import PiperTTS
+
+    voice = cfg.resolve_path("tts.piper.voice")
+    binary = cfg.get("tts.piper.binary", "piper")
+    # A relative path like "piper/piper" -> resolve against the repo root so it
+    # works regardless of CWD or where the repo is cloned. A bare "piper"
+    # (on PATH) or an absolute path is left as-is.
+    if "/" in binary and not Path(binary).is_absolute():
+        binary = str(Path(PROJECT_ROOT) / binary)
+    return PiperTTS(
+        binary=binary,
+        voice=str(voice),
+        length_scale=cfg.get("tts.piper.length_scale", 1.0),
+    )
+
+
 def _build_tts_engine(cfg: Config) -> tuple[str, TTS]:
     engine = cfg.get("tts.engine", "piper")
     if engine == "orpheus":
         from zero.tts.remote_engine import RemoteTTS
 
-        return "orpheus", RemoteTTS(
+        tts: TTS = RemoteTTS(
             url=cfg.get("tts.orpheus.url", "http://127.0.0.1:9100/tts"),
             voice=cfg.get("tts.orpheus.voice", "tara"),
             timeout=cfg.get("tts.orpheus.timeout", 30),
         )
-    if engine == "piper":
-        from zero.tts.piper_engine import PiperTTS
+        # Optional local failover so a dropped tunnel doesn't leave ZERO mute.
+        # Piper is built lazily on the first remote failure.
+        if cfg.get("tts.fallback") == "piper":
+            from zero.tts.fallback import FallbackTTS
 
-        voice = cfg.resolve_path("tts.piper.voice")
-        binary = cfg.get("tts.piper.binary", "piper")
-        # A relative path like "piper/piper" -> resolve against the repo root so it
-        # works regardless of CWD or where the repo is cloned. A bare "piper"
-        # (on PATH) or an absolute path is left as-is.
-        if "/" in binary and not Path(binary).is_absolute():
-            binary = str(Path(PROJECT_ROOT) / binary)
-        return "piper", PiperTTS(
-            binary=binary,
-            voice=str(voice),
-            length_scale=cfg.get("tts.piper.length_scale", 1.0),
-        )
+            tts = FallbackTTS(tts, lambda: _build_piper(cfg))
+        return "orpheus", tts
+    if engine == "piper":
+        return "piper", _build_piper(cfg)
     if engine == "fish":
         from zero.tts.fish_engine import FishTTS
 
@@ -131,6 +153,8 @@ def build_memory(cfg: Config):
         path=str(path),
         max_facts=cfg.get("memory.max_facts", 30),
         recent_episodes=cfg.get("memory.recent_episodes", 3),
+        max_stored_facts=cfg.get("memory.max_stored_facts", 200),
+        max_stored_episodes=cfg.get("memory.max_stored_episodes", 100),
     )
 
 
@@ -209,7 +233,7 @@ def build_vision(cfg: Config):
     return Eyes(
         cam, detector, namer, client,
         color_top_n=cfg.get("vision.color.top_n", 5),
-        max_items=cfg.get("vision.max_items", 6),
+        max_items=cfg.get("vision.max_items", 15),
         use_gpu=cfg.get("vision.gpu.enabled", True),
         multimodal=cfg.get("vision.multimodal", False),
         jpeg_quality=cfg.get("vision.gpu.jpeg_quality", 80),
@@ -217,6 +241,13 @@ def build_vision(cfg: Config):
         frames_per_look=cfg.get("vision.frames_per_look", 2),
         look_window_s=cfg.get("vision.look_window_s", 1.0),
         vlm_fallback=cfg.get("vision.gpu.vlm_fallback", False),
+        preview=cfg.get("vision.preview", False),
+        preview_scale=cfg.get("vision.preview_scale", 1.0),
+        preview_mode=cfg.get("vision.preview_mode", "auto"),
+        # Default PRIVATE: never expose the unauthenticated camera stream on the
+        # LAN unless config.yaml explicitly asks for 0.0.0.0.
+        preview_host=cfg.get("vision.preview_host", "127.0.0.1"),
+        preview_port=cfg.get("vision.preview_port", 8008),
     )
 
 

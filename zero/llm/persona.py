@@ -42,9 +42,6 @@ Final reminder: You're not here to impress with trivia. You're here to connect, 
 """
 
 
-def build_system_prompt(name: str, description: str) -> str:
-    return SYSTEM_TEMPLATE.format(
-        name=name,
-        description=description.strip(),
-        cues=" ".join(CUES),
-    )
+def build_system_prompt() -> str:
+    """The full system prompt. Edit SYSTEM_TEMPLATE above to change the persona."""
+    return SYSTEM_TEMPLATE

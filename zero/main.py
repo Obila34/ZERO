@@ -9,10 +9,11 @@ generated — the main trick for keeping a fully-local pipeline feeling responsi
 """
 from __future__ import annotations
 
+import argparse
 import itertools
 import queue
 import random
-import sys
+import re
 import threading
 import time
 
@@ -28,6 +29,85 @@ from zero.tts.orchestrator import split_sentences
 from zero.utils.logging import get_logger, setup_logging
 
 log = get_logger("main")
+
+
+# Stop phrases that end the conversation and return to wake-word mode. Matched on
+# word boundaries AND only in short utterances, so a sentence that merely mentions
+# one ("tell me about the movie Goodbye Lenin") doesn't put ZERO to sleep.
+STOP_PHRASES = (
+    "goodbye", "good bye", "go to sleep", "stop listening", "stop talking",
+    "that's all", "thats all", "see you later", "bye zero", "bye jarvis",
+    "bye for now", "talk later", "shut down",
+)
+_STOP_RE = re.compile(r"\b(?:" + "|".join(re.escape(p) for p in STOP_PHRASES) + r")\b")
+_STOP_MAX_WORDS = 5  # stop commands are short; longer sentences just mention the words
+
+
+def is_stop_phrase(text: str) -> bool:
+    t = text.lower().strip(" .!?,")
+    if len(t.split()) > _STOP_MAX_WORDS:
+        return False
+    return bool(_STOP_RE.search(t))
+
+
+# Words/phrases that signal the user is asking about what ZERO can SEE. On these
+# we hand the multimodal LLM a few recent keyframes so it can actually look;
+# every other turn just carries the cheap text detector hint. Kept deliberately
+# tight, two ways: bare demonstratives ("this", "that", "there") appear in most
+# ordinary sentences, and polysemous verbs ("see", "look", "watch", "picture")
+# are mostly non-visual in speech ("I see", "looking forward to it", "picture
+# this scenario") — those live in the PHRASES list in their genuinely visual
+# forms instead.
+_VISUAL_WORDS = {
+    "color", "colour", "colors", "colours", "wearing", "holding", "camera",
+    "recognize", "recognise",
+}
+_VISUAL_PHRASES = (
+    "what is this", "what's this", "what is that", "what's that",
+    "who is this", "who's this", "who is that", "who's that",
+    "who am i", "what am i", "in front of you", "how many",
+    "over there", "over here", "around you", "the room", "this room",
+    "next to", "read this", "read that", "am i wearing", "in my hand",
+    # The visual uses of the demoted polysemous words:
+    "do you see", "can you see", "what do you see", "what can you see",
+    "have you seen", "how do i look", "take a look", "look at",
+    "look around", "looking at", "watch me", "watch this",
+)
+
+# Detected labels that are useless as visual signals: "person" is on screen
+# almost always, and the word turns up constantly in abstract speech ("he's a
+# nice person") — matching it would ship keyframes on ordinary chat.
+_GENERIC_LABELS = {"person"}
+
+
+def _mentions_visible_object(text_lower: str, labels) -> bool:
+    """True if the utterance names an object the camera can see RIGHT NOW.
+
+    'What color is the cup?' should be visual whenever a cup is actually in
+    frame — no fixed word list can enumerate every object, but the live
+    detections can. Matches the full label and its head noun ('cell phone' ->
+    'phone'), plus a naive plural, on word boundaries.
+    """
+    for label in labels:
+        label = str(label).lower().strip()
+        if not label or label in _GENERIC_LABELS:
+            continue
+        candidates = {label, label.split()[-1]}
+        for cand in candidates:
+            pattern = r"\s+".join(re.escape(part) for part in cand.split())
+            if re.search(rf"\b{pattern}(?:e?s)?\b", text_lower):
+                return True
+    return False
+
+
+def is_visual_question(text: str, visible_labels=()) -> bool:
+    t = text.lower()
+    words = {w.strip(" .!?,;:'\"") for w in t.split()}
+    if words & _VISUAL_WORDS:
+        return True
+    if any(p in t for p in _VISUAL_PHRASES):
+        return True
+    return _mentions_visible_object(t, visible_labels)
 
 
 class Zero:
@@ -63,10 +143,7 @@ class Zero:
         else:
             self.eyes = None
 
-        system_prompt = build_system_prompt(
-            name=self.cfg.get("persona.name", "Zero"),
-            description=self.cfg.get("persona.description", "a warm companion."),
-        )
+        system_prompt = build_system_prompt()
         self.convo = Conversation(
             system_prompt=system_prompt,
             history_turns=self.cfg.get("llm.history_turns", 3),
@@ -75,9 +152,10 @@ class Zero:
         self.memory = build_memory(self.cfg)  # long-term SQLite store (or None)
         self.state = State.IDLE
         self._interrupt = False  # set by the barge-in monitor to stop playback
+        self._memory_thread: threading.Thread | None = None  # background fact save
 
         # Voice-only extras (need the voice/mic): owner verification + spoken fillers.
-        self._filler_prob = self.cfg.get("conversation.filler_probability", 0.9)
+        self._filler_prob = self.cfg.get("conversation.filler_probability", 0.5)
         self._fillers = {}
         if not text_mode:
             self.voiceid, self._voiceprint = build_voiceid(self.cfg)
@@ -167,6 +245,7 @@ class Zero:
         except KeyboardInterrupt:
             print()
         self._end_conversation()
+        self._join_memory_thread()
 
     # -- main loop ----------------------------------------------------------
     def run(self) -> None:
@@ -195,6 +274,7 @@ class Zero:
             self.mic.stop()
             if self.eyes is not None:
                 self.eyes.stop()
+            self._join_memory_thread()
 
     def _wait_for_wake(self) -> None:
         self._to(State.IDLE)
@@ -205,16 +285,8 @@ class Zero:
                 return
 
     # -- conversation -------------------------------------------------------
-    # Stop phrases that end the conversation and return to wake-word mode.
-    _STOP_PHRASES = (
-        "goodbye", "good bye", "go to sleep", "stop listening", "stop talking",
-        "that's all", "thats all", "see you later", "bye zero", "bye jarvis",
-        "bye for now", "talk later", "shut down",
-    )
-
     def _is_stop(self, text: str) -> bool:
-        t = text.lower().strip(" .!?,")
-        return any(p in t for p in self._STOP_PHRASES)
+        return is_stop_phrase(text)
 
     def _converse(self) -> None:
         """After a single wake, stay in a flowing conversation: listen -> reply,
@@ -280,29 +352,34 @@ class Zero:
             # Kick the LLM off in the BACKGROUND so its prefill overlaps the spoken
             # filler — the model is already generating while the filler plays, so the
             # real answer flows in with little or no added delay.
-            chunks = self._stream_in_background(messages)
+            chunks, llm_stop = self._stream_in_background(messages)
             self._to(State.SPEAKING)
-            self._play_filler(text)
-            reply = self._speak_streaming(chunks)
-            self.convo.add_assistant(reply)
-            log.info("reply: %r", reply)
+            # Barge-in covers the filler AND the reply, so the wake word can cut
+            # ZERO off at any point while it's making sound.
+            monitor = self._start_bargein()
+            try:
+                self._play_filler(text)
+                reply = "" if self._interrupt else self._speak_streaming(chunks, llm_stop)
+            finally:
+                self._stop_bargein(monitor)
+            if self._interrupt:
+                llm_stop.set()  # stop generating a reply nobody is listening to
+                log.info("barge-in: stopped speaking to listen")
+            # Store only what was actually SPOKEN — after a barge-in the model must
+            # not "remember" saying sentences the user never heard.
+            if reply:
+                self.convo.add_assistant(reply)
+                log.info("reply: %r", reply)
 
     # -- vision -------------------------------------------------------------
-    # Words that signal the user is asking about what ZERO can SEE. On these we
-    # hand the multimodal LLM a few recent keyframes so it can actually look;
-    # every other turn just carries the cheap text detector hint.
-    _VISUAL_WORDS = {
-        "see", "seeing", "look", "looking", "looks", "watch", "show", "showing",
-        "this", "that", "these", "those", "here", "there", "front", "behind",
-        "color", "colour", "holding", "wearing", "hand", "object", "thing",
-        "room", "around", "left", "right", "near", "far", "distance", "away",
-        "many", "count", "where", "who", "recognize", "read", "picture", "camera",
-    }
-
     def _is_visual(self, text: str) -> bool:
-        t = text.lower()
-        words = {w.strip(" .!?,;:'\"") for w in t.split()}
-        return bool(words & self._VISUAL_WORDS)
+        labels: set[str] = set()
+        if self.eyes is not None:
+            try:
+                labels = self.eyes.visible_labels()
+            except Exception:  # a scene read must never break a turn
+                pass
+        return is_visual_question(text, labels)
 
     def _look(self, text: str) -> tuple[str, list[str]]:
         """Ephemeral (note, keyframes) for this turn — never persisted, never raises.
@@ -354,20 +431,38 @@ class Zero:
                 return
 
     def _end_conversation(self) -> None:
-        """On sleep/stop: extract durable facts from the chat into long-term memory,
-        then go idle. Runs an extra (offline) LLM pass — fine, the user is done."""
+        """On sleep/stop: extract durable facts from the chat into long-term memory
+        (two extra LLM passes) on a BACKGROUND thread, so ZERO goes back to
+        listening for the wake word immediately instead of being deaf for seconds.
+        The transcript is snapshotted first — the next conversation may reset the
+        history while the save is still running."""
         if self.memory is not None and self.convo._history:
-            try:
-                self._extract_facts()
-            except Exception as e:  # never let memory break the loop
-                log.warning("memory extraction failed: %s", e)
-            try:
-                self._summarize_session()  # episodic memory of the conversation arc
-            except Exception as e:
-                log.warning("session summary failed: %s", e)
+            transcript = self.convo.transcript()
+            self._memory_thread = threading.Thread(
+                target=self._save_memories, args=(transcript,),
+                name="memory-save", daemon=True,
+            )
+            self._memory_thread.start()
         self._to(State.IDLE)
 
-    def _extract_facts(self) -> None:
+    def _save_memories(self, transcript: str) -> None:
+        try:
+            self._extract_facts(transcript)
+        except Exception as e:  # never let memory break the loop
+            log.warning("memory extraction failed: %s", e)
+        try:
+            self._summarize_session(transcript)  # episodic memory of the arc
+        except Exception as e:
+            log.warning("session summary failed: %s", e)
+
+    def _join_memory_thread(self, timeout: float = 30.0) -> None:
+        """Give an in-flight background memory save a chance to finish on shutdown."""
+        t = self._memory_thread
+        if t is not None and t.is_alive():
+            log.info("finishing memory save...")
+            t.join(timeout=timeout)
+
+    def _extract_facts(self, transcript: str) -> None:
         prompt = [
             {"role": "system", "content": (
                 "Extract durable facts about the USER from the conversation. Output "
@@ -375,7 +470,7 @@ class Zero:
                 "job, preferences, ongoing projects, important personal details). "
                 "Use short lowercase keys. If there are no durable facts, output "
                 "exactly NONE and nothing else.")},
-            {"role": "user", "content": self.convo.transcript()},
+            {"role": "user", "content": transcript},
         ]
         result = "".join(self.llm.stream(prompt)).strip()
         if not result or result.upper().startswith("NONE"):
@@ -385,7 +480,7 @@ class Zero:
                 key, _, value = line.partition(":")
                 self.memory.remember(key.strip("-• ").strip(), value)
 
-    def _summarize_session(self) -> None:
+    def _summarize_session(self, transcript: str) -> None:
         """Write a one-line summary of the conversation into episodic memory, so
         next time ZERO can recall the ARC of past chats, not just isolated facts."""
         prompt = [
@@ -394,29 +489,38 @@ class Zero:
                 "the user talked about or what happened — from your point of view "
                 "as the assistant. No preamble, just the sentence. If nothing of "
                 "substance was said, output exactly NONE.")},
-            {"role": "user", "content": self.convo.transcript()},
+            {"role": "user", "content": transcript},
         ]
         summary = "".join(self.llm.stream(prompt)).strip()
         if summary and not summary.upper().startswith("NONE"):
             self.memory.add_episode(summary)
 
-    def _stream_in_background(self, messages):
-        """Start the LLM streaming on a worker thread feeding a queue, and return
-        a generator over it. Calling this begins prefill immediately (a bare
+    def _stream_in_background(self, messages) -> tuple:
+        """Start the LLM streaming on a worker thread feeding a queue. Returns
+        (generator, stop_event). Calling this begins prefill immediately (a bare
         generator would wait until first consumed), so it overlaps the filler.
+        Setting the stop event makes the worker abandon the stream — used on
+        barge-in so the GPU stops generating a reply nobody will hear.
         """
         q: "queue.Queue" = queue.Queue()
+        stop = threading.Event()
 
         def worker():
+            stream = self.llm.stream(messages)
             try:
-                for chunk in self.llm.stream(messages):
+                for chunk in stream:
+                    if stop.is_set():
+                        break  # barge-in: abandon the rest of the reply
                     q.put(chunk)
             except Exception as e:  # never let the worker die silently
                 log.error("LLM stream error: %s", e)
             finally:
+                close = getattr(stream, "close", None)
+                if callable(close):
+                    close()  # closes the HTTP stream so the server stops generating
                 q.put(None)  # sentinel = done
 
-        threading.Thread(target=worker, daemon=True).start()
+        threading.Thread(target=worker, name="llm-stream", daemon=True).start()
 
         def gen():
             while True:
@@ -425,7 +529,7 @@ class Zero:
                     return
                 yield item
 
-        return gen()
+        return gen(), stop
 
     _QUESTION_WORDS = {
         "what", "why", "how", "when", "who", "where", "which", "whose", "can",
@@ -446,7 +550,9 @@ class Zero:
         return "default"
 
     def _play_filler(self, user_text: str) -> None:
-        """Play one pre-synthesized filler chosen to match what the user said."""
+        """Play one pre-synthesized filler chosen to match what the user said.
+        Interruptible: the barge-in monitor is already running, so the wake word
+        cuts a filler off just like it cuts off a reply."""
         if random.random() > self._filler_prob:
             return
         category = self._filler_category(user_text)
@@ -455,69 +561,116 @@ class Zero:
             return
         log.debug("filler category: %s", category)
         self.speaker.play(random.choice(audios), self.voice.sample_rate,
-                          should_stop=lambda: False)
+                          should_stop=self._should_interrupt)
 
-    def _speak_streaming(self, chunks) -> str:
+    def _speak_streaming(self, chunks, llm_stop: threading.Event) -> str:
         """Stream the reply: a producer thread turns the LLM text into sentences and
         streams each sentence's AUDIO CHUNKS onto a queue, while a single gapless
         output stream plays them as they arrive. First audio lands ~200ms after the
         first sentence starts generating, and there are no inter-sentence pauses.
-        Returns the full reply text.
+
+        Returns the text that was actually SPOKEN. On barge-in the whole pipeline
+        is shut down — LLM worker, TTS producer, queue — so nothing keeps
+        generating/synthesizing a reply nobody is listening to, and only the
+        sentences whose audio reached the speaker are returned for history.
         """
-        full: list[str] = []
+        full: list[str] = []          # every sentence handed to TTS, in order
         audio_q: "queue.Queue" = queue.Queue(maxsize=32)
+        stop_evt = threading.Event()  # tells the producer to abandon synthesis
+        played = -1                   # index into `full` of the last sentence heard
+
+        def put_piece(item) -> bool:
+            """Queue an audio piece without ever blocking forever: on barge-in the
+            consumer stops draining, and a plain put() would wedge this thread."""
+            while not stop_evt.is_set():
+                try:
+                    audio_q.put(item, timeout=0.2)
+                    return True
+                except queue.Full:
+                    continue
+            return False
 
         def producer():
             buffer = ""
             first_token = True
             try:
                 for chunk in itertools.chain(chunks, ["\n"]):  # sentinel flush
+                    if stop_evt.is_set():
+                        return
                     if first_token and chunk.strip():
                         log.info("LLM first token: %.2fs",
                                  time.monotonic() - self._t_reply_start)
                         first_token = False
                     buffer += chunk
+                    # Only rescan for sentences when this chunk could complete one.
+                    if not any(c in chunk for c in ".!?…\n"):
+                        continue
                     sentences = split_sentences(buffer)
                     complete, buffer = sentences[:-1], (sentences[-1] if sentences else "")
                     for sentence in complete:
                         full.append(sentence)
+                        idx = len(full) - 1
                         for piece in self.voice.synthesize_stream(sentence):
-                            audio_q.put(piece)
+                            if not put_piece((idx, piece)):
+                                return
                 if buffer.strip():
                     full.append(buffer.strip())
+                    idx = len(full) - 1
                     for piece in self.voice.synthesize_stream(buffer):
-                        audio_q.put(piece)
+                        if not put_piece((idx, piece)):
+                            return
             finally:
-                audio_q.put(None)  # sentinel: done
+                try:
+                    audio_q.put_nowait(None)  # sentinel: done
+                except queue.Full:
+                    pass  # consumer is draining after barge-in; thread-death ends it
 
-        threading.Thread(target=producer, daemon=True).start()
+        prod = threading.Thread(target=producer, name="tts-producer", daemon=True)
+        prod.start()
 
-        self._spoke_any = False
+        spoke_any = False
 
         def audio_gen():
+            nonlocal played, spoke_any
             while True:
-                piece = audio_q.get()
-                if piece is None:
+                item = audio_q.get()
+                if item is None:
                     return
-                if not self._spoke_any:
+                idx, piece = item
+                if not spoke_any:
                     log.info("first audio out: %.2fs after STT",
                              time.monotonic() - self._t_reply_start)
-                    self._to(State.SPEAKING)
-                    self._spoke_any = True
+                    spoke_any = True
+                played = idx
                 yield piece
 
-        # Barge-in: keep the mic live during playback and listen for the wake word.
-        # Saying it again cuts ZERO off mid-reply (echo-safe: ZERO never says its
-        # own wake word, so its voice off the speaker won't false-trigger).
-        monitor = self._start_bargein()
-        try:
-            self.speaker.play_stream(audio_gen(), self.voice.sample_rate,
-                                     should_stop=self._should_interrupt)
-        finally:
-            self._stop_bargein(monitor)
+        # Barge-in: the monitor (started by the caller) keeps the mic live and
+        # listens for the wake word; saying it cuts ZERO off mid-reply (echo-safe:
+        # ZERO never says its own wake word, so its voice won't false-trigger).
+        self.speaker.play_stream(audio_gen(), self.voice.sample_rate,
+                                 should_stop=self._should_interrupt)
+
         if self._interrupt:
-            log.info("barge-in: stopped speaking to listen")
+            # Shut the whole pipeline down and unblock the producer, then return
+            # only the sentences the user actually heard.
+            llm_stop.set()
+            stop_evt.set()
+            self._drain_audio_queue(audio_q, prod)
+            return " ".join(full[: played + 1]).strip()
+        prod.join(timeout=5.0)
         return " ".join(full).strip()
+
+    @staticmethod
+    def _drain_audio_queue(q: "queue.Queue", producer: threading.Thread) -> None:
+        """Empty the audio queue until the producer's sentinel arrives (or the
+        producer dies), so a producer blocked on a full queue always unblocks."""
+        while True:
+            try:
+                if q.get(timeout=0.2) is None:
+                    return
+            except queue.Empty:
+                if not producer.is_alive():
+                    return
 
     def _should_interrupt(self) -> bool:
         """Barge-in hook: True stops playback the instant the wake word fires."""
@@ -564,13 +717,18 @@ class Zero:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(
+        prog="zero",
+        description="ZERO — offline conversational voice robot.",
+    )
+    parser.add_argument("config", nargs="?", default=None,
+                        help="path to a config YAML (default: config.yaml)")
+    parser.add_argument("--text", action="store_true",
+                        help="type-to-chat mode: LLM + memory only, no mic/speaker")
+    args = parser.parse_args()
     setup_logging()
-    args = sys.argv[1:]
-    text_mode = "--text" in args
-    positional = [a for a in args if not a.startswith("--")]
-    config_path = positional[0] if positional else None
-    zero = Zero(config_path, text_mode=text_mode)
-    if text_mode:
+    zero = Zero(args.config, text_mode=args.text)
+    if args.text:
         zero.run_text()
     else:
         zero.run()

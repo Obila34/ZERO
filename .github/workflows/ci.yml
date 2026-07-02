@@ -1,0 +1,22 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      # Only what the pure-logic tests import — the heavy audio/vision stacks
+      # (sounddevice, opencv, onnxruntime, pywhispercpp) are exercised on-device.
+      - name: Install test dependencies
+        run: pip install numpy PyYAML requests pydantic pytest ruff
+      - name: Lint (syntax errors + pyflakes)
+        run: ruff check zero tests
+      - name: Tests
+        run: pytest -q

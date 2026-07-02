@@ -75,22 +75,27 @@ class OllamaLLM(LLM):
             return
 
         emitted = False
-        for line in resp.iter_lines():
-            if not line:
-                continue
-            try:
-                obj = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if "error" in obj:
-                log.error("Ollama error: %s", obj["error"])
-                return
-            chunk = obj.get("message", {}).get("content", "")
-            if chunk:
-                emitted = True
-                yield chunk
-            if obj.get("done"):
-                if not emitted:
-                    # No content came back — log why so empty replies are visible.
-                    log.warning("empty reply (done_reason=%s)", obj.get("done_reason"))
-                break
+        try:
+            for line in resp.iter_lines():
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if "error" in obj:
+                    log.error("Ollama error: %s", obj["error"])
+                    return
+                chunk = obj.get("message", {}).get("content", "")
+                if chunk:
+                    emitted = True
+                    yield chunk
+                if obj.get("done"):
+                    if not emitted:
+                        # No content came back — log why so empty replies are visible.
+                        log.warning("empty reply (done_reason=%s)", obj.get("done_reason"))
+                    break
+        finally:
+            # Runs on normal exit AND when the consumer abandons the generator
+            # (barge-in) — closes the HTTP stream so Ollama stops generating.
+            resp.close()
