@@ -377,6 +377,11 @@ class Zero:
     def _wait_for_wake(self) -> None:
         self._to(State.IDLE)
         self.wake.reset()
+        # Defensive: the stop-phrase path in _converse() returns with the mic
+        # paused, so without this the callback would drop every frame and
+        # frames() would block forever — leaving ZERO deaf to the wake word.
+        self.mic.resume()
+        self.mic.drain()
         for frame in self.mic.frames():
             if self.events.peek_pending():
                 opened = self._drain_events()  # timers/greetings fire in IDLE
