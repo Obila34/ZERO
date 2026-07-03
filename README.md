@@ -56,6 +56,16 @@ detections (no distances) if the GPU is unreachable. See
 Switch with `tts.engine: piper | fish` in `config.yaml`. The LLM prompt never
 changes — the orchestrator translates the shared cue vocabulary per engine.
 
+> **Running the real two-machine setup (Pi + GPU node)?** Read
+> [`docs/OPERATIONS.md`](docs/OPERATIONS.md) — the full architecture, the SSH
+> tunnel, exact start/restart commands for both boxes, and a troubleshooting
+> table mapping every known log error to its fix.
+>
+> **Where ZERO is headed:** [`docs/PLAN.md`](docs/PLAN.md) — the roadmap to a
+> present, learning, proactive companion (identity, agentic tool use, human-like
+> memory, self-directed learning, proactivity), each module designed against
+> this codebase with prior-art research.
+
 ## Setup (on the Pi 5)
 
 ```bash

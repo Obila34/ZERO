@@ -37,11 +37,17 @@ class FallbackSTT(STT):
                           "while the primary is down: %s", e)
         return self._fallback
 
+    degraded = False  # True while the last transcription used the fallback —
+                      # self-state narration reads this
+
     def transcribe(self, audio: np.ndarray, sample_rate: int) -> str:
         try:
-            return self._primary.transcribe(audio, sample_rate)
+            text = self._primary.transcribe(audio, sample_rate)
+            self.degraded = False
+            return text
         except Exception as e:
             log.warning("primary STT failed: %s", e)
+        self.degraded = True
         fallback = self._get_fallback()
         if fallback is None:
             return ""

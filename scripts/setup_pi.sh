@@ -40,6 +40,15 @@ if [ ! -x piper/piper ]; then
   tar -xzf piper.tar.gz
 fi
 
+echo "== identity models (voice + face embedders) =="
+mkdir -p models/voiceid models/identity
+[ -f models/voiceid/voxceleb_ECAPA512_LM.onnx ] || wget -O models/voiceid/voxceleb_ECAPA512_LM.onnx \
+  https://huggingface.co/Wespeaker/wespeaker-ecapa-tdnn512-LM/resolve/main/voxceleb_ECAPA512_LM.onnx || true
+# ArcFace face embedder (InsightFace buffalo_l recognition model, 512-d).
+[ -f models/identity/arcface.onnx ] || wget -O models/identity/arcface.onnx \
+  https://huggingface.co/public-data/insightface/resolve/main/models/buffalo_l/w600k_r50.onnx || true
+pip install opencv-python-headless || true   # Haar face detection (identity)
+
 echo "== optional local STT fallback (whisper base.en) =="
 mkdir -p models/whisper
 [ -f models/whisper/ggml-base.en.bin ] || wget -O models/whisper/ggml-base.en.bin \

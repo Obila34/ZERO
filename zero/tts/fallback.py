@@ -42,6 +42,8 @@ class FallbackTTS(TTS):
         self._builder = fallback_builder
         self._fallback: Optional[TTS] = None
         self._fallback_broken = False  # builder failed once — don't retry every turn
+        self.degraded = False  # True while the last utterance used the fallback
+                               # voice — self-state narration reads this
 
     @property
     def sample_rate(self) -> int:  # type: ignore[override]
@@ -78,8 +80,10 @@ class FallbackTTS(TTS):
         except Exception as e:
             log.warning("primary TTS failed: %s", e)
         if getattr(audio, "size", 0):
+            self.degraded = False
             return audio
         # Non-empty text but no audio back = the primary is down.
+        self.degraded = True
         return self._fallback_audio(text)
 
     def synthesize_stream(self, text: str) -> Iterator[np.ndarray]:
@@ -93,7 +97,9 @@ class FallbackTTS(TTS):
         except Exception as e:
             log.warning("primary TTS stream failed: %s", e)
         if yielded:
+            self.degraded = False
             return  # got at least partial audio; don't repeat the sentence
+        self.degraded = True
         audio = self._fallback_audio(text)
         if getattr(audio, "size", 0):
             yield audio

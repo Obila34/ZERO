@@ -69,8 +69,13 @@ def health():
 async def transcribe(request: Request):
     data = await request.body()
     t = time.time()
+    # Per-request language override: ?language=sw, or ?language=auto to let
+    # Whisper detect (code-switched English/Swahili works best on auto).
+    lang = request.query_params.get("language", _lang) or _lang
+    if lang.lower() == "auto":
+        lang = None
     segments, _info = _model.transcribe(
-        io.BytesIO(data), language=_lang, beam_size=1,
+        io.BytesIO(data), language=lang, beam_size=1,
     )
     text = " ".join(s.text for s in segments).strip()
     dt = time.time() - t

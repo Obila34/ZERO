@@ -62,6 +62,7 @@ def build_stt(cfg: Config) -> STT:
         remote = RemoteSTT(
             url=cfg.get("stt.remote_url", "http://127.0.0.1:9000/transcribe"),
             timeout=cfg.get("stt.remote_timeout", 30),
+            language=cfg.get("stt.language"),
         )
         # Optional local failover so a dropped tunnel doesn't leave ZERO deaf.
         # The local engine is built lazily on the first remote failure.
@@ -142,12 +143,42 @@ def build_voice(cfg: Config) -> VoiceOrchestrator:
     return VoiceOrchestrator(engine_name=engine_name, tts=tts, nonverbals_dir=nonverbals)
 
 
+def build_tools(cfg: Config, llm: LLM, memory, events, context_provider=None):
+    """Wrap the LLM with the tool router, or return it untouched if tools are
+    off. Returns (llm, registry, timer_manager) — registry/timers are None
+    when disabled."""
+    if not cfg.get("tools.enabled", True):
+        return llm, None, None
+    from zero.tools.builtin import (
+        RecallTool, RememberTool, ReminderTool, TimeTool, TimerTool,
+    )
+    from zero.tools.registry import ToolRegistry
+    from zero.tools.router import ToolAwareLLM
+    from zero.tools.timers import TimerManager
+
+    timers = TimerManager(events)
+    registry = ToolRegistry(allow=cfg.get("tools.allow"))
+    for tool in (TimeTool(), TimerTool(timers), ReminderTool(timers),
+                 RememberTool(), RecallTool()):
+        registry.register(tool)
+    wrapped = ToolAwareLLM(llm, registry, context_provider=context_provider)
+    return wrapped, registry, timers
+
+
 def build_memory(cfg: Config):
     """Long-term memory store, or None if disabled in config."""
     if not cfg.get("memory.enabled", True):
         return None
+    from zero.memory.embeddings import build_embedder
     from zero.memory.sqlite_memory import SqliteMemory
 
+    embedder = build_embedder(
+        cfg.get("memory.embeddings.backend", "auto"),
+        host=cfg.get("llm.host", ""),
+        model=cfg.get("memory.embeddings.ollama_model",
+                      cfg.get("llm.model", "")),
+        hash_dim=cfg.get("memory.embeddings.hash_dim", 256),
+    )
     path = cfg.resolve_path("memory.path", "zero_memory.sqlite")
     return SqliteMemory(
         path=str(path),
@@ -155,6 +186,12 @@ def build_memory(cfg: Config):
         recent_episodes=cfg.get("memory.recent_episodes", 3),
         max_stored_facts=cfg.get("memory.max_stored_facts", 200),
         max_stored_episodes=cfg.get("memory.max_stored_episodes", 100),
+        embedder=embedder,
+        top_k=cfg.get("memory.retrieval.top_k", 6),
+        half_life_days=cfg.get("memory.retrieval.half_life_days", 14.0),
+        min_activation=cfg.get("memory.retrieval.min_activation", 0.05),
+        forget_max_age_days=cfg.get("memory.forgetting.max_age_days", 90.0),
+        forgetting=cfg.get("memory.forgetting.enabled", True),
     )
 
 
@@ -186,30 +223,43 @@ def build_vision(cfg: Config):
         request_fps=cfg.get("vision.camera.request_fps", 30),
         mjpg=cfg.get("vision.camera.mjpg", True),
     )
-    model_path = cfg.resolve_path("vision.detect.model_path", "yolo11n.onnx")
-    # Optional explicit open-vocabulary names file; otherwise the detector
-    # auto-loads a sibling "<model>.names.json" or falls back to COCO-80.
-    names = None
-    names_cfg = cfg.get("vision.detect.names_path")
-    if names_cfg:
-        import json
+    def _local_detector():
+        model_path = cfg.resolve_path("vision.detect.model_path", "yolo11n.onnx")
+        # Optional explicit open-vocabulary names file; otherwise the detector
+        # auto-loads a sibling "<model>.names.json" or falls back to COCO-80.
+        names = None
+        names_cfg = cfg.get("vision.detect.names_path")
+        if names_cfg:
+            import json
 
-        names_path = cfg.resolve_path("vision.detect.names_path", names_cfg)
-        try:
-            names = json.loads(Path(names_path).read_text(encoding="utf-8"))
-            log.info("open-vocab names loaded (%d) from %s", len(names), names_path)
-        except (ValueError, OSError) as e:
-            log.warning("could not load names_path %s — using model default: %s",
-                        names_path, e)
-    detector = Detector(
-        model_path=str(model_path),
-        confidence=cfg.get("vision.detect.confidence", 0.35),
-        iou=cfg.get("vision.detect.iou", 0.45),
-        device=cfg.get("vision.detect.device", "cpu"),
-        imgsz=cfg.get("vision.detect.imgsz", 640),
-        classes=cfg.get("vision.detect.classes"),
-        names=names,
-    )
+            names_path = cfg.resolve_path("vision.detect.names_path", names_cfg)
+            try:
+                names = json.loads(Path(names_path).read_text(encoding="utf-8"))
+                log.info("open-vocab names loaded (%d) from %s",
+                         len(names), names_path)
+            except (ValueError, OSError) as e:
+                log.warning("could not load names_path %s — using model "
+                            "default: %s", names_path, e)
+        return Detector(
+            model_path=str(model_path),
+            confidence=cfg.get("vision.detect.confidence", 0.35),
+            iou=cfg.get("vision.detect.iou", 0.45),
+            device=cfg.get("vision.detect.device", "cpu"),
+            imgsz=cfg.get("vision.detect.imgsz", 640),
+            classes=cfg.get("vision.detect.classes"),
+            names=names,
+        )
+
+    perception_client = build_perception_client(cfg)
+    if perception_client is not None:
+        # GPU-first (Phase 8): YOLO11x on the server; local YOLO11s is the
+        # lazily-built tunnel-outage fallback.
+        from zero.perception.remote import FallbackDetector, RemoteDetector
+
+        detector = FallbackDetector(RemoteDetector(perception_client),
+                                    _local_detector)
+    else:
+        detector = _local_detector()
     namer = ColorNamer(
         center_crop=cfg.get("vision.color.center_crop", 0.6),
         min_saturation=cfg.get("vision.color.min_saturation", 50),
@@ -218,6 +268,43 @@ def build_vision(cfg: Config):
         min_colorful_ratio=cfg.get("vision.color.min_colorful_ratio", 0.10),
         min_pixels=cfg.get("vision.color.min_pixels", 50),
     )
+    learned = None
+    if cfg.get("learning.objects.enabled", True):
+        try:
+            from zero.vision.learned import LearnedObjects, build_object_embedder
+
+            def _local_embedder():
+                clip_path = None
+                if cfg.get("learning.objects.clip_model_path"):
+                    p = cfg.resolve_path("learning.objects.clip_model_path")
+                    clip_path = str(p) if p is not None and p.exists() else None
+                return build_object_embedder(clip_path)
+
+            if perception_client is not None:
+                # GPU-first (Phase 8): real CLIP embeddings server-side; the
+                # local (histogram/CLIP-onnx) embedder covers outages. CLIP's
+                # tighter space earns a lower match threshold.
+                from zero.perception.remote import (
+                    FallbackObjectEmbedder, RemoteObjectEmbedder,
+                )
+
+                embedder = FallbackObjectEmbedder(
+                    RemoteObjectEmbedder(perception_client), _local_embedder)
+                threshold = cfg.get("learning.objects.match_threshold_clip", 0.72)
+            else:
+                embedder = _local_embedder()
+                threshold = cfg.get("learning.objects.match_threshold", 0.80)
+            learned = LearnedObjects(
+                str(cfg.resolve_path("learning.objects.db_path",
+                                     "zero_objects.sqlite")),
+                embedder,
+                match_threshold=threshold,
+                max_samples_per_object=cfg.get(
+                    "learning.objects.max_samples_per_object", 5),
+            )
+        except Exception as e:
+            log.warning("learned objects unavailable: %s", e)
+
     client = None
     if cfg.get("vision.gpu.enabled", True):
         client = VisionClient(
@@ -248,7 +335,178 @@ def build_vision(cfg: Config):
         # LAN unless config.yaml explicitly asks for 0.0.0.0.
         preview_host=cfg.get("vision.preview_host", "127.0.0.1"),
         preview_port=cfg.get("vision.preview_port", 8008),
+        learned=learned,
+        unknown_conf=cfg.get("learning.objects.unknown_conf", 0.45),
     )
+
+
+def build_perception_client(cfg: Config):
+    """Shared HTTP client for the GPU /perceive/* endpoints, or None when the
+    remote-perception offload is disabled."""
+    if not cfg.get("perception.remote.enabled", True):
+        return None
+    from zero.perception.remote import PerceptionClient
+
+    return PerceptionClient(
+        base_url=cfg.get("perception.remote.base_url", "http://127.0.0.1:8000"),
+        timeout=cfg.get("perception.remote.timeout_s", 5.0),
+        detect_timeout=cfg.get("perception.remote.detect_timeout_s", 10.0),
+        jpeg_quality=cfg.get("perception.remote.jpeg_quality", 80),
+    )
+
+
+def build_identity(cfg: Config):
+    """Face+voice identity service, or None (anonymous mode) if disabled or no
+    usable model is present. Each channel degrades independently: no face model
+    -> voice-only; no voice model -> face-only."""
+    from zero.utils.logging import get_logger
+
+    log = get_logger("identity")
+    if not cfg.get("identity.enabled", False):
+        return None
+    from zero.identity.fuser import IdentityFuser
+    from zero.identity.registry import PersonRegistry
+    from zero.identity.service import IdentityService
+
+    client = build_perception_client(cfg)
+
+    def _local_voice():
+        v_path = cfg.resolve_path("identity.voice.model_path",
+                                  "models/voiceid/voxceleb_ECAPA512_LM.onnx")
+        if v_path is None or not v_path.exists():
+            raise FileNotFoundError(f"voice model missing: {v_path}")
+        from zero.voiceid.speaker import SpeakerVerifier
+
+        return SpeakerVerifier(str(v_path))
+
+    def _local_face():
+        f_path = cfg.resolve_path("identity.face.model_path")
+        if f_path is None or not f_path.exists():
+            raise FileNotFoundError(f"face model missing: {f_path}")
+        from zero.identity.face import FaceRecognizer
+
+        return FaceRecognizer(str(f_path),
+                              min_size=cfg.get("identity.face.min_size", 60))
+
+    voice = face = None
+    if client is not None:
+        # GPU-first (Phase 8): embeddings computed server-side, local models
+        # only as lazily-built fallbacks for tunnel outages.
+        from zero.perception.remote import (
+            FallbackFace, FallbackSpeaker, RemoteFaceRecognizer,
+            RemoteSpeakerEmbedder,
+        )
+
+        voice = FallbackSpeaker(RemoteSpeakerEmbedder(client), _local_voice)
+        face = FallbackFace(RemoteFaceRecognizer(client), _local_face)
+    else:
+        try:
+            voice = _local_voice()
+        except Exception as e:
+            log.warning("identity voice channel unavailable: %s — face-only", e)
+        if cfg.get("identity.face.model_path"):
+            try:
+                face = _local_face()
+            except Exception as e:
+                log.warning("identity face channel unavailable: %s — voice-only", e)
+
+    if voice is None and face is None:
+        log.warning("identity enabled but no usable models — running anonymous")
+        return None
+
+    registry = PersonRegistry(
+        str(cfg.resolve_path("identity.db_path", "zero_identity.sqlite")),
+        max_samples_per_kind=cfg.get("identity.max_samples_per_kind", 5),
+    )
+    fuser = IdentityFuser(
+        w_face=cfg.get("identity.fusion.w_face", 0.55),
+        w_voice=cfg.get("identity.fusion.w_voice", 0.45),
+        threshold=cfg.get("identity.fusion.threshold", 0.50),
+        face_threshold=cfg.get("identity.fusion.face_threshold", 0.42),
+        voice_threshold=cfg.get("identity.fusion.voice_threshold", 0.45),
+    )
+    return IdentityService(
+        registry, fuser, voice_embedder=voice, face_recognizer=face,
+        reinforce_threshold=cfg.get("identity.reinforce_threshold", 0.70),
+    )
+
+
+def build_privacy(cfg: Config):
+    """(PrivacyGuard, ListeningIndicator) — both always exist; the guard's
+    mode and the LED pin come from config."""
+    from zero.privacy.guard import PrivacyGuard
+    from zero.privacy.indicator import ListeningIndicator
+
+    guard = PrivacyGuard(mode=cfg.get("privacy.bystander_mode", "guarded"))
+    indicator = ListeningIndicator(gpio_pin=cfg.get("privacy.indicator_gpio_pin"))
+    return guard, indicator
+
+
+def build_perception(cfg: Config, identity=None):
+    """(AffectEstimator | None, SpeakerTracker | None) per config."""
+    affect = None
+    if cfg.get("perception.affect.enabled", True):
+        from zero.perception.affect import AffectEstimator
+
+        fer_path = None
+        if cfg.get("perception.affect.face_model_path"):
+            p = cfg.resolve_path("perception.affect.face_model_path")
+            fer_path = str(p) if p is not None and p.exists() else None
+        affect = AffectEstimator(
+            face_model_path=fer_path,
+            face_detector=getattr(identity, "face_detector", None),
+        )
+    tracker = None
+    if cfg.get("perception.diarize.enabled", True):
+        from zero.perception.diarize import SpeakerTracker
+
+        tracker = SpeakerTracker(
+            change_threshold=cfg.get("perception.diarize.change_threshold", 0.40))
+    return affect, tracker
+
+
+def build_proactive(cfg: Config, *, events, eyes, identity, memory, is_idle):
+    """The proactive stack: curiosity queue + policy + trigger watcher.
+    Returns (triggers, curiosity, policy) — all None when disabled. Greetings
+    need eyes+identity; curiosity questions and idle learning still run
+    without them (from timers/memory alone there's little to do, so the
+    watcher only starts when it has at least one real signal source)."""
+    from zero.utils.logging import get_logger
+
+    log = get_logger("proactive")
+    if not cfg.get("proactive.enabled", True):
+        return None, None, None
+    from zero.proactive.curiosity import CuriosityStore
+    from zero.proactive.policy import InteractionPolicy
+    from zero.proactive.triggers import TriggerSource
+
+    curiosity = None
+    if cfg.get("learning.curiosity.enabled", True):
+        curiosity = CuriosityStore(
+            str(cfg.resolve_path("learning.curiosity.db_path",
+                                 "zero_curiosity.sqlite")),
+            max_pending=cfg.get("learning.curiosity.max_pending", 20),
+        )
+    quiet = cfg.get("proactive.quiet_hours", [22, 7])
+    policy = InteractionPolicy(
+        enabled=True,
+        greet_cooldown_s=cfg.get("proactive.greet_cooldown_s", 4 * 3600),
+        curiosity_cooldown_s=cfg.get("proactive.curiosity_cooldown_s", 1800),
+        max_per_hour=cfg.get("proactive.max_per_hour", 6),
+        quiet_hours=tuple(quiet) if quiet else None,
+        presence_reset_s=cfg.get("proactive.presence_reset_s", 1200),
+    )
+    if eyes is None and identity is None and curiosity is None:
+        log.info("proactive on, but no signal sources — watcher not started")
+        return None, curiosity, policy
+    triggers = TriggerSource(
+        events=events, policy=policy, eyes=eyes, identity=identity,
+        curiosity=curiosity, memory=memory, is_idle=is_idle,
+        check_interval_s=cfg.get("proactive.check_interval_s", 3.0),
+        linger_before_question_s=cfg.get("proactive.linger_s", 45.0),
+        consolidate_interval_s=cfg.get("proactive.consolidate_interval_s", 1800),
+    )
+    return triggers, curiosity, policy
 
 
 def build_voiceid(cfg: Config):

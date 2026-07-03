@@ -5,10 +5,10 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=CHANGEME
-Environment=GPU_HOST=user@gpu-box
+User=head
+Environment=GPU_HOST=obilasam3@zerolabs1
 Environment=AUTOSSH_GATETIME=0
-ExecStart=/home/CHANGEME/ZERO/scripts/pi_tunnel.sh
+ExecStart=/home/head/Mzee/offline_v5/scripts/pi_tunnel.sh
 Restart=always
 RestartSec=3
 

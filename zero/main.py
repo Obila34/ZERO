@@ -19,10 +19,17 @@ import time
 
 from zero.config import load_config
 from zero.conversation import Conversation
+from zero.events import EventBus
 from zero.factory import (
-    build_endpointer, build_llm, build_memory, build_stt, build_vision, build_voice,
-    build_voiceid, build_wake,
+    build_endpointer, build_identity, build_llm, build_memory, build_perception,
+    build_privacy, build_proactive, build_stt, build_tools, build_vision,
+    build_voice, build_voiceid, build_wake,
 )
+from zero.privacy.guard import parse_forget_command
+from zero.identity.service import parse_enrollment
+from zero.memory.preferences import apply_rate_delta, parse_preference
+from zero.tools.base import ToolContext
+from zero.vision.learned import parse_object_teach
 from zero.llm.persona import build_system_prompt
 from zero.state import State, can_transition
 from zero.tts.orchestrator import split_sentences
@@ -120,7 +127,13 @@ class Zero:
         # voice are only built for the full voice pipeline — so text mode runs on
         # a box with no mic/Piper/whisper installed (just to test brain + memory).
         log.info("loading engines...")
-        self.llm = build_llm(self.cfg)
+        self.events = EventBus()
+        self.memory = build_memory(self.cfg)  # long-term SQLite store (or None)
+        base_llm = build_llm(self.cfg)
+        self.llm, self.tool_registry, self.timers = build_tools(
+            self.cfg, base_llm, self.memory, self.events,
+            context_provider=self._tool_context,
+        )
         if not text_mode:
             # Lazy import so text mode doesn't require sounddevice/numpy/portaudio.
             from zero.audio.capture import MicCapture
@@ -143,13 +156,20 @@ class Zero:
         else:
             self.eyes = None
 
-        system_prompt = build_system_prompt()
+        tool_block = (self.tool_registry.spec_block()
+                      if self.tool_registry is not None else "")
+        lang_block = ""
+        if self.cfg.get("conversation.multilingual", True):
+            lang_block = (
+                "Language: if the person speaks Swahili, or mixes Swahili and "
+                "English (Sheng-style), reply in the same language or mix, "
+                "naturally. Never point out the switch — just flow with it.")
+        system_prompt = build_system_prompt(tool_block, lang_block)
         self.convo = Conversation(
             system_prompt=system_prompt,
             history_turns=self.cfg.get("llm.history_turns", 3),
             trim_at_turns=self.cfg.get("llm.history_trim_at", 8),
         )
-        self.memory = build_memory(self.cfg)  # long-term SQLite store (or None)
         self.state = State.IDLE
         self._interrupt = False  # set by the barge-in monitor to stop playback
         self._memory_thread: threading.Thread | None = None  # background fact save
@@ -157,13 +177,83 @@ class Zero:
         # Voice-only extras (need the voice/mic): owner verification + spoken fillers.
         self._filler_prob = self.cfg.get("conversation.filler_probability", 0.5)
         self._fillers = {}
+        self._person = None  # IdentityResult of the current speaker (or None)
         if not text_mode:
             self.voiceid, self._voiceprint = build_voiceid(self.cfg)
             if self.voiceid is not None:
                 log.info("voice ID active — only the enrolled voice will be answered")
+            self.identity = build_identity(self.cfg)
+            self.privacy, self.indicator = build_privacy(self.cfg)
+            self.affect, self.speaker_tracker = build_perception(
+                self.cfg, self.identity)
+            self.proactive, self.curiosity, self.policy = build_proactive(
+                self.cfg, events=self.events, eyes=self.eyes,
+                identity=self.identity, memory=self.memory,
+                is_idle=lambda: self.state == State.IDLE,
+            )
             self._fillers = self._presynth_fillers()
         else:
             self.voiceid, self._voiceprint = None, None
+            self.identity = None
+            self.privacy, self.indicator = None, None
+            self.affect, self.speaker_tracker = None, None
+            self.proactive, self.curiosity, self.policy = None, None, None
+
+    def _self_state_notes(self) -> list[str]:
+        """One-time notes when a pipeline stage degrades to (or recovers from)
+        its local fallback — so ZERO can say 'I'm on my backup voice' instead
+        of pretending nothing changed."""
+        notes: list[str] = []
+        if not hasattr(self, "_degraded_flags"):
+            self._degraded_flags = {"tts": False, "stt": False}
+        checks = (
+            ("tts", bool(getattr(self.voice, "degraded", False)),
+             "(Your main voice is down — you're speaking through your local "
+             "backup voice right now. If it comes up, be upfront about it.)"),
+            ("stt", bool(getattr(self.stt, "degraded", False)),
+             "(Your fast hearing is down — you're transcribing locally, which "
+             "is slower. If asked why you're slow, that's why.)"),
+        )
+        for key, now_degraded, note in checks:
+            if now_degraded and not self._degraded_flags[key]:
+                notes.append(note)
+            self._degraded_flags[key] = now_degraded
+        return notes
+
+    def _tool_context(self) -> ToolContext:
+        """Fresh, narrow context for a tool run — who's speaking now, plus the
+        memory store and event bus."""
+        person = self._person
+        return ToolContext(
+            memory=self.memory, events=self.events,
+            person_id=person.person_id if person is not None else None,
+            person_name=person.name if person is not None else None,
+        )
+
+    def _drain_events(self) -> bool:
+        """Speak any queued announcements (timers, reminders, proactive nudges).
+        Called at safe moments only: idle wake-wait and turn boundaries, so an
+        announcement never talks over a reply. Returns True when an event asked
+        to OPEN A CONVERSATION (a greeting or a curiosity question expects a
+        reply — ZERO should listen, not go back to sleep)."""
+        if self.text_mode:
+            return False
+        open_conversation = False
+        for event in self.events.drain():
+            log.info("announcing %s: %s", event.kind, event.text)
+            prev = self.state
+            self._to(State.SPEAKING)
+            try:
+                self._speak_one(event.text)
+                if event.meta.get("open_conversation"):
+                    open_conversation = True
+                    # The opener is real dialogue — _converse() folds it into
+                    # the fresh history so the LLM knows it said it.
+                    self._pending_opener = event.text
+            except Exception as e:  # an announcement must never kill the loop
+                log.warning("announcement failed: %s", e)
+            self._to(prev if prev != State.SPEAKING else State.IDLE)
+        return open_conversation
 
     _DEFAULT_FILLERS = {
         "question": ["Good question, let me think.", "Hmm, let me think about that.",
@@ -198,6 +288,8 @@ class Zero:
             log.warning("illegal transition %s -> %s", self.state, dst)
         log.debug("state: %s -> %s", self.state, dst)
         self.state = dst
+        if self.indicator is not None:   # the visible "I can hear you" signal
+            self.indicator.set_state(dst.name.lower())
 
     def _start_conversation(self) -> None:
         """Fresh history + load long-term memory (injected once, cache-friendly)."""
@@ -262,24 +354,41 @@ class Zero:
             except Exception as e:  # a missing camera must not stop voice working
                 log.warning("could not start eyes — running voice-only: %s", e)
                 self.eyes = None
+        if self.proactive is not None:
+            self.proactive.start()  # presence greetings + curiosity + idle learning
         log.info("ZERO ready. Say the wake word to start talking. (Ctrl-C to quit)")
         try:
             while True:
-                self._wait_for_wake()   # IDLE: wait for "Hey Jarvis" to begin
+                self._wait_for_wake()   # IDLE: wake word OR a proactive opener
                 self._converse()        # free-flowing multi-turn until sleep/stop
         except KeyboardInterrupt:
             print()
             log.info("shutting down")
         finally:
+            if self.proactive is not None:
+                self.proactive.stop()
             self.mic.stop()
             if self.eyes is not None:
                 self.eyes.stop()
+            if self.indicator is not None:
+                self.indicator.close()
             self._join_memory_thread()
 
     def _wait_for_wake(self) -> None:
         self._to(State.IDLE)
         self.wake.reset()
         for frame in self.mic.frames():
+            if self.events.peek_pending():
+                opened = self._drain_events()  # timers/greetings fire in IDLE
+                if opened:
+                    # A proactive opener (greeting / curiosity question) expects
+                    # an answer — enter the conversation without a wake word.
+                    log.info("proactive opener — conversation open")
+                    return
+                self._to(State.IDLE)
+                self.wake.reset()
+                self.mic.resume()
+                self.mic.drain()               # drop our own announcement audio
             if self.wake.process(frame):
                 log.info("wake word! let's talk.")
                 return
@@ -298,11 +407,20 @@ class Zero:
         # prefix stable, so the cache stays warm through the conversation).
         if self.memory is not None:
             self.convo.set_memory(self.memory.as_block())
+        # A proactive opener ("Hey David, welcome back.") started this
+        # conversation — seed it as the first assistant turn.
+        opener = getattr(self, "_pending_opener", None)
+        if opener:
+            self.convo.add_assistant(opener)
+            self._pending_opener = None
+        if self.speaker_tracker is not None:
+            self.speaker_tracker.reset()   # a new conversation, a clean slate
         sr = self.cfg.get("audio.sample_rate", 16000)
         idle_s = self.cfg.get("conversation.sleep_timeout_ms", 30000) / 1000.0
         log.info("conversation open — just talk (say 'goodbye' to stop)")
 
         while True:
+            self._drain_events()  # timers/reminders land at turn boundaries
             self._to(State.LISTENING)
             self.mic.resume()  # re-open the mic for the user's turn
             self.mic.drain()   # drop audio captured while we were speaking/thinking
@@ -328,9 +446,131 @@ class Zero:
                     continue
                 log.debug("owner verified (voice score %.2f)", score)
 
+            # Who is speaking? Face (current frame) + voice (this utterance),
+            # fused. Local + fast; never on the critical path of a failure.
+            frame = self.eyes.current_frame() if self.eyes is not None else None
+            self._turn_notes = []
+            if self.identity is not None:
+                ident = self.identity.identify(audio=utterance, frame_rgb=frame)
+                self._person = ident if ident.is_known else None
+                # Diarization: notice when a DIFFERENT person takes over.
+                if self.speaker_tracker is not None:
+                    change_note = self.speaker_tracker.update(
+                        person_id=ident.person_id if ident.is_known else None,
+                        name=ident.name if ident.is_known else None,
+                        voice_emb=self.identity.voice_embedding(utterance),
+                    )
+                    if change_note:
+                        self._turn_notes.append(change_note)
+
+            # Bystander gate BEFORE transcription: in strict mode an unknown
+            # voice isn't even transcribed — nothing to act on, nothing kept.
+            decision = None
+            if self.privacy is not None and self.identity is not None:
+                decision = self.privacy.decide(self._person)
+                if not decision.respond:
+                    continue
+            self._memory_allowed = decision.store_memory if decision else True
+
             text = self.stt.transcribe(utterance, sr).strip()
             if not text:
                 continue  # misfire / noise — keep listening, stay in conversation
+
+            # Erasure on request: "forget that" / "forget everything about me".
+            forget = parse_forget_command(text)
+            if forget and self.memory is not None:
+                pid = self._person.person_id if self._person is not None else None
+                if forget == "me":
+                    n = self.memory.forget_person(pid) if pid is not None else 0
+                    if self._person is not None and self.identity is not None:
+                        self.identity.forget(self._person.name)
+                        line = (f"Done — I've forgotten everything about you, "
+                                f"{self._person.name}, including your face and "
+                                "voice.")
+                        self._person = None
+                    else:
+                        line = ("I don't have anything stored about you "
+                                "specifically." if n == 0 else "Done.")
+                else:
+                    what = self.memory.forget_last(
+                        self._person.person_id if self._person else None)
+                    line = ("Forgotten." if what
+                            else "There's nothing recent to forget.")
+                self._to(State.SPEAKING)
+                self._speak_one(line)
+                self.convo.add_user(text)
+                self.convo.add_assistant(line)
+                continue
+
+            # Affect: a coarse read of tone (voice prosody + words + face).
+            # Only notable, confident reads reach the LLM — never a guess.
+            if self.affect is not None:
+                mood = self.affect.estimate(utterance, sr, text, frame_rgb=frame)
+                if mood.notable:
+                    self._turn_notes.append(
+                        f"(The speaker sounds {mood.label} right now — "
+                        "let that shape your tone, don't comment on it.)")
+
+            # Self-state narration: when a stage is running on its fallback,
+            # ZERO knows — and can be upfront instead of sounding "off".
+            self._turn_notes.extend(self._self_state_notes())
+
+            # Conversational enrolment: "I'm David" / "my name is David" —
+            # capture this moment's face + voice and remember the person.
+            if self.identity is not None:
+                new_name = parse_enrollment(text)
+                if new_name:
+                    result, kinds = self.identity.enroll(
+                        new_name, audio=utterance, frame_rgb=frame)
+                    if kinds:
+                        self._person = result
+                        senses = " and ".join(kinds)
+                        line = (f"Nice to meet you, {new_name}. "
+                                f"I'll remember your {senses}.")
+                    else:
+                        line = (f"Nice to meet you, {new_name} — but I couldn't "
+                                "get a good look or listen, so tell me again "
+                                "in a moment.")
+                    self._to(State.SPEAKING)
+                    self._speak_one(line)
+                    self.convo.add_user(text)
+                    self.convo.add_assistant(line)
+                    continue
+
+            # Object teaching: "this is a french press" — the article is what
+            # separates an OBJECT from a person ("this is Peter"). Binds the
+            # current crop to the name; the detector hint uses it from now on.
+            obj_name = parse_object_teach(text) if self.eyes is not None else None
+            if obj_name:
+                pid = self._person.person_id if self._person is not None else None
+                ok = self.eyes.teach_object(obj_name, person_id=pid)
+                line = (f"Got it — that's a {obj_name}. I'll recognise it now."
+                        if ok else
+                        "I want to learn that, but I can't get a good look "
+                        "right now — hold it up for me and tell me again.")
+                self._to(State.SPEAKING)
+                self._speak_one(line)
+                self.convo.add_user(text)
+                self.convo.add_assistant(line)
+                continue
+
+            # Behavioural corrections: "speak slower", "keep it short" — stored
+            # as standing preferences and applied to engine knobs where one exists.
+            if self.memory is not None and self.cfg.get("preferences.enabled", True):
+                pref = parse_preference(text)
+                if pref is not None:
+                    pref_text, rate_delta = pref
+                    pid = (self._person.person_id
+                           if self._person is not None else None)
+                    self.memory.set_preference(pref_text, person_id=pid)
+                    if rate_delta is not None:
+                        apply_rate_delta(self.voice, rate_delta)
+                    line = f"Okay — I'll {pref_text} from now on."
+                    self._to(State.SPEAKING)
+                    self._speak_one(line)
+                    self.convo.add_user(text)
+                    self.convo.add_assistant(line)
+                    continue
 
             if self._is_stop(text):
                 self._to(State.SPEAKING)
@@ -404,14 +644,37 @@ class Zero:
         model to treat the parenthetical as its own perception, not user text.
         """
         note, images = self._look(text)
-        if not (note or images):
+        ident = self._person
+        id_note = (
+            f"(You recognise the speaker — it's {ident.name}.)"
+            if ident is not None and ident.is_known else ""
+        )
+        # Relevance recall: what a human would "think of" hearing this turn —
+        # ephemeral, attached to the outgoing copy only, never history.
+        recall_note = ""
+        if self.memory is not None:
+            try:
+                pid = ident.person_id if ident is not None else None
+                recalled = self.memory.relevant_block(text, person_id=pid)
+                if recalled:
+                    recall_note = f"(This reminds you of things you know: {recalled}.)"
+            except Exception as e:  # recall must never break a turn
+                log.debug("recall failed: %s", e)
+        turn_notes = list(getattr(self, "_turn_notes", []) or [])
+        if not (note or images or id_note or recall_note or turn_notes):
             return messages
         last = dict(messages[-1])
+        extras = []
+        if id_note:
+            extras.append(id_note)
+        extras.extend(turn_notes)   # speaker change, affect — this turn only
+        if recall_note:
+            extras.append(recall_note)
         if note:
-            last["content"] = (
-                f"{last['content']}\n\n"
-                f"(Right now, through your camera, you can see: {note}.)"
-            )
+            extras.append(
+                f"(Right now, through your camera, you can see: {note}.)")
+        if extras:
+            last["content"] = last["content"] + "\n\n" + "\n".join(extras)
         if images:
             last["images"] = images  # THIS turn only — not stored in history
         return [*messages[:-1], last]
@@ -420,14 +683,16 @@ class Zero:
     def _maybe_remember(self, text: str) -> None:
         """Explicit 'remember that ...' — store immediately so it survives even if
         the conversation never ends cleanly."""
-        if self.memory is None:
-            return
+        if self.memory is None or not getattr(self, "_memory_allowed", True):
+            return  # guarded/strict privacy: strangers are never remembered
         low = text.lower()
+        pid = self._person.person_id if self._person is not None else None
         for trigger in ("remember that ", "remember "):
             if low.startswith(trigger):
                 fact = text[len(trigger):].strip()
                 if fact:
-                    self.memory.remember(f"note ({int(time.time())})", fact)
+                    self.memory.remember(f"note ({int(time.time())})", fact,
+                                         person_id=pid, importance=7.0)
                 return
 
     def _end_conversation(self) -> None:
@@ -436,24 +701,52 @@ class Zero:
         listening for the wake word immediately instead of being deaf for seconds.
         The transcript is snapshotted first — the next conversation may reset the
         history while the save is still running."""
-        if self.memory is not None and self.convo._history:
+        if (self.memory is not None and self.convo._history
+                and getattr(self, "_memory_allowed", True)):
             transcript = self.convo.transcript()
+            pid = self._person.person_id if self._person is not None else None
             self._memory_thread = threading.Thread(
-                target=self._save_memories, args=(transcript,),
+                target=self._save_memories, args=(transcript, pid),
                 name="memory-save", daemon=True,
             )
             self._memory_thread.start()
+        self._person = None  # identity does not persist across conversations
         self._to(State.IDLE)
 
-    def _save_memories(self, transcript: str) -> None:
+    def _save_memories(self, transcript: str, person_id: int | None = None) -> None:
         try:
-            self._extract_facts(transcript)
+            self._extract_facts(transcript, person_id)
         except Exception as e:  # never let memory break the loop
             log.warning("memory extraction failed: %s", e)
         try:
-            self._summarize_session(transcript)  # episodic memory of the arc
+            self._summarize_session(transcript, person_id)  # episodic memory
         except Exception as e:
             log.warning("session summary failed: %s", e)
+        try:
+            # Sleep-phase pass: gentle forgetting + reflection over recent
+            # episodes into higher-level insights. Same background thread, so
+            # ZERO is already back listening while it "dreams".
+            stats = self.memory.consolidate(reflect_fn=self._reflect)
+            if stats.get("insights") or stats.get("forgotten"):
+                log.info("consolidated memory: %s", stats)
+        except Exception as e:
+            log.warning("memory consolidation failed: %s", e)
+
+    def _reflect(self, episodes_text: str) -> list[str]:
+        """Distil recent episode summaries into up to 3 higher-level insights."""
+        prompt = [
+            {"role": "system", "content": (
+                "Below are one-line summaries of your recent conversations with "
+                "the user. Infer up to 3 higher-level, durable insights about "
+                "them (habits, routines, ongoing situations, relationships). "
+                "One short sentence per line, no bullets. If none, output "
+                "exactly NONE.")},
+            {"role": "user", "content": episodes_text},
+        ]
+        result = "".join(self.llm.stream(prompt)).strip()
+        if not result or result.upper().startswith("NONE"):
+            return []
+        return [ln for ln in result.splitlines() if ln.strip()]
 
     def _join_memory_thread(self, timeout: float = 30.0) -> None:
         """Give an in-flight background memory save a chance to finish on shutdown."""
@@ -462,13 +755,14 @@ class Zero:
             log.info("finishing memory save...")
             t.join(timeout=timeout)
 
-    def _extract_facts(self, transcript: str) -> None:
+    def _extract_facts(self, transcript: str, person_id: int | None = None) -> None:
         prompt = [
             {"role": "system", "content": (
-                "Extract durable facts about the USER from the conversation. Output "
-                "only short 'key: value' lines for lasting facts (name, location, "
-                "job, preferences, ongoing projects, important personal details). "
-                "Use short lowercase keys. If there are no durable facts, output "
+                "Extract durable facts about the USER from the conversation. "
+                "Output only lines shaped 'key: value | N' where N is 1-10 — "
+                "how important this fact is to remember long-term (name/family "
+                "= 9-10, preferences/projects = 6-8, passing details = 2-4). "
+                "Short lowercase keys. If there are no durable facts, output "
                 "exactly NONE and nothing else.")},
             {"role": "user", "content": transcript},
         ]
@@ -476,11 +770,19 @@ class Zero:
         if not result or result.upper().startswith("NONE"):
             return
         for line in result.splitlines():
-            if ":" in line:
-                key, _, value = line.partition(":")
-                self.memory.remember(key.strip("-• ").strip(), value)
+            if ":" not in line:
+                continue
+            key, _, rest = line.partition(":")
+            value, _, imp_s = rest.partition("|")
+            try:
+                importance = float(imp_s.strip())
+            except ValueError:
+                importance = 5.0
+            self.memory.remember(key.strip("-• ").strip(), value.strip(),
+                                 person_id=person_id, importance=importance)
 
-    def _summarize_session(self, transcript: str) -> None:
+    def _summarize_session(self, transcript: str,
+                           person_id: int | None = None) -> None:
         """Write a one-line summary of the conversation into episodic memory, so
         next time ZERO can recall the ARC of past chats, not just isolated facts."""
         prompt = [
@@ -493,7 +795,7 @@ class Zero:
         ]
         summary = "".join(self.llm.stream(prompt)).strip()
         if summary and not summary.upper().startswith("NONE"):
-            self.memory.add_episode(summary)
+            self.memory.add_episode(summary, person_id=person_id)
 
     def _stream_in_background(self, messages) -> tuple:
         """Start the LLM streaming on a worker thread feeding a queue. Returns

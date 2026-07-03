@@ -42,6 +42,9 @@ Final reminder: You're not here to impress with trivia. You're here to connect, 
 """
 
 
-def build_system_prompt() -> str:
-    """The full system prompt. Edit SYSTEM_TEMPLATE above to change the persona."""
-    return SYSTEM_TEMPLATE
+def build_system_prompt(*extra_blocks: str) -> str:
+    """The full system prompt. Edit SYSTEM_TEMPLATE above to change the persona.
+    ``extra_blocks`` (tool specs, active preferences, self-state) are appended
+    as their own paragraphs — persona text stays untouched."""
+    blocks = [SYSTEM_TEMPLATE] + [b.strip() for b in extra_blocks if b and b.strip()]
+    return "\n\n".join(blocks)

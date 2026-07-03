@@ -1,0 +1,223 @@
+"""Tools: duration parsing, timers firing, registry allow-list, 3-tier router."""
+from __future__ import annotations
+
+import time
+
+import pytest
+
+from zero.events import Event, EventBus
+from zero.tools.base import Tool, ToolContext
+from zero.tools.builtin import (
+    RecallTool, RememberTool, ReminderTool, TimeTool, TimerTool,
+    parse_duration_s,
+)
+from zero.tools.registry import ToolRegistry
+from zero.tools.router import ToolAwareLLM
+from zero.tools.timers import TimerManager, humanize_s
+
+
+# ── duration parsing ─────────────────────────────────────────────────────────
+@pytest.mark.parametrize("text,seconds", [
+    ("5 minutes", 300), ("90 seconds", 90), ("1 hour", 3600),
+    ("1 hour 30 minutes", 5400), ("ten minutes", 600), ("an hour", 3600),
+    ("2m", 120), ("45s", 45), ("half an hour", 1800),
+])
+def test_parse_duration(text, seconds):
+    assert parse_duration_s(text) == seconds
+
+
+@pytest.mark.parametrize("text", ["", "tomorrow", "the weekend", "no time here"])
+def test_parse_duration_rejects(text):
+    assert parse_duration_s(text) is None
+
+
+def test_humanize():
+    assert humanize_s(90) == "1 minute 30 seconds"
+    assert humanize_s(3600) == "1 hour"
+    assert humanize_s(45) == "45 seconds"
+
+
+# ── timers fire onto the bus ─────────────────────────────────────────────────
+def test_timer_fires_event():
+    bus = EventBus()
+    tm = TimerManager(bus)
+    tm.set(0.6, "tea", kind="timer")
+    assert len(tm.active()) == 1
+    deadline = time.time() + 5.0
+    events = []
+    while not events and time.time() < deadline:
+        events = bus.drain()
+        time.sleep(0.05)
+    assert events and events[0].kind == "timer" and "tea" in events[0].text
+    assert tm.active() == []
+
+
+def test_timer_cancel():
+    bus = EventBus()
+    tm = TimerManager(bus)
+    tid = tm.set(30, "later")
+    assert tm.cancel(tid) is True
+    assert tm.active() == []
+    assert tm.cancel(tid) is False
+
+
+# ── registry / allow-list ────────────────────────────────────────────────────
+def test_allowlist_blocks_unlisted():
+    reg = ToolRegistry(allow=["time"])
+    assert reg.register(TimeTool()) is True
+    assert reg.register(RememberTool()) is False
+    assert reg.names() == ["time"]
+    assert "time:" in reg.spec_block()
+
+
+# ── fake LLM for router tests ────────────────────────────────────────────────
+class FakeLLM:
+    """Replays scripted replies, chunked to exercise the sniffing logic."""
+
+    def __init__(self, *replies: str, chunk: int = 7):
+        self.replies = list(replies)
+        self.chunk = chunk
+        self.calls: list[list] = []
+
+    def stream(self, messages):
+        self.calls.append(list(messages))
+        reply = self.replies.pop(0) if self.replies else ""
+        for i in range(0, len(reply), self.chunk):
+            yield reply[i:i + self.chunk]
+
+
+def _registry(memory=None):
+    bus = EventBus()
+    tm = TimerManager(bus)
+    reg = ToolRegistry()
+    for t in (TimeTool(), TimerTool(tm), ReminderTool(tm),
+              RememberTool(), RecallTool()):
+        reg.register(t)
+    return reg, bus, tm
+
+
+def _collect(gen):
+    return "".join(gen)
+
+
+def test_router_plain_chat_passthrough():
+    reg, _, _ = _registry()
+    llm = FakeLLM("Nairobi is the capital of Kenya.")
+    router = ToolAwareLLM(llm, reg)
+    out = _collect(router.stream([{"role": "user", "content": "capital of Kenya?"}]))
+    assert out == "Nairobi is the capital of Kenya."
+    assert len(llm.calls) == 1
+
+
+def test_router_tier1_timer_skips_llm():
+    reg, _, tm = _registry()
+    llm = FakeLLM("should never be called")
+    router = ToolAwareLLM(llm, reg)
+    out = _collect(router.stream(
+        [{"role": "user", "content": "Set a timer for 5 minutes"}]))
+    assert "5 minutes" in out and "Timer set" in out
+    assert llm.calls == []          # no LLM round-trip
+    assert len(tm.active()) == 1
+
+
+def test_router_tier1_time():
+    reg, _, _ = _registry()
+    router = ToolAwareLLM(FakeLLM("no"), reg)
+    out = _collect(router.stream([{"role": "user", "content": "What time is it?"}]))
+    assert "It's" in out
+
+
+def test_router_tier1_reminder():
+    reg, _, tm = _registry()
+    router = ToolAwareLLM(FakeLLM("no"), reg)
+    out = _collect(router.stream(
+        [{"role": "user", "content": "Remind me to check the oven in 10 minutes"}]))
+    assert "check the oven" in out and "10 minutes" in out
+    assert len(tm.active()) == 1
+
+
+def test_router_tier2_json_tool_call_and_rephrase():
+    reg, _, tm = _registry()
+    llm = FakeLLM(
+        '{"tool": "timer", "args": {"duration": "3 minutes", "label": "eggs"}}',
+        "Three minutes for your eggs — timer's running.",
+    )
+    router = ToolAwareLLM(llm, reg)
+    out = _collect(router.stream([{"role": "user", "content": "boil eggs timing"}]))
+    assert out == "Three minutes for your eggs — timer's running."
+    assert len(tm.active()) == 1
+    # Follow-up call carried the tool result back to the model.
+    assert any("Tool result" in str(m.get("content", ""))
+               for m in llm.calls[1])
+
+
+def test_router_tier2_unknown_tool_is_graceful():
+    reg, _, _ = _registry()
+    llm = FakeLLM('{"tool": "nuke", "args": {}}', "I can't do that one.")
+    router = ToolAwareLLM(llm, reg)
+    out = _collect(router.stream([{"role": "user", "content": "launch"}]))
+    assert out == "I can't do that one."
+    assert any("don't have a tool called nuke" in str(m.get("content", ""))
+               for m in llm.calls[1])
+
+
+def test_router_malformed_json_is_spoken_not_silent():
+    reg, _, _ = _registry()
+    llm = FakeLLM('{"tool": broken json here')
+    router = ToolAwareLLM(llm, reg)
+    out = _collect(router.stream([{"role": "user", "content": "hi"}]))
+    assert out == '{"tool": broken json here'   # spoken as-is, never mute
+
+
+def test_router_brace_prose_not_treated_as_tool():
+    reg, _, _ = _registry()
+    llm = FakeLLM("{ that's an odd way to open a sentence but fine.")
+    router = ToolAwareLLM(llm, reg)
+    out = _collect(router.stream([{"role": "user", "content": "hm"}]))
+    assert out.startswith("{ that's an odd way")
+
+
+def test_router_llm_death_still_speaks_result():
+    reg, _, _ = _registry()
+    llm = FakeLLM('{"tool": "time", "args": {}}')   # no second reply: LLM "dies"
+    router = ToolAwareLLM(llm, reg)
+    out = _collect(router.stream([{"role": "user", "content": "clock?"}]))
+    assert "It's" in out                              # raw tool result spoken
+
+
+# ── memory-backed tools ──────────────────────────────────────────────────────
+class DictMemory:
+    def __init__(self):
+        self.data = {}
+
+    def remember(self, key, value):
+        self.data[key] = value
+
+    def facts(self):
+        return dict(self.data)
+
+
+def test_remember_and_recall_roundtrip():
+    mem = DictMemory()
+    ctx = ToolContext(memory=mem, person_name="David")
+    out = RememberTool().run({"fact": "the wifi password is hunter2"}, ctx)
+    assert "remember" in out.lower()
+    out = RecallTool().run({"query": "wifi"}, ctx)
+    assert "hunter2" in out
+
+
+def test_recall_empty():
+    out = RecallTool().run({"query": "quantum"}, ToolContext(memory=DictMemory()))
+    assert "don't remember" in out
+
+
+def test_tool_error_is_contained():
+    class Boom(Tool):
+        name = "boom"
+        description = "explodes"
+
+        def run(self, args, ctx):
+            raise RuntimeError("kapow")
+
+    out = Boom().safe_run({}, ToolContext())
+    assert "boom" in out and "kapow" in out

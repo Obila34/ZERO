@@ -48,7 +48,19 @@ from fastapi import FastAPI, HTTPException
 CONFIG = load_config()
 SERVER_DIR = Path(__file__).resolve().parent
 
-app = FastAPI(title="Zero Vision GPU service", version="0.5-cp5")
+app = FastAPI(title="Zero Vision GPU service", version="0.6-perceive")
+
+# Perception offload (Phase 8): detection/face/speaker/CLIP endpoints under
+# /perceive/*. Optional — the app still serves depth/VLM if the module's deps
+# are missing; each endpoint 503s individually with a clear reason.
+try:
+    try:
+        from perception import router as _perceive_router
+    except ImportError:
+        from server.vision.perception import router as _perceive_router
+    app.include_router(_perceive_router)
+except Exception as _exc:  # pragma: no cover
+    print(f"[app] /perceive endpoints not mounted: {_exc}")
 
 # Lazily constructed so /health stays cheap and importing the app never pulls in
 # torch. The depth model loads on the first /facts (or /analyze) call; the VLM on

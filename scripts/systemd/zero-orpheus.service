@@ -5,9 +5,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=CHANGEME
-WorkingDirectory=/home/CHANGEME/ZERO
-ExecStart=/home/CHANGEME/ZERO/.venv/bin/python server/orpheus_cpp_server.py --port 9100
+User=obilasam3
+WorkingDirectory=/home/obilasam3/zero
+ExecStart=/home/obilasam3/zero/.venv/bin/python server/orpheus_cpp_server.py --port 9100
 Restart=always
 RestartSec=3
 

@@ -56,6 +56,12 @@ class VoiceOrchestrator:
         self.pause_ms = pause_ms
         self._clip_cache: dict[str, np.ndarray] = {}
 
+    @property
+    def degraded(self) -> bool:
+        """True while the underlying engine is on its fallback voice —
+        self-state narration (Phase 7) reads this to be honest about it."""
+        return bool(getattr(self.tts, "degraded", False))
+
     # -- public API ---------------------------------------------------------
     def synthesize(self, text: str) -> np.ndarray:
         text = text.strip()

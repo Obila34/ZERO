@@ -5,9 +5,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=CHANGEME
-WorkingDirectory=/home/CHANGEME/ZERO/server/vision
-ExecStart=/home/CHANGEME/ZERO/.venv/bin/uvicorn app:app --host 0.0.0.0 --port 8000
+User=obilasam3
+WorkingDirectory=/home/obilasam3/zero/server/vision
+ExecStart=/home/obilasam3/zero/.venv/bin/uvicorn app:app --host 0.0.0.0 --port 8000
 Restart=always
 RestartSec=3
 

@@ -56,7 +56,8 @@ class Eyes:
                  vlm_fallback: bool = False,
                  preview: bool = False, preview_scale: float = 1.0,
                  preview_mode: str = "auto", preview_host: str = "127.0.0.1",
-                 preview_port: int = 8008):
+                 preview_port: int = 8008, learned=None,
+                 unknown_conf: float = 0.45):
         self._camera = camera
         self._detector = detector
         self._color = color_namer
@@ -81,6 +82,12 @@ class Eyes:
         self._thread: Optional[threading.Thread] = None
         self._stop = threading.Event()
         self._gpu_ok = False
+        # Learned objects (Phase 4): user-taught names override COCO labels on
+        # per-turn context; low-confidence, unmatched sightings feed curiosity.
+        self._learned = learned
+        self._unknown_conf = float(unknown_conf)
+        self._unknowns: dict[str, float] = {}   # label -> last seen ts
+        self._unknowns_lock = threading.Lock()
 
     # ── lifecycle ────────────────────────────────────────────────────────────
     def start(self) -> None:
@@ -162,10 +169,68 @@ class Eyes:
         snap = self._scene.snapshot()
         return {d.label.lower() for d in snap.detections}
 
+    def current_frame(self):
+        """Latest camera frame (RGB copy), or None if nothing has been seen yet.
+        Used by identity (face matching) and learning (object crops)."""
+        return self._scene.snapshot().frame_rgb
+
+    def _with_learned(self, snap) -> list:
+        """Detections with learned-name overrides applied; also logs sightings
+        of low-confidence objects nobody has named yet (curiosity fodder)."""
+        dets = snap.detections
+        if self._learned is None or snap.frame_rgb is None or not dets:
+            return dets
+        try:
+            annotated = self._learned.annotate(snap.frame_rgb, dets)
+        except Exception as e:  # learned names must never break perception
+            log.debug("learned annotate failed: %s", e)
+            return dets
+        now = time.time()
+        with self._unknowns_lock:
+            for orig, ann in zip(dets, annotated):
+                if (ann.label == orig.label            # no learned override
+                        and orig.confidence < self._unknown_conf
+                        and orig.label.lower() != "person"):
+                    self._unknowns[orig.label.lower()] = now
+        return annotated
+
+    def recent_unknowns(self, within_s: float = 3600.0) -> list[str]:
+        """Labels of unfamiliar (low-confidence, unlearned) objects sighted
+        recently — consumed by curiosity. Draining resets the log."""
+        now = time.time()
+        with self._unknowns_lock:
+            out = [lbl for lbl, ts in self._unknowns.items()
+                   if now - ts <= within_s]
+            self._unknowns.clear()
+        return out
+
+    def teach_object(self, name: str, person_id: int | None = None) -> bool:
+        """Bind ``name`` to what the camera is looking at right now: the largest
+        detected object's crop, or the centre of the frame if nothing is boxed."""
+        if self._learned is None:
+            return False
+        snap = self._scene.snapshot()
+        frame = snap.frame_rgb
+        if frame is None:
+            return False
+        H, W = frame.shape[:2]
+        if snap.detections:
+            big = max(snap.detections, key=lambda d: d.bbox[2] * d.bbox[3])
+            x, y, w, h = (int(v) for v in big.bbox)
+            crop = frame[max(0, y):min(H, y + h), max(0, x):min(W, x + w)]
+        else:
+            my, mx = int(H * 0.2), int(W * 0.2)
+            crop = frame[my:H - my, mx:W - mx]
+        try:
+            return self._learned.teach(name, crop, person_id=person_id)
+        except Exception as e:
+            log.warning("teach_object failed: %s", e)
+            return False
+
     def local_context(self) -> str:
         """Instant, GPU-free detector hint ('3 people, a cup'), or '' if empty."""
         snap = self._scene.snapshot()
-        return phrasing.detector_hint(snap.detections, self._max_items)
+        return phrasing.detector_hint(self._with_learned(snap), self._max_items)
 
     def visual_context(self, question: str = "") -> VisualContext:
         """Context for a visual turn: the detector hint + a few recent keyframes.
@@ -180,7 +245,7 @@ class Eyes:
             frames = self._scene.recent_frames(self._frames_per_look,
                                                self._look_window_s)
             images = [b for b in (self._encode(f) for f in frames) if b]
-        text = phrasing.detector_hint(snap.detections, self._max_items)
+        text = phrasing.detector_hint(self._with_learned(snap), self._max_items)
         # Long-tail naming: when the main LLM can't see (multimodal off) but the
         # GPU VLM is reachable, ask it to describe the frame so ZERO can still name
         # objects outside the detector's vocabulary. Never on the multimodal path

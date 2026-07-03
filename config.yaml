@@ -11,10 +11,25 @@ audio:
   output_device: pipewire   # routes to PipeWire's default sink = the BT speaker
                             # (needs the pipewire-alsa package). Use Headphones for 3.5mm jack.
 
+privacy:
+  # Bystander handling for voices ZERO does not recognise:
+  #   open    = answered and remembered (single-user household)
+  #   guarded = answered, but nothing they say is stored long-term  <- default
+  #   strict  = unknown voices are not engaged at all
+  # Known (enrolled) people always get full service. Erasure is always
+  # honoured: "forget that", "forget everything about me".
+  bystander_mode: guarded
+  indicator_gpio_pin:        # LED pin for the visible "I'm listening" signal
+                             # (e.g. 17). Blank = log-only indicator.
+
 conversation:
   # After waking once, ZERO stays in a flowing conversation (no wake word between
   # turns). It sleeps after this much continuous silence, or on a stop phrase.
   sleep_timeout_ms: 30000
+
+  # Reply in the language spoken to: Swahili / English code-switching flows
+  # naturally (persona-level; pairs with stt.language below).
+  multilingual: true
 
   # Barge-in: while ZERO is speaking, the mic stays live and listens for the wake
   # word — say it again to cut the reply off and talk. Echo-safe (ZERO never says
@@ -38,6 +53,118 @@ memory:
                              # the start, so ZERO recalls the ARC of past chats (0 = off)
   max_stored_facts: 200      # storage caps (oldest pruned) so the DB never grows
   max_stored_episodes: 100   # forever — injection caps above only limit the prompt
+
+  # Human-like recall: memories are activation-ranked (relevance x recency x
+  # importance, Generative-Agents style) instead of dumped wholesale. Semantic
+  # relevance needs embeddings; the GPU Ollama provides them over the existing
+  # tunnel, with an offline hashing fallback so recall degrades, never breaks.
+  embeddings:
+    backend: auto            # auto (ollama if llm.host set, else hash) | ollama | hash | off
+    ollama_model:            # blank = reuse llm.model for /api/embeddings
+    hash_dim: 256            # fallback hashing-embedder dimension
+  retrieval:
+    top_k: 6                 # memories surfaced per recall
+    half_life_days: 14       # recency decay half-life
+    min_activation: 0.05     # below this a memory doesn't surface at all
+  forgetting:
+    enabled: true            # gentle decay: old + unimportant + never-recalled
+    max_age_days: 90         # ...memories fade after this long untouched
+
+learning:
+  # Few-shot object learning: "this is a french press" binds the current
+  # object crop's embedding to the name — no retraining, grows past COCO-80.
+  objects:
+    enabled: true
+    db_path: zero_objects.sqlite
+    clip_model_path:           # optional CLIP image-encoder ONNX; blank = the
+                               # offline histogram embedder (color+shape)
+    match_threshold: 0.80      # cosine needed to override a detector label (local hist)
+    match_threshold_clip: 0.72 # threshold when the remote CLIP embedder is active
+    max_samples_per_object: 5
+    unknown_conf: 0.45         # detections below this and unlearned count as
+                               # "unfamiliar" -> curiosity queue
+  # Curiosity: while ALONE, learn silently (consolidate memory, log unknown
+  # objects, queue questions); ask when a known person is around. ZERO never
+  # talks to an empty room.
+  curiosity:
+    enabled: true
+    db_path: zero_curiosity.sqlite
+    max_pending: 20
+
+perception:
+  # ── GPU offload (Phase 8): the Pi is a FRONTEND ────────────────────────────
+  # Heavy senses run on the GPU via /perceive/* on the vision server (:8000,
+  # the same SSH tunnel): YOLO11x detection, SCRFD+ArcFace faces, ECAPA voice
+  # embeddings, CLIP object embeddings. Every stage keeps its local engine as
+  # a lazily-built fallback, so a dropped tunnel degrades (smaller local
+  # models) instead of blinding ZERO — and recovers per-call.
+  remote:
+    enabled: true
+    base_url: http://127.0.0.1:8000   # vision server through the tunnel
+    timeout_s: 5.0                    # face/speaker/CLIP calls
+    detect_timeout_s: 10.0            # detection (first call loads YOLO11x)
+    jpeg_quality: 80
+
+  # Reading HOW things are said. Affect fuses voice prosody + a text valence
+  # lexicon (+ facial expression if an FER+ ONNX is configured); only notable,
+  # confident reads reach the LLM — as tone guidance, never spoken diagnosis.
+  affect:
+    enabled: true
+    face_model_path:          # optional FER+ ONNX (64x64 gray); blank = voice+text only
+  # Turn-level diarization: notice when a DIFFERENT person takes over,
+  # using the per-utterance voice embeddings identity already computes.
+  diarize:
+    enabled: true
+    change_threshold: 0.40    # consecutive-turn voice cosine below this = new speaker
+
+proactive:
+  # ZERO speaking without a wake word — greeting a recognised face, asking a
+  # queued curiosity question. Gated hard: known people only, cooldowns, a
+  # global hourly cap, quiet hours. Timers/reminders the user explicitly set
+  # always announce.
+  enabled: true
+  quiet_hours: [22, 7]        # no proactive speech from 22:00 to 07:00 ([] = off)
+  greet_cooldown_s: 14400     # re-greet the same person at most every 4h
+  curiosity_cooldown_s: 1800  # at most one curiosity question per 30 min
+  max_per_hour: 6             # global proactive utterance cap
+  presence_reset_s: 1200      # away this long -> next arrival greets again
+  check_interval_s: 3.0       # idle watcher tick
+  linger_s: 45                # person present this long before a question
+
+preferences:
+  enabled: true                # "speak slower" / "keep it short" -> stored as
+                               # standing behaviour + engine knobs where possible
+
+tools:
+  # The hands: real actions routed in three tiers — regex intents (instant),
+  # LLM JSON tool calls (flexible), plain chat (everything else). The allow
+  # list is the safety boundary: a tool not named here cannot run.
+  enabled: true
+  allow: [time, timer, reminder, remember, recall]
+
+identity:
+  # "Who is this?" — multi-person recognition fusing FACE and VOICE embeddings
+  # (same embed->cosine->threshold pattern as voiceid, but a registry of people
+  # instead of one owner). Enrol conversationally: "I'm David" / "my name is
+  # David". Each channel degrades independently: missing face model ->
+  # voice-only, missing voice model -> face-only, neither -> anonymous mode.
+  enabled: true
+  db_path: zero_identity.sqlite
+  max_samples_per_kind: 5    # stored embedding samples per person per channel
+  reinforce_threshold: 0.70  # confident joint matches refresh stored samples
+  voice:
+    model_path: models/voiceid/voxceleb_ECAPA512_LM.onnx  # reuses the voiceid model
+  face:
+    # ArcFace-style ONNX face embedder (512-d), e.g. w600k_r50.onnx from
+    # InsightFace buffalo_l. Blank/missing = voice-only identity.
+    model_path: models/identity/arcface.onnx
+    min_size: 60             # smallest face (px) worth matching
+  fusion:
+    w_face: 0.55             # weights are normalized; face is the steadier signal
+    w_voice: 0.45
+    threshold: 0.50          # fused (both channels agree) accept
+    face_threshold: 0.42     # single-channel accepts are stricter by nature
+    voice_threshold: 0.45
 
 voiceid:
   # "Only my voice" — verify each utterance is the enrolled owner before acting.
@@ -72,6 +199,8 @@ stt:
   engine: remote                              # remote (GPU turbo) | whispercpp (local)
   remote_url: http://127.0.0.1:9000/transcribe
   remote_timeout: 30
+  language:                 # blank = server default (en) | sw | auto (Whisper
+                            # detects — best for English/Swahili code-switching)
   # If the remote fails (tunnel down), fail over to this local engine per-utterance
   # — built lazily on first failure; the remote is retried every turn so quality
   # comes back the moment the tunnel does. Needs the whispercpp model + pywhispercpp

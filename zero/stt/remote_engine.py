@@ -19,7 +19,13 @@ log = get_logger("stt.remote")
 
 
 class RemoteSTT(STT):
-    def __init__(self, url: str, timeout: float = 30.0):
+    def __init__(self, url: str, timeout: float = 30.0,
+                 language: str | None = None):
+        # Optional language pass-through: 'sw', 'auto' (server lets Whisper
+        # detect — best for code-switched speech), or None = server default.
+        if language:
+            sep = "&" if "?" in url else "?"
+            url = f"{url}{sep}language={language}"
         self.url = url
         self.timeout = timeout
         log.info("remote STT -> %s", url)
