@@ -49,6 +49,11 @@ mkdir -p models/voiceid models/identity
   https://huggingface.co/public-data/insightface/resolve/main/models/buffalo_l/w600k_r50.onnx || true
 pip install opencv-python-headless || true   # Haar face detection (identity)
 
+echo "== vision extras (camera + detection: opencv, pydantic) =="
+# The eyes need these; without pydantic the whole vision stack fails to import
+# and ZERO silently runs voice-only. Kept light (no torch — YOLO is ONNX/GPU).
+pip install -r requirements-vision.txt || true
+
 echo "== optional local STT fallback (whisper base.en) =="
 mkdir -p models/whisper
 [ -f models/whisper/ggml-base.en.bin ] || wget -O models/whisper/ggml-base.en.bin \

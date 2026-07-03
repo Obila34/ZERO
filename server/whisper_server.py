@@ -76,6 +76,15 @@ async def transcribe(request: Request):
         lang = None
     segments, _info = _model.transcribe(
         io.BytesIO(data), language=lang, beam_size=1,
+        # Anti-hallucination: Silero VAD drops non-speech before decoding (kills
+        # the phantom "Thank you"/"you" on silence), and turning off
+        # condition_on_previous_text stops the "how are you? how are you? ..."
+        # repetition loops. no_speech_threshold trims low-confidence segments.
+        vad_filter=True,
+        vad_parameters={"min_silence_duration_ms": 300},
+        condition_on_previous_text=False,
+        no_speech_threshold=0.6,
+        temperature=0.0,
     )
     text = " ".join(s.text for s in segments).strip()
     dt = time.time() - t
