@@ -13,6 +13,13 @@ from zero.wake.base import WakeWord
 log = get_logger("wake.oww")
 
 
+# openWakeWord's models are trained on 80 ms windows at 16 kHz. Feeding smaller
+# chunks (our mic hands out 30 ms / 480-sample frames because WebRTC VAD needs
+# them small) makes some versions return an empty scores dict — and then the
+# wake word can never fire. Buffer frames here until we have a full chunk.
+_CHUNK_SAMPLES = 1280
+
+
 class OpenWakeWordEngine(WakeWord):
     def __init__(self, model: str = "hey_jarvis", threshold: float = 0.5):
         from openwakeword.model import Model  # lazy
@@ -26,14 +33,27 @@ class OpenWakeWordEngine(WakeWord):
         self._model = (
             Model(wakeword_models=[model], **kwargs) if model else Model(**kwargs)
         )
+        self._buf: np.ndarray = np.empty(0, dtype=np.int16)
         log.info("openWakeWord loaded (model=%s, threshold=%.2f)", model, threshold)
 
     def process(self, frame: np.ndarray) -> bool:
-        # openWakeWord expects int16 mono samples.
-        scores = self._model.predict(frame)
-        score = max(scores.values()) if scores else 0.0
-        return score >= self.threshold
+        # openWakeWord expects int16 mono samples in 1280-sample chunks. Small
+        # mic frames get concatenated; we run predict once per completed chunk
+        # and fire on the FIRST chunk to cross threshold in this call.
+        if frame.dtype != np.int16:
+            frame = frame.astype(np.int16, copy=False)
+        self._buf = np.concatenate((self._buf, frame)) if self._buf.size else frame
+        fired = False
+        while self._buf.size >= _CHUNK_SAMPLES:
+            chunk, self._buf = self._buf[:_CHUNK_SAMPLES], self._buf[_CHUNK_SAMPLES:]
+            scores = self._model.predict(chunk)
+            score = max(scores.values()) if scores else 0.0
+            if score >= self.threshold:
+                fired = True
+                break
+        return fired
 
     def reset(self) -> None:
         # Drop accumulated context so the next activation starts clean.
         self._model.reset()
+        self._buf = np.empty(0, dtype=np.int16)
