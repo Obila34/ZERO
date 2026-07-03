@@ -199,15 +199,47 @@ def _suggest_gain(peak: float) -> str:
             f"~{peak:.2f} up to ~{target:.2f})")
 
 
+def _is_invalid_sample_rate(err) -> bool:
+    """PaErrorCode -9997 = paInvalidSampleRate. Match by code and by string
+    (some builds only give the message)."""
+    code = err.args[1] if len(err.args) >= 2 else None
+    return code == -9997 or "sample rate" in str(err).lower()
+
+
+def _record_with_resample(device, seconds: float) -> np.ndarray:
+    """Return `seconds` of mono float32 audio at SR, resampling if the device
+    refuses 16 kHz. Mirrors the fallback in zero/audio/capture.py so what you
+    hear here is what the assistant will hear."""
+    try:
+        rec = sd.rec(int(seconds * SR), samplerate=SR, channels=1,
+                     dtype="float32", device=device)
+        sd.wait()
+        return rec[:, 0]
+    except sd.PortAudioError as err:
+        if not _is_invalid_sample_rate(err):
+            raise
+    # Fall back to the device's native rate + resample down to SR.
+    info = sd.query_devices(device) if device is not None else sd.query_devices(kind="input")
+    native = int(info.get("default_samplerate") or 48000) or 48000
+    print(f"  ! device rejected {SR} Hz; recording at native {native} Hz "
+          "and resampling.")
+    rec = sd.rec(int(seconds * native), samplerate=native, channels=1,
+                 dtype="float32", device=device)
+    sd.wait()
+    mono_native = rec[:, 0]
+    from math import gcd
+    from scipy.signal import resample_poly
+
+    g = gcd(SR, native)
+    return resample_poly(mono_native, up=SR // g, down=native // g)
+
+
 def cmd_record(args) -> None:
     device = resolve_device(args.device)
     label = sd.query_devices(device)["name"] if device is not None else "default input"
     print(f"Recording {args.seconds:.0f}s from: {label}")
     print("  -> speak now (say the wake word)...")
-    rec = sd.rec(int(args.seconds * SR), samplerate=SR, channels=1,
-                 dtype="float32", device=device)
-    sd.wait()
-    mono = rec[:, 0]
+    mono = _record_with_resample(device, args.seconds)
 
     raw_peak = float(np.max(np.abs(mono)))
     raw_rms = float(np.sqrt(np.mean(mono ** 2)))
@@ -260,6 +292,22 @@ def cmd_meter(args) -> None:
     """Real-time level meter — hold the mic where you'd sit, watch the bar."""
     device = resolve_device(args.device)
     label = sd.query_devices(device)["name"] if device is not None else "default input"
+
+    # Probe the device: try SR first; on paInvalidSampleRate, fall back to
+    # native rate. Same behaviour as MicCapture in the assistant.
+    stream_rate = SR
+    stream_block = BLOCK
+    try:
+        sd.check_input_settings(device=device, samplerate=SR, channels=1,
+                                dtype="float32")
+    except sd.PortAudioError as err:
+        if not _is_invalid_sample_rate(err):
+            raise
+        info = sd.query_devices(device) if device is not None else sd.query_devices(kind="input")
+        stream_rate = int(info.get("default_samplerate") or 48000) or 48000
+        stream_block = int(stream_rate * BLOCK_MS / 1000)
+        print(f"  ! device rejected {SR} Hz; opening at native {stream_rate} Hz.")
+
     print(f"Live meter from: {label}   (gain x{args.gain})   {args.seconds:.0f}s")
     print("  bars per frame; H = would clip; . = below wake-word floor")
     print()
@@ -279,7 +327,7 @@ def cmd_meter(args) -> None:
         print(f"  {flag} {'#' * bars:<40}  peak={p:.2f}")
 
     try:
-        with sd.InputStream(samplerate=SR, blocksize=BLOCK, channels=1,
+        with sd.InputStream(samplerate=stream_rate, blocksize=stream_block, channels=1,
                             dtype="float32", device=device, callback=callback):
             while time.monotonic() < end:
                 sd.sleep(100)

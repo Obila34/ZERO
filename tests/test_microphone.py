@@ -12,6 +12,10 @@ from pathlib import Path
 import pytest
 
 
+class _FakePortAudioError(Exception):
+    """Minimal stand-in — matches sounddevice.PortAudioError.args = (msg, code)."""
+
+
 @pytest.fixture(scope="module")
 def mic_mod(monkeypatch_module=None):
     """Import test_microphone.py by path (it lives at the repo root, not on
@@ -20,11 +24,15 @@ def mic_mod(monkeypatch_module=None):
     import types
 
     fake_sd = types.ModuleType("sounddevice")
-    fake_sd.query_devices = lambda idx=None: (
+    fake_sd.query_devices = lambda idx=None, kind=None: (
         {"name": "Fake", "max_input_channels": 1}
         if idx is not None else _DEFAULT_DEVICES
     )
     fake_sd.default = types.SimpleNamespace(device=(0, 0))
+    fake_sd.PortAudioError = _FakePortAudioError
+    fake_sd.rec = lambda *a, **kw: None      # tests override per-case
+    fake_sd.wait = lambda: None
+    fake_sd.check_input_settings = lambda **kw: None
     sys.modules["sounddevice"] = fake_sd
 
     path = Path(__file__).resolve().parents[1] / "test_microphone.py"
@@ -291,3 +299,76 @@ def test_cmd_set_by_index(mic_mod, tmp_path, monkeypatch):
     mic_mod.cmd_set(Args())
     written = cfg.read_text(encoding="utf-8")
     assert "input_device: 0" in written
+
+
+# -- sample-rate fallback ------------------------------------------------
+
+def test_is_invalid_sample_rate_by_code(mic_mod):
+    err = _FakePortAudioError("Error opening InputStream: Invalid sample rate", -9997)
+    assert mic_mod._is_invalid_sample_rate(err) is True
+
+
+def test_is_invalid_sample_rate_by_message(mic_mod):
+    # No numeric code, just message — some builds don't include the code arg.
+    err = _FakePortAudioError("bad sample rate")
+    assert mic_mod._is_invalid_sample_rate(err) is True
+
+
+def test_is_invalid_sample_rate_false_for_other_errors(mic_mod):
+    err = _FakePortAudioError("device busy", -9985)
+    assert mic_mod._is_invalid_sample_rate(err) is False
+
+
+def test_record_with_resample_16k_path(mic_mod, monkeypatch):
+    """When sd.rec succeeds at 16 kHz, no resample — the raw recording is returned."""
+    import numpy as np
+
+    recording = np.zeros((mic_mod.SR, 1), dtype=np.float32)  # 1s at 16 kHz
+    monkeypatch.setattr(mic_mod.sd, "rec", lambda *a, **kw: recording)
+    monkeypatch.setattr(mic_mod.sd, "wait", lambda: None)
+
+    out = mic_mod._record_with_resample(device=0, seconds=1.0)
+    assert out.shape == (mic_mod.SR,)
+
+
+def test_record_with_resample_falls_back_to_native(mic_mod, monkeypatch):
+    """On paInvalidSampleRate, retries at native rate + resamples down to 16 kHz."""
+    import numpy as np
+
+    calls = []
+    NATIVE = 48000
+
+    def fake_rec(nsamples, samplerate, channels, dtype, device):  # noqa: ARG001
+        calls.append(samplerate)
+        if samplerate == mic_mod.SR:
+            raise _FakePortAudioError("Invalid sample rate", -9997)
+        # Return a proper 48 kHz recording (1 second).
+        return np.zeros((nsamples, 1), dtype=np.float32)
+
+    monkeypatch.setattr(mic_mod.sd, "rec", fake_rec)
+    monkeypatch.setattr(mic_mod.sd, "wait", lambda: None)
+    monkeypatch.setattr(mic_mod.sd, "query_devices",
+                        lambda idx=None, kind=None: {
+                            "name": "USB Audio Device",
+                            "max_input_channels": 1,
+                            "default_samplerate": NATIVE,
+                        })
+
+    out = mic_mod._record_with_resample(device=0, seconds=1.0)
+
+    # Both rates attempted, in order.
+    assert calls == [mic_mod.SR, NATIVE]
+    # 1 second of audio at SR after resampling, within one sample tolerance.
+    assert abs(out.shape[0] - mic_mod.SR) <= 1
+
+
+def test_record_with_resample_reraises_non_rate_errors(mic_mod, monkeypatch):
+    """A non-sample-rate PortAudioError must propagate, NOT trigger fallback."""
+    def fake_rec(*a, **kw):
+        raise _FakePortAudioError("device busy", -9985)
+
+    monkeypatch.setattr(mic_mod.sd, "rec", fake_rec)
+    monkeypatch.setattr(mic_mod.sd, "wait", lambda: None)
+
+    with pytest.raises(_FakePortAudioError):
+        mic_mod._record_with_resample(device=0, seconds=1.0)
