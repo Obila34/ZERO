@@ -119,3 +119,175 @@ def test_gain_suggestion_very_quiet_brio(mic_mod):
             break
     else:
         pytest.fail(f"expected a gain in [10, 16] range in suggestion: {msg!r}")
+
+
+# -- mics subcommand -----------------------------------------------------
+
+def test_input_devices_filters_output_only(mic_mod):
+    _patch_devices(mic_mod, _DEFAULT_DEVICES)
+    rows = list(mic_mod._input_devices())
+    # 3 of 4 have max_input_channels > 0.
+    assert [idx for idx, _ in rows] == [1, 2, 3]
+
+
+# -- set subcommand: config rewrite --------------------------------------
+
+_CONFIG_SAMPLE = """\
+# ZERO configuration
+audio:
+  sample_rate: 16000
+  block_ms: 30
+  input_device: Logitech BRIO     # ALSA hw:4,0 — the USB webcam mic (2 in).
+                                  # Note: "USB Audio Device" is OUTPUT only.
+  input_gain: 12.0
+  output_device: pipewire
+
+privacy:
+  bystander_mode: guarded
+"""
+
+
+def test_rewrite_input_device_preserves_comment(mic_mod):
+    new_text, old_line = mic_mod._rewrite_input_device(_CONFIG_SAMPLE, "USB Audio Device")
+    assert "Logitech BRIO" in old_line
+    lines = new_text.splitlines()
+    # Same LINE INDEX, new value, comment retained.
+    changed = [l for l in lines if "input_device:" in l]
+    assert len(changed) == 1
+    assert "USB Audio Device" in changed[0]
+    assert "# ALSA hw:4,0" in changed[0]  # trailing comment preserved
+    # Indentation preserved (two spaces).
+    assert changed[0].startswith("  input_device:")
+
+
+def test_rewrite_input_device_leaves_other_lines_alone(mic_mod):
+    new_text, _ = mic_mod._rewrite_input_device(_CONFIG_SAMPLE, "2")
+    # Every non-input_device line is byte-identical.
+    for old, new in zip(_CONFIG_SAMPLE.splitlines(), new_text.splitlines()):
+        if "input_device:" in old:
+            continue
+        assert old == new
+
+
+def test_rewrite_input_device_numeric_index(mic_mod):
+    new_text, _ = mic_mod._rewrite_input_device(_CONFIG_SAMPLE, "2")
+    changed = [l for l in new_text.splitlines() if "input_device:" in l]
+    assert "input_device: 2" in changed[0]
+
+
+def test_rewrite_input_device_only_touches_audio_block(mic_mod):
+    """A key of the same name outside the audio: block must NOT be rewritten."""
+    text = _CONFIG_SAMPLE + """
+some_other_section:
+  input_device: OTHER   # must remain
+"""
+    new_text, _ = mic_mod._rewrite_input_device(text, "NEWMIC")
+    # Only ONE line changed — the one under audio:.
+    assert new_text.count("input_device: NEWMIC") == 1
+    assert "input_device: OTHER" in new_text  # sibling section untouched
+
+
+def test_rewrite_input_device_missing_key_raises(mic_mod):
+    empty = "audio:\n  sample_rate: 16000\n"
+    with pytest.raises(KeyError):
+        mic_mod._rewrite_input_device(empty, "whatever")
+
+
+# -- device name display --------------------------------------------------
+
+def test_device_display_name_strips_hw_suffix(mic_mod):
+    _patch_devices(mic_mod, [
+        {"name": "Logitech BRIO: USB Audio (hw:4,0)", "max_input_channels": 2},
+    ])
+    assert mic_mod._device_display_name(0) == "Logitech BRIO"
+
+
+def test_device_display_name_strips_paren_suffix(mic_mod):
+    _patch_devices(mic_mod, [
+        {"name": "Microphone (Realtek Audio)", "max_input_channels": 1},
+    ])
+    assert mic_mod._device_display_name(0) == "Microphone"
+
+
+# -- cmd_set: refuses output-only devices --------------------------------
+
+def test_cmd_set_rejects_output_only_device(mic_mod, tmp_path, monkeypatch):
+    # Point CONFIG_PATH at a temp file so we don't touch the real one.
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(_CONFIG_SAMPLE, encoding="utf-8")
+    monkeypatch.setattr(mic_mod, "CONFIG_PATH", cfg)
+
+    _patch_devices(mic_mod, [
+        {"name": "USB Audio Device", "max_input_channels": 0},  # output-only!
+    ])
+
+    class Args:
+        device = "0"
+        by = "name"
+        dry_run = False
+
+    with pytest.raises(SystemExit) as exc:
+        mic_mod.cmd_set(Args())
+    assert exc.value.code == 3  # dedicated exit code for "no input channels"
+    # Config file untouched.
+    assert cfg.read_text(encoding="utf-8") == _CONFIG_SAMPLE
+
+
+def test_cmd_set_writes_config(mic_mod, tmp_path, monkeypatch):
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(_CONFIG_SAMPLE, encoding="utf-8")
+    monkeypatch.setattr(mic_mod, "CONFIG_PATH", cfg)
+
+    _patch_devices(mic_mod, [
+        {"name": "Logitech BRIO: USB Audio (hw:4,0)", "max_input_channels": 2},
+    ])
+
+    class Args:
+        device = "0"
+        by = "name"
+        dry_run = False
+
+    mic_mod.cmd_set(Args())
+    written = cfg.read_text(encoding="utf-8")
+    assert "input_device: Logitech BRIO" in written
+    assert "# ALSA hw:4,0" in written  # trailing comment survived
+
+
+def test_cmd_set_dry_run_does_not_write(mic_mod, tmp_path, monkeypatch, capsys):
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(_CONFIG_SAMPLE, encoding="utf-8")
+    monkeypatch.setattr(mic_mod, "CONFIG_PATH", cfg)
+
+    _patch_devices(mic_mod, [
+        {"name": "Logitech BRIO", "max_input_channels": 2},
+    ])
+
+    class Args:
+        device = "0"
+        by = "name"
+        dry_run = True
+
+    mic_mod.cmd_set(Args())
+    # File untouched.
+    assert cfg.read_text(encoding="utf-8") == _CONFIG_SAMPLE
+    out = capsys.readouterr().out
+    assert "dry run" in out.lower()
+
+
+def test_cmd_set_by_index(mic_mod, tmp_path, monkeypatch):
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(_CONFIG_SAMPLE, encoding="utf-8")
+    monkeypatch.setattr(mic_mod, "CONFIG_PATH", cfg)
+
+    _patch_devices(mic_mod, [
+        {"name": "Logitech BRIO", "max_input_channels": 2},
+    ])
+
+    class Args:
+        device = "0"
+        by = "index"
+        dry_run = False
+
+    mic_mod.cmd_set(Args())
+    written = cfg.read_text(encoding="utf-8")
+    assert "input_device: 0" in written

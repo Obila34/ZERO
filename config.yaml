@@ -4,7 +4,9 @@
 audio:
   sample_rate: 16000        # 16 kHz mono everywhere in the pipeline
   block_ms: 30              # frame size for capture / VAD
-  input_device: USB Audio Device  # ALSA hw:3,0 — matched by PortAudio name substring
+  input_device: USB Audio Device  # C-Media dongle at hw:3,0. PortAudio may report
+                                  # 0 input channels until the mic is unmuted at
+                                  # the ALSA layer (alsamixer -c 3, F4=capture).
   input_gain: 12.0          # software boost for quiet mics. The BRIO captures very
                             # low even at max hardware gain (peak ~0.03) — ~10-14
                             # brings the wake word + STT to a usable level. 1.0 = off.
