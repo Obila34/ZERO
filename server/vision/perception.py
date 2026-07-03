@@ -20,9 +20,16 @@ from __future__ import annotations
 
 import base64
 import io
+import threading
 import wave
 from pathlib import Path
 from typing import Optional
+
+# One lock per lazy model. FastAPI runs sync endpoints in a large threadpool,
+# so without this the first burst of concurrent requests each start their OWN
+# model build (and, worse, their own weight download of the SAME file, which
+# corrupts and restarts endlessly). Double-checked locking loads exactly once.
+_LOAD_LOCK = threading.Lock()
 
 import numpy as np
 
@@ -68,10 +75,12 @@ _YOLO = None
 def _yolo():
     global _YOLO
     if _YOLO is None:
-        from ultralytics import YOLO  # pip install ultralytics
+        with _LOAD_LOCK:
+            if _YOLO is None:  # re-check inside the lock (download happens once)
+                from ultralytics import YOLO  # pip install ultralytics
 
-        _YOLO = YOLO(YOLO_MODEL)
-        print(f"[perceive] YOLO loaded: {YOLO_MODEL}", flush=True)
+                _YOLO = YOLO(YOLO_MODEL)
+                print(f"[perceive] YOLO loaded: {YOLO_MODEL}", flush=True)
     return _YOLO
 
 
@@ -102,35 +111,41 @@ _FACE_LOCAL = None        # (haar_cascade, onnx_session) fallback
 
 
 def _face_engine():
-    """Returns ("insight", app) or ("local", (cascade, session))."""
+    """Returns ("insight", app) or ("local", (cascade, session)). Loads once
+    even under concurrent requests (double-checked lock)."""
     global _FACE_APP, _FACE_LOCAL
     if _FACE_APP is not None:
         return "insight", _FACE_APP
     if _FACE_LOCAL is not None:
         return "local", _FACE_LOCAL
-    try:
-        from insightface.app import FaceAnalysis  # pip install insightface
+    with _LOAD_LOCK:
+        if _FACE_APP is not None:
+            return "insight", _FACE_APP
+        if _FACE_LOCAL is not None:
+            return "local", _FACE_LOCAL
+        try:
+            from insightface.app import FaceAnalysis  # pip install insightface
 
-        app = FaceAnalysis(name="buffalo_l",
-                           allowed_modules=["detection", "recognition"])
-        app.prepare(ctx_id=0, det_size=(640, 640))
-        _FACE_APP = app
-        print("[perceive] InsightFace SCRFD+ArcFace ready", flush=True)
-        return "insight", app
-    except Exception as exc:
-        print(f"[perceive] insightface unavailable ({exc}); trying local ONNX",
-              flush=True)
-    if not ARCFACE_ONNX.exists():
-        raise HTTPException(
-            503, "no face engine: install insightface or place "
-                 f"{ARCFACE_ONNX.name} under models/identity/")
-    import onnxruntime as ort
+            app = FaceAnalysis(name="buffalo_l",
+                               allowed_modules=["detection", "recognition"])
+            app.prepare(ctx_id=0, det_size=(640, 640))
+            _FACE_APP = app
+            print("[perceive] InsightFace SCRFD+ArcFace ready", flush=True)
+            return "insight", app
+        except Exception as exc:
+            print(f"[perceive] insightface unavailable ({exc}); trying local ONNX",
+                  flush=True)
+        if not ARCFACE_ONNX.exists():
+            raise HTTPException(
+                503, "no face engine: install insightface or place "
+                     f"{ARCFACE_ONNX.name} under models/identity/")
+        import onnxruntime as ort
 
-    cascade = cv2.CascadeClassifier(
-        cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-    sess = ort.InferenceSession(str(ARCFACE_ONNX))
-    _FACE_LOCAL = (cascade, sess)
-    return "local", _FACE_LOCAL
+        cascade = cv2.CascadeClassifier(
+            cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+        sess = ort.InferenceSession(str(ARCFACE_ONNX))
+        _FACE_LOCAL = (cascade, sess)
+        return "local", _FACE_LOCAL
 
 
 @router.post("/face")
@@ -179,17 +194,19 @@ _SPEAKER = None
 def _speaker():
     global _SPEAKER
     if _SPEAKER is None:
-        if not SPEAKER_ONNX.exists():
-            raise HTTPException(
-                503, f"speaker model missing: {SPEAKER_ONNX} "
-                     "(download the WeSpeaker ECAPA ONNX)")
-        import sys
+        with _LOAD_LOCK:
+            if _SPEAKER is None:
+                if not SPEAKER_ONNX.exists():
+                    raise HTTPException(
+                        503, f"speaker model missing: {SPEAKER_ONNX} "
+                             "(download the WeSpeaker ECAPA ONNX)")
+                import sys
 
-        sys.path.insert(0, str(REPO_ROOT))
-        from zero.voiceid.speaker import SpeakerVerifier
+                sys.path.insert(0, str(REPO_ROOT))
+                from zero.voiceid.speaker import SpeakerVerifier
 
-        _SPEAKER = SpeakerVerifier(str(SPEAKER_ONNX))
-        print("[perceive] speaker embedder ready", flush=True)
+                _SPEAKER = SpeakerVerifier(str(SPEAKER_ONNX))
+                print("[perceive] speaker embedder ready", flush=True)
     return _SPEAKER
 
 
@@ -218,16 +235,22 @@ _CLIP = None
 def _clip():
     global _CLIP
     if _CLIP is None:
-        try:
-            import torch
-            from transformers import CLIPImageProcessor, CLIPVisionModelWithProjection
-        except Exception as exc:
-            raise HTTPException(503, f"CLIP unavailable (needs transformers+torch): {exc}")
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        model = CLIPVisionModelWithProjection.from_pretrained(CLIP_MODEL).to(device).eval()
-        proc = CLIPImageProcessor.from_pretrained(CLIP_MODEL)
-        _CLIP = (model, proc, device, torch)
-        print(f"[perceive] CLIP ready on {device}: {CLIP_MODEL}", flush=True)
+        with _LOAD_LOCK:
+            if _CLIP is None:
+                try:
+                    import torch
+                    from transformers import (
+                        CLIPImageProcessor, CLIPVisionModelWithProjection,
+                    )
+                except Exception as exc:
+                    raise HTTPException(
+                        503, f"CLIP unavailable (needs transformers+torch): {exc}")
+                device = "cuda" if torch.cuda.is_available() else "cpu"
+                model = CLIPVisionModelWithProjection.from_pretrained(
+                    CLIP_MODEL).to(device).eval()
+                proc = CLIPImageProcessor.from_pretrained(CLIP_MODEL)
+                _CLIP = (model, proc, device, torch)
+                print(f"[perceive] CLIP ready on {device}: {CLIP_MODEL}", flush=True)
     return _CLIP
 
 
