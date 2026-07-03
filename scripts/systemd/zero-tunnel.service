@@ -8,7 +8,7 @@ Type=simple
 User=head
 Environment=GPU_HOST=obilasam3@zerolabs1
 Environment=AUTOSSH_GATETIME=0
-ExecStart=/home/head/Mzee/offline_v5/scripts/pi_tunnel.sh
+ExecStart=/bin/bash /home/head/Mzee/ZERO/scripts/pi_tunnel.sh
 Restart=always
 RestartSec=3
 

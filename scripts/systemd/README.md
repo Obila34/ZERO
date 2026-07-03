@@ -3,7 +3,7 @@
 These make ZERO start itself after a power cycle so the robot is just *on*, with
 no manual steps — the seamless goal. The units are pre-filled for the real
 machines (GPU `obilasam3@zerolabs1`, repo `/home/obilasam3/ZERO`; Pi user
-`head`, repo `/home/head/Mzee/offline_v5`). Edit only if a user/path changes.
+`head`, repo `/home/head/Mzee/ZERO`). Edit only if a user/path changes.
 
 ## On the GPU node (zerolabs1)
 

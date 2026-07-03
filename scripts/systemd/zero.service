@@ -6,8 +6,8 @@ Wants=network-online.target zero-tunnel.service
 [Service]
 Type=simple
 User=head
-WorkingDirectory=/home/head/Mzee/offline_v5
-ExecStart=/home/head/Mzee/offline_v5/.venv/bin/python -m zero.main
+WorkingDirectory=/home/head/Mzee/ZERO
+ExecStart=/home/head/Mzee/ZERO/.venv/bin/python -m zero.main
 Restart=always
 RestartSec=5
 

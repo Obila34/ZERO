@@ -8,7 +8,7 @@ log lines alone. This is the document to read before touching anything.
 >
 > | Role | Host | Shell prompt looks like | Repo path |
 > |---|---|---|---|
-> | **Pi / frontend** — the device you talk to | `head` | `head@head:~/Mzee/offline_v5$` | `~/Mzee/offline_v5` |
+> | **Pi / frontend** — the device you talk to | `head` | `head@head:~/Mzee/ZERO$` | `~/Mzee/ZERO` |
 > | **GPU node** — where all the models run | `zerolabs1` | `obilasam3@zerolabs1 in …/ZERO` | `~/ZERO` |
 >
 > **Rule #1 of this system: check your prompt before pasting a command.**
@@ -104,7 +104,7 @@ a symptom, not the system working as intended.
 All bind `127.0.0.1` except vision (`0.0.0.0`) — reachable only through the
 tunnel. Logs: **`~/zero_logs/{whisper,orpheus,vision,ollama}.log`**.
 
-### Pi (`head`, `~/Mzee/offline_v5`)
+### Pi (`head`, `~/Mzee/ZERO`)
 
 - `python -m zero.main` — the whole robot (wake, VAD, camera, playback,
   conversation loop).
@@ -193,7 +193,7 @@ curl -s http://127.0.0.1:11434/api/tags | head -c 300      # lists gemma4
 ### Step 2 — Pi (`head`), terminal 1: the tunnel
 
 ```bash
-cd ~/Mzee/offline_v5
+cd ~/Mzee/ZERO
 GPU_HOST=obilasam3@zerolabs1 bash scripts/pi_tunnel.sh
 ```
 
@@ -212,7 +212,7 @@ curl -s http://127.0.0.1:9100/health           # {"ok":true} = tunnel + orpheus 
 ### Step 3 — Pi, terminal 2: the app
 
 ```bash
-cd ~/Mzee/offline_v5
+cd ~/Mzee/ZERO
 source .venv/bin/activate
 python -m zero.main            # or:  python -m zero.main --text  (brain-only, no audio)
 ```
@@ -303,7 +303,7 @@ including a fresh, state-free orpheus after a `llama_decode` crash).
 
 Edit `User=`, `WorkingDirectory=`, `ExecStart=` paths, and `GPU_HOST=` in each
 unit first (they ship with real values already: GPU user `obilasam3`, repo
-`/home/obilasam3/ZERO`; Pi user `head`, repo `/home/head/Mzee/offline_v5`).
+`/home/obilasam3/ZERO`; Pi user `head`, repo `/home/head/Mzee/ZERO`).
 
 ```bash
 # GPU node (zerolabs1) — ollama already has its own ollama.service if installed via installer
