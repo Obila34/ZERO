@@ -6,8 +6,8 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=obilasam3
-WorkingDirectory=/home/obilasam3/zero
-ExecStart=/home/obilasam3/zero/.venv/bin/python server/whisper_server.py --model deepdml/faster-whisper-large-v3-turbo-ct2 --port 9000
+WorkingDirectory=/home/obilasam3/ZERO
+ExecStart=/home/obilasam3/ZERO/.venv/bin/python server/whisper_server.py --model deepdml/faster-whisper-large-v3-turbo-ct2 --port 9000
 Restart=always
 RestartSec=3
 

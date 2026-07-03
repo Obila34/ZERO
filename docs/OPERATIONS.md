@@ -9,7 +9,7 @@ log lines alone. This is the document to read before touching anything.
 > | Role | Host | Shell prompt looks like | Repo path |
 > |---|---|---|---|
 > | **Pi / frontend** — the device you talk to | `head` | `head@head:~/Mzee/offline_v5$` | `~/Mzee/offline_v5` |
-> | **GPU node** — where all the models run | `zerolabs1` | `obilasam3@zerolabs1 in …/zero` | `~/zero` |
+> | **GPU node** — where all the models run | `zerolabs1` | `obilasam3@zerolabs1 in …/ZERO` | `~/ZERO` |
 >
 > **Rule #1 of this system: check your prompt before pasting a command.**
 > Nearly every outage we've had came from running Pi commands on the GPU box or
@@ -45,7 +45,7 @@ Nothing is exposed to the internet; all traffic rides the encrypted SSH link.
 |  :9000   Whisper server    -> large-v3-turbo (faster-whisper, CUDA)  |
 |  :9100   Orpheus TTS       -> quantized GGUF via llama.cpp + SNAC    |
 |  :8000   Vision server     -> Depth Anything V2 (+ optional VLM)     |
-|  RTX 5060 Ti 16 GB · CUDA 13.x · venv at ~/zero/.venv (py3.12)       |
+|  RTX 5060 Ti 16 GB · CUDA 13.x · venv at ~/ZERO/.venv (py3.12)       |
 +----------------------------------------------------------------------+
 ```
 
@@ -149,7 +149,7 @@ Order matters: **GPU servers first, then the tunnel, then the app.**
 ### Step 1 — GPU node (`zerolabs1`)
 
 ```bash
-cd ~/zero
+cd ~/ZERO
 bash scripts/run_gpu_servers.sh
 ```
 
@@ -302,8 +302,8 @@ units in `scripts/systemd/` make both boxes self-starting and self-healing
 including a fresh, state-free orpheus after a `llama_decode` crash).
 
 Edit `User=`, `WorkingDirectory=`, `ExecStart=` paths, and `GPU_HOST=` in each
-unit first (they ship with `CHANGEME`; real values: GPU user `obilasam3`, repo
-`/home/obilasam3/zero`; Pi user `head`, repo `/home/head/Mzee/offline_v5`).
+unit first (they ship with real values already: GPU user `obilasam3`, repo
+`/home/obilasam3/ZERO`; Pi user `head`, repo `/home/head/Mzee/offline_v5`).
 
 ```bash
 # GPU node (zerolabs1) — ollama already has its own ollama.service if installed via installer

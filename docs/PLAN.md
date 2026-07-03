@@ -73,8 +73,8 @@ valuable — we do not build all of it at once.
 self-heal (`Restart=always`). Also fixes the Orpheus `llama_decode` crash
 (a crashed server auto-restarts clean, state-free).
 
-**How:** fill the `CHANGEME` fields (GPU `obilasam3` / `/home/obilasam3/zero`;
-Pi `head` / `/home/head/Mzee/offline_v5`), then:
+**How:** the units already ship with real values (GPU `obilasam3` /
+`/home/obilasam3/ZERO`; Pi `head` / `/home/head/Mzee/offline_v5`), then:
 
 ```bash
 # GPU (zerolabs1)
