@@ -927,10 +927,20 @@ class Zero:
                         if not put_piece((idx, piece)):
                             return
             finally:
-                try:
-                    audio_q.put_nowait(None)  # sentinel: done
-                except queue.Full:
-                    pass  # consumer is draining after barge-in; thread-death ends it
+                # Deliver the "done" sentinel RELIABLY. put_nowait dropped it
+                # whenever the queue was full — which happens the moment synthesis
+                # outpaces playback (e.g. fast GPU Orpheus filling the 32 slots).
+                # A dropped sentinel left the consumer blocked on get() forever:
+                # playback never returned and the whole conversation froze in
+                # SPEAKING (ZERO went deaf after the first reply). Block until it
+                # lands; if a barge-in already set stop_evt, the drain path cleans
+                # up instead, so we don't wait on a stalled consumer.
+                while not stop_evt.is_set():
+                    try:
+                        audio_q.put(None, timeout=0.2)
+                        break
+                    except queue.Full:
+                        continue
 
         prod = threading.Thread(target=producer, name="tts-producer", daemon=True)
         prod.start()
