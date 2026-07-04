@@ -984,11 +984,11 @@ class Zero:
         return self._interrupt
 
     def _start_bargein(self):
-        """Run the wake detector on the live mic during playback. Returns a stop
-        Event (or None if barge-in is off / no mic)."""
+        """Run the wake detector on the live mic during playback. Returns
+        (stop_event, thread) — both None if barge-in is off / no mic."""
         self._interrupt = False
         if self.text_mode or not self.cfg.get("conversation.barge_in", True):
-            return None
+            return None, None
         self.mic.resume()
         self.mic.drain()   # drop the tail of our own audio captured a moment ago
         self.wake.reset()
@@ -1006,14 +1006,24 @@ class Zero:
                     log.debug("barge-in monitor error: %s", e)
                     return
 
-        threading.Thread(target=monitor, name="bargein", daemon=True).start()
-        return stop
+        thread = threading.Thread(target=monitor, name="bargein", daemon=True)
+        thread.start()
+        return stop, thread
 
-    def _stop_bargein(self, stop) -> None:
+    def _stop_bargein(self, bargein) -> None:
+        stop, thread = bargein
         if stop is None:
             return
         stop.set()
-        # Re-mute the mic; the conversation loop re-opens it for the next turn.
+        # Join the monitor WHILE the mic is still live: frames keep arriving, so
+        # the monitor pulls one more, sees the stop flag and exits. If we paused
+        # first, it would block forever in frames() (no frames while paused) and
+        # then steal the NEXT turn's audio off the shared queue — which made ZERO
+        # go deaf after the first reply. Only after it's dead do we mute.
+        if thread is not None:
+            thread.join(timeout=1.5)
+            if thread.is_alive():
+                log.warning("barge-in monitor did not exit in time — mic contention")
         self.mic.pause()
 
     def _speak_one(self, text: str) -> None:
