@@ -49,6 +49,11 @@ mkdir -p models/voiceid models/identity
   https://huggingface.co/public-data/insightface/resolve/main/models/buffalo_l/w600k_r50.onnx || true
 pip install opencv-python-headless || true   # Haar face detection (identity)
 
+echo "== Silero VAD (ONNX, torch-free) =="
+mkdir -p models/vad
+[ -f models/vad/silero_vad.onnx ] || wget -O models/vad/silero_vad.onnx \
+  https://github.com/snakers4/silero-vad/raw/master/src/silero_vad/data/silero_vad.onnx || true
+
 echo "== vision extras (camera + detection: opencv, pydantic) =="
 # The eyes need these; without pydantic the whole vision stack fails to import
 # and ZERO silently runs voice-only. Kept light (no torch — YOLO is ONNX/GPU).

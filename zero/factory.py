@@ -38,6 +38,8 @@ def build_endpointer(cfg: Config):
         aggressiveness=cfg.get("vad.aggressiveness", 3),
         energy_threshold=cfg.get("vad.energy_threshold", 350),
         min_utterance_rms=cfg.get("vad.min_utterance_rms", 0),
+        silero_model=str(cfg.resolve_path("vad.silero_model",
+                                          "models/vad/silero_vad.onnx")),
     )
 
 

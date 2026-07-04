@@ -10,6 +10,7 @@ the collected utterance as a float32 mono array (or None if nothing was said).
 """
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Iterable
 
 import numpy as np
@@ -38,6 +39,10 @@ class _BaseEndpointer:
     def _is_speech(self, frame: np.ndarray) -> bool:  # pragma: no cover - overridden
         raise NotImplementedError
 
+    def _on_capture_start(self) -> None:
+        """Reset per-utterance VAD state at the start of each capture. No-op by
+        default; stateful backends (silero) override it."""
+
     def _energetic(self, frame: np.ndarray) -> bool:
         if self.energy_threshold <= 0:
             return True
@@ -51,6 +56,7 @@ class _BaseEndpointer:
         (background) is NOT an idle timeout — we drop it and keep listening, so a
         stray background blip doesn't end the conversation.
         """
+        self._on_capture_start()   # reset stateful VAD (silero) per utterance
         idle_limit = int(idle_timeout_s * 1000 / self.block_ms) if idle_timeout_s else None
         idle_blocks_seen = 0
         frames_iter = iter(frames)
@@ -121,22 +127,64 @@ class _BaseEndpointer:
 
 
 class SileroEndpointer(_BaseEndpointer):
-    def __init__(self, **kw):
-        super().__init__(**kw)
-        import torch  # lazy
+    """Silero-VAD via ONNX Runtime — no torch (keeps the Pi torch-free).
 
-        self._torch = torch
-        # silero-vad ships via torch.hub; cache after first download.
-        model, _ = torch.hub.load("snakers4/silero-vad", "silero_vad", trust_repo=True)
-        self._model = model
-        self._threshold = 0.5
-        log.info("silero VAD loaded")
+    Silero v5 requires exactly 512-sample windows at 16 kHz, but our frames are
+    480 (30 ms), so we buffer and feed whole 512-windows in order, carrying the
+    model's recurrent state between them. The ONNX I/O is smoke-tested at
+    construction, so an API/version mismatch raises here and the factory falls
+    back to webrtc rather than silently deafening the mic at runtime.
+    """
+
+    _WINDOW = 512  # samples @ 16 kHz that silero v5 demands
+
+    def __init__(self, model_path: str | None = None, threshold: float = 0.5, **kw):
+        super().__init__(**kw)
+        import onnxruntime as ort  # already on the Pi (wake word / YOLO)
+
+        if not model_path or not Path(model_path).exists():
+            raise FileNotFoundError(f"silero VAD model missing: {model_path}")
+        self._sess = ort.InferenceSession(model_path,
+                                          providers=["CPUExecutionProvider"])
+        self._input_names = {i.name for i in self._sess.get_inputs()}
+        self._threshold = float(threshold)
+        self._sr = np.array(self.sample_rate, dtype=np.int64)
+        self._state = np.zeros((2, 1, 128), dtype=np.float32)
+        self._buf = np.zeros(0, dtype=np.float32)
+        self._last_prob = 0.0
+        # Validate the ONNX interface NOW (deaf-mic insurance) — a mismatch
+        # raises and build_endpointer() falls back to webrtc.
+        self._run(np.zeros(self._WINDOW, dtype=np.float32))
+        self._on_capture_start()
+        log.info("silero VAD (onnx) loaded (%s)", model_path)
+
+    def _on_capture_start(self) -> None:
+        self._state = np.zeros((2, 1, 128), dtype=np.float32)
+        self._buf = np.zeros(0, dtype=np.float32)
+        self._last_prob = 0.0
+
+    def _run(self, chunk: np.ndarray) -> float:
+        feed = {"input": chunk[None, :].astype(np.float32), "sr": self._sr}
+        if "state" in self._input_names:
+            feed["state"] = self._state
+        out = self._sess.run(None, feed)
+        prob = float(np.asarray(out[0]).reshape(-1)[0])
+        if "state" in self._input_names and len(out) > 1:
+            self._state = np.asarray(out[1], dtype=np.float32)
+        return prob
 
     def _is_speech(self, frame: np.ndarray) -> bool:
-        # silero wants float32 in [-1, 1]; it expects 512-sample chunks at 16 kHz.
-        x = self._torch.from_numpy(frame.astype(np.float32) / 32768.0)
-        prob = float(self._model(x, self.sample_rate).item())
-        return prob >= self._threshold
+        samples = frame.astype(np.float32) / 32768.0
+        self._buf = (np.concatenate([self._buf, samples])
+                     if self._buf.size else samples)
+        while self._buf.size >= self._WINDOW:
+            chunk = self._buf[: self._WINDOW]
+            self._buf = self._buf[self._WINDOW:]
+            try:
+                self._last_prob = self._run(chunk)
+            except Exception as e:  # a transient run error must not drop the turn
+                log.debug("silero run failed: %s", e)
+        return self._last_prob >= self._threshold
 
 
 class WebrtcEndpointer(_BaseEndpointer):
@@ -154,7 +202,13 @@ class WebrtcEndpointer(_BaseEndpointer):
         return self._vad.is_speech(frame.tobytes(), self.sample_rate)
 
 
-def build_endpointer(engine: str, **kw) -> _BaseEndpointer:
-    if engine == "webrtc":
-        return WebrtcEndpointer(**kw)
-    return SileroEndpointer(**kw)
+def build_endpointer(engine: str, *, aggressiveness: int = 3,
+                     silero_model: str | None = None, **kw) -> _BaseEndpointer:
+    """Build the configured endpointer. Silero falls back to webrtc if its
+    model/runtime isn't available, so a missing model never breaks the mic."""
+    if engine == "silero":
+        try:
+            return SileroEndpointer(model_path=silero_model, **kw)
+        except Exception as e:
+            log.warning("silero VAD unavailable (%s) — falling back to webrtc", e)
+    return WebrtcEndpointer(aggressiveness=aggressiveness, **kw)
