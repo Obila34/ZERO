@@ -7,9 +7,10 @@ audio:
   input_device: USB Audio Device  # C-Media dongle at hw:3,0. PortAudio may report
                                   # 0 input channels until the mic is unmuted at
                                   # the ALSA layer (alsamixer -c 3, F4=capture).
-  input_gain: 12.0          # software boost for quiet mics. The BRIO captures very
-                            # low even at max hardware gain (peak ~0.03) — ~10-14
-                            # brings the wake word + STT to a usable level. 1.0 = off.
+  input_gain: 16.0          # software boost for quiet mics. This USB dongle
+                            # captures very low (speech landed ~184-346 RMS at
+                            # gain 12) — 16 lifts it clear of the min_utterance_rms
+                            # gate below. 1.0 = off. Raise toward 20 if still quiet.
   output_device: pipewire   # routes to PipeWire's default sink = the BT speaker
                             # (needs the pipewire-alsa package). Use Headphones for 3.5mm jack.
 
@@ -188,7 +189,7 @@ vad:
   silence_ms: 700           # trailing silence that ends an utterance (too low cuts you off mid-sentence)
   aggressiveness: 3         # webrtc 0-3; 3 = most aggressive at rejecting background murmur
   energy_threshold: 350     # int16 RMS a single frame must exceed to count as speech
-  min_utterance_rms: 300    # PROXIMITY GATE: drop a whole utterance quieter than this
+  min_utterance_rms: 200    # PROXIMITY GATE: drop a whole utterance quieter than this
                             # on average (background people are quieter than you).
                             # 0 = off (calibrate first: run and read the "utterance:
                             # rms=" logs for your voice vs background, then set between).

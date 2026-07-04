@@ -74,19 +74,28 @@ async def transcribe(request: Request):
     lang = request.query_params.get("language", _lang) or _lang
     if lang.lower() == "auto":
         lang = None
-    segments, _info = _model.transcribe(
-        io.BytesIO(data), language=lang, beam_size=1,
-        # Anti-hallucination: Silero VAD drops non-speech before decoding (kills
-        # the phantom "Thank you"/"you" on silence), and turning off
-        # condition_on_previous_text stops the "how are you? how are you? ..."
-        # repetition loops. no_speech_threshold trims low-confidence segments.
-        vad_filter=True,
-        vad_parameters={"min_silence_duration_ms": 300},
-        condition_on_previous_text=False,
-        no_speech_threshold=0.6,
-        temperature=0.0,
-    )
-    text = " ".join(s.text for s in segments).strip()
+
+    # Anti-hallucination: Silero VAD drops non-speech before decoding (kills the
+    # phantom "Thank you"/"you" on silence), condition_on_previous_text=False
+    # stops the "how are you? how are you? ..." repetition loops. But VAD needs
+    # the Silero model + onnxruntime; if that path errors we must NOT 500 and
+    # leave the Pi deaf — retry once WITHOUT the VAD filter instead.
+    def _run(use_vad: bool) -> str:
+        kwargs = dict(language=lang, beam_size=1,
+                      condition_on_previous_text=False, temperature=0.0)
+        if use_vad:
+            kwargs.update(vad_filter=True,
+                          vad_parameters={"min_silence_duration_ms": 300},
+                          no_speech_threshold=0.6)
+        segments, _info = _model.transcribe(io.BytesIO(data), **kwargs)
+        return " ".join(s.text for s in segments).strip()
+
+    try:
+        text = _run(use_vad=True)
+    except Exception as e:
+        print(f"[whisper] vad_filter path failed ({e}); retrying without VAD",
+              flush=True)
+        text = _run(use_vad=False)
     dt = time.time() - t
     print(f"[whisper] {dt:.2f}s -> {text!r}", flush=True)
     return {"text": text, "seconds": round(dt, 3)}
