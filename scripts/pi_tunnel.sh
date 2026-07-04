@@ -29,17 +29,23 @@ FORWARDS=(
   -L 8000:localhost:8000
 )
 
+# SSH options tuned for an UNATTENDED tunnel that may cross networks (Tailscale):
+#   - accept-new: trust a new host key automatically so it never hangs on a
+#     prompt (a systemd service has no one to answer it);
+#   - ServerAlive*: drop and let autossh rebuild the link within ~45s of a stall;
+#   - ConnectTimeout: fail fast on a bad network so the retry loop kicks in.
+SSH_OPTS=(
+  -o StrictHostKeyChecking=accept-new
+  -o ServerAliveInterval=15 -o ServerAliveCountMax=3
+  -o ExitOnForwardFailure=yes
+  -o ConnectTimeout=10
+)
+
 if command -v autossh >/dev/null 2>&1; then
   echo "[pi] autossh tunnel -> $GPU_HOST (auto-reconnect)"
-  exec autossh -M 0 -N \
-    -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
-    -o ExitOnForwardFailure=yes \
-    "${FORWARDS[@]}" "$GPU_HOST"
+  exec autossh -M 0 -N "${SSH_OPTS[@]}" "${FORWARDS[@]}" "$GPU_HOST"
 else
   echo "[pi] autossh not found — using plain ssh (no auto-reconnect)."
   echo "[pi] install it for resilience:  sudo apt-get install -y autossh"
-  exec ssh -N \
-    -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
-    -o ExitOnForwardFailure=yes \
-    "${FORWARDS[@]}" "$GPU_HOST"
+  exec ssh -N "${SSH_OPTS[@]}" "${FORWARDS[@]}" "$GPU_HOST"
 fi
