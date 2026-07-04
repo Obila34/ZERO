@@ -6,7 +6,10 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=head
-Environment=GPU_HOST=obilasam3@zerolabs1
+# The GPU's TAILSCALE IP (stable per-device), so the tunnel works on ANY
+# network, not just the GPU's LAN. The plain hostname 'zerolabs1' only resolves
+# on-LAN. MagicDNS name 'zerolabs1-1' also works if you prefer a name.
+Environment=GPU_HOST=obilasam3@100.110.56.17
 Environment=AUTOSSH_GATETIME=0
 ExecStart=/bin/bash /home/head/Mzee/ZERO/scripts/pi_tunnel.sh
 Restart=always
