@@ -151,6 +151,11 @@ class LearnedObjects:
 
     def match(self, crop_rgb: np.ndarray) -> tuple[str, float] | None:
         """(name, score) of the best learned match above threshold, or None."""
+        # Nothing taught yet -> never embed. Embedding is expensive (a remote
+        # CLIP round trip per crop); doing it with an empty store just to find
+        # zero rows to compare against was stalling every conversation turn.
+        if self.name_count() == 0:
+            return None
         v = self._embedder.embed(crop_rgb)
         if v is None:
             return None
@@ -177,6 +182,8 @@ class LearnedObjects:
         """Return detections with labels overridden by learned names where a
         crop matches. Pure function of the inputs — originals untouched."""
         if frame_rgb is None or not detections:
+            return list(detections)
+        if self.name_count() == 0:   # nothing taught -> skip the embed loop entirely
             return list(detections)
         H, W = frame_rgb.shape[:2]
         out = []
