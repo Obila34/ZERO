@@ -679,7 +679,17 @@ class Zero:
 
         # Decisive presence fact so "can you see me?" is answered from reality.
         presence_note = ""
-        if person_present is False:
+        if self.eyes is None:
+            # Camera never came up this session — ZERO is BLIND. The persona
+            # assumes it can see, so without this it invents a scene (a phantom
+            # "bookshelf"). Only bother the LLM with it on a visual question.
+            if self._is_visual(text):
+                presence_note = (
+                    "(Your camera is offline right now — you cannot see anything "
+                    "at all. If asked what you see, say honestly that your eyes "
+                    "aren't working at the moment. Do NOT invent or describe a "
+                    "scene.)")
+        elif person_present is False:
             presence_note = (
                 "(Your camera view has NO people in it right now. If asked "
                 "whether you can see someone, say honestly that you can't see "
