@@ -295,11 +295,11 @@ vision:
                             #   a trusted home network).
   preview_port: 8008        # web mode: browse to http://<host>:<port>/
   preview_scale: 1.0        # enlarge the 640x480 view (e.g. 1.5 = 960x720)
-  detect_interval_s: 0.4    # min seconds between detections. With GPU offload
-                            # (perception.remote) each detection is an HTTP round
-                            # trip + YOLO11x inference, so 0 would FLOOD the GPU
-                            # and the tunnel. 0.4 = ~2-3/s, plenty for ambient
-                            # perception. Set 0 only for a purely local Pi detector.
+  detect_interval_s: 0.1    # min seconds between detections (~10/s) for near
+                            # real-time presence. Each is an HTTP round trip +
+                            # GPU YOLO11x — fine on LAN/Tailscale when compute
+                            # isn't the limit. Raise toward 0.4 if the tunnel
+                            # or GPU gets saturated; 0 = as fast as possible.
 
   # On a visual turn ZERO hands the multimodal LLM a few RECENT frames (not one
   # frozen pose) so it can see motion/action — a raised hand, someone mid-turn.
