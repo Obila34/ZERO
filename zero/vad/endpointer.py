@@ -76,6 +76,14 @@ class _BaseEndpointer:
                         trailing_silence = 0
                     else:
                         idle_blocks_seen += 1
+                        # Heartbeat: proves the listener is alive AND receiving
+                        # frames while it waits for you to start talking. If this
+                        # ticks but your speech isn't caught -> VAD/level issue.
+                        # If it never ticks on a turn -> no frames are arriving
+                        # (the mic stream died), a different problem entirely.
+                        if idle_blocks_seen % max(1, int(5000 / self.block_ms)) == 0:
+                            log.info("listening… (%.0fs, no speech yet)",
+                                     idle_blocks_seen * self.block_ms / 1000.0)
                         if idle_limit and idle_blocks_seen >= idle_limit:
                             return None
                 else:
