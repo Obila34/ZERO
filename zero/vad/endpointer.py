@@ -203,12 +203,14 @@ class WebrtcEndpointer(_BaseEndpointer):
 
 
 def build_endpointer(engine: str, *, aggressiveness: int = 3,
-                     silero_model: str | None = None, **kw) -> _BaseEndpointer:
+                     silero_model: str | None = None,
+                     silero_threshold: float = 0.5, **kw) -> _BaseEndpointer:
     """Build the configured endpointer. Silero falls back to webrtc if its
     model/runtime isn't available, so a missing model never breaks the mic."""
     if engine == "silero":
         try:
-            return SileroEndpointer(model_path=silero_model, **kw)
+            return SileroEndpointer(model_path=silero_model,
+                                    threshold=silero_threshold, **kw)
         except Exception as e:
             log.warning("silero VAD unavailable (%s) — falling back to webrtc", e)
     return WebrtcEndpointer(aggressiveness=aggressiveness, **kw)

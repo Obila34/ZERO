@@ -40,6 +40,7 @@ def build_endpointer(cfg: Config):
         min_utterance_rms=cfg.get("vad.min_utterance_rms", 0),
         silero_model=str(cfg.resolve_path("vad.silero_model",
                                           "models/vad/silero_vad.onnx")),
+        silero_threshold=cfg.get("vad.silero_threshold", 0.5),
     )
 
 

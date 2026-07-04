@@ -188,10 +188,12 @@ wake:
   threshold: 0.5
 
 vad:
-  engine: silero            # silero (ONNX, torch-free, sharper endpointing) |
-                            # webrtc (ultra-light fallback). Silero auto-falls
-                            # back to webrtc if its model is missing.
+  engine: webrtc            # webrtc (energy-based, catches quiet mics) <- chosen |
+                            # silero (ONNX, sharper on clean audio but STRICTER —
+                            # can miss a quiet mic; lower silero_threshold if so).
   silero_model: models/vad/silero_vad.onnx   # downloaded by setup_pi.sh
+  silero_threshold: 0.3     # speech-probability to accept (default silero is
+                            # 0.5; lower = more sensitive, for quiet mics)
   silence_ms: 700           # trailing silence that ends an utterance (too low cuts you off mid-sentence)
   aggressiveness: 3         # webrtc 0-3; 3 = most aggressive at rejecting background murmur
   energy_threshold: 350     # int16 RMS a single frame must exceed to count as speech
