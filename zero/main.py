@@ -655,10 +655,38 @@ class Zero:
         """
         note, images = self._look(text)
         ident = self._person
-        id_note = (
-            f"(You recognise the speaker — it's {ident.name}.)"
-            if ident is not None and ident.is_known else ""
-        )
+
+        # Ground PRESENCE in the detector (truth), not the LLM's imagination —
+        # otherwise it happily says "yes I see you" to an empty room. YOLO is
+        # authoritative for "is a person in frame right now".
+        person_present = None
+        if self.eyes is not None:
+            try:
+                person_present = "person" in self.eyes.visible_labels()
+            except Exception:  # a scene read must never break a turn
+                person_present = None
+
+        # Identity note — only claim to SEE someone when their FACE is in the
+        # current frame. Voice-only recognition (they're talking off-camera)
+        # must NOT let ZERO claim it can see them.
+        id_note = ""
+        if ident is not None and ident.is_known:
+            if "face" in ident.via:
+                id_note = f"(You can see {ident.name} — you recognise their face.)"
+            else:
+                id_note = (f"(You recognise {ident.name}'s voice, but you can't "
+                           "see their face in the camera right now.)")
+
+        # Decisive presence fact so "can you see me?" is answered from reality.
+        presence_note = ""
+        if person_present is False:
+            presence_note = (
+                "(Your camera view has NO people in it right now. If asked "
+                "whether you can see someone, say honestly that you can't see "
+                "anyone at the moment — do NOT pretend to.)")
+        elif person_present is True and not id_note:
+            presence_note = "(There's a person in your camera view right now.)"
+
         # Relevance recall: what a human would "think of" hearing this turn —
         # ephemeral, attached to the outgoing copy only, never history.
         recall_note = ""
@@ -671,12 +699,15 @@ class Zero:
             except Exception as e:  # recall must never break a turn
                 log.debug("recall failed: %s", e)
         turn_notes = list(getattr(self, "_turn_notes", []) or [])
-        if not (note or images or id_note or recall_note or turn_notes):
+        if not (note or images or id_note or presence_note or recall_note
+                or turn_notes):
             return messages
         last = dict(messages[-1])
         extras = []
         if id_note:
             extras.append(id_note)
+        if presence_note:
+            extras.append(presence_note)
         extras.extend(turn_notes)   # speaker change, affect — this turn only
         if recall_note:
             extras.append(recall_note)
