@@ -26,7 +26,7 @@ from zero.factory import (
     build_voice, build_voiceid, build_wake,
 )
 from zero.privacy.guard import parse_forget_command
-from zero.identity.service import parse_enrollment
+from zero.identity.service import parse_enroll_command, parse_enrollment
 from zero.memory.preferences import apply_rate_delta, parse_preference
 from zero.tools.base import ToolContext
 from zero.vision.learned import parse_object_teach
@@ -520,22 +520,27 @@ class Zero:
             # ZERO knows — and can be upfront instead of sounding "off".
             self._turn_notes.extend(self._self_state_notes())
 
-            # Conversational enrolment: "I'm David" / "my name is David" —
-            # capture this moment's face + voice and remember the person.
+            # Enrolment. Two ways in:
+            #   * name introduction   — "I'm David" / "my name is David"
+            #   * explicit command    — "remember my face", "learn me as David"
+            # Both run the guided multi-angle capture so recognition is robust.
             if self.identity is not None:
-                new_name = parse_enrollment(text)
-                if new_name:
-                    result, kinds = self.identity.enroll(
-                        new_name, audio=utterance, frame_rgb=frame)
-                    if kinds:
-                        self._person = result
-                        senses = " and ".join(kinds)
-                        line = (f"Nice to meet you, {new_name}. "
-                                f"I'll remember your {senses}.")
+                cmd = parse_enroll_command(text)         # explicit request
+                name_intro = parse_enrollment(text) if cmd is None else None
+                if cmd is not None or name_intro:
+                    if cmd:                              # explicit + name
+                        name = cmd
+                    elif name_intro:                     # "I'm David"
+                        name = name_intro
+                    elif self._person is not None:       # "remember my face" + known
+                        name = self._person.name
+                    else:                                # command, but no name known
+                        name = None
+                    if name:
+                        line = self._guided_enroll(name, first_audio=utterance)
                     else:
-                        line = (f"Nice to meet you, {new_name} — but I couldn't "
-                                "get a good look or listen, so tell me again "
-                                "in a moment.")
+                        line = ("Sure — tell me your name while you look at me, "
+                                "and I'll remember your face.")
                     self._to(State.SPEAKING)
                     self._speak_one(line)
                     self.convo.add_user(text)
@@ -1041,6 +1046,66 @@ class Zero:
         audio = self.voice.synthesize(text)
         if getattr(audio, "size", 0):
             self.speaker.play(audio, self.voice.sample_rate, should_stop=lambda: False)
+
+    # -- guided enrolment ---------------------------------------------------
+    _ENROLL_POSES = (
+        "Okay, look straight at me.",
+        "Great — now turn your head a little to your left.",
+        "And a little to your right.",
+        "Perfect. Now look back at me.",
+    )
+
+    def _guided_enroll(self, name: str, first_audio=None) -> str:
+        """Capture several FACE samples across head poses (plus one VOICE sample
+        from the triggering utterance), narrating each step. More varied samples
+        = far more robust recognition than a single frontal shot. Returns the
+        spoken summary line; the caller speaks it and logs the turn."""
+        if self.identity is None or self.eyes is None:
+            # Voice-only fallback: no camera, just save the voice sample.
+            result, kinds = self.identity.enroll(name, audio=first_audio) \
+                if self.identity is not None else (None, [])
+            if kinds:
+                self._person = result
+                return f"Got it, {name}. I've saved your voice — I'll know you next time."
+            return (f"I'd love to remember you, {name}, but I can't see or hear "
+                    "you clearly right now. Let's try again in a moment.")
+
+        faces = 0
+        voice_ok = False
+        for i, prompt in enumerate(self._ENROLL_POSES):
+            self._to(State.SPEAKING)
+            self._speak_one(prompt)
+            time.sleep(0.7)  # let them move and the camera catch a fresh frame
+            frame = self.eyes.current_frame()
+            audio = first_audio if i == 0 else None  # voice once, from their ask
+            try:
+                _result, kinds = self.identity.enroll(name, audio=audio,
+                                                      frame_rgb=frame)
+            except Exception as e:  # enrolment must never crash the turn
+                log.warning("guided enroll step failed: %s", e)
+                kinds = []
+            faces += 1 if "face" in kinds else 0
+            voice_ok = voice_ok or ("voice" in kinds)
+
+        # Refresh who ZERO thinks it's looking at, so the rest of the
+        # conversation is attributed to the freshly enrolled person.
+        try:
+            ident = self.identity.identify(frame_rgb=self.eyes.current_frame())
+            if ident.is_known:
+                self._person = ident
+        except Exception:
+            pass
+
+        if faces == 0 and not voice_ok:
+            return (f"Hmm, I couldn't get a clear look at you, {name}. Let's try "
+                    "again in better light, facing the camera.")
+        got = []
+        if faces:
+            got.append(f"your face from {faces} angle" + ("s" if faces != 1 else ""))
+        if voice_ok:
+            got.append("your voice")
+        return (f"Got it, {name}. I've saved {' and '.join(got)} — "
+                "I'll recognise you next time.")
 
 
 def main() -> int:

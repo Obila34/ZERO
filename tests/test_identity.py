@@ -6,7 +6,9 @@ import pytest
 
 from zero.identity.fuser import IdentityFuser, STRANGER
 from zero.identity.registry import PersonRegistry
-from zero.identity.service import IdentityService, parse_enrollment
+from zero.identity.service import (
+    ENROLL_NEEDS_NAME, IdentityService, parse_enroll_command, parse_enrollment,
+)
 
 
 def _unit(seed: int, dim: int = 32) -> np.ndarray:
@@ -112,6 +114,47 @@ def test_parse_enrollment_accepts(text, name):
 ])
 def test_parse_enrollment_rejects(text):
     assert parse_enrollment(text) is None
+
+
+# ── explicit "remember my face" enrolment commands ──────────────────────────
+@pytest.mark.parametrize("text,name", [
+    ("remember me as David", "David"),
+    ("Please remember my face as Jane", "Jane"),
+    ("enroll me as Sam", "Sam"),
+    ("register me as Peter", "Peter"),
+])
+def test_parse_enroll_command_named(text, name):
+    assert parse_enroll_command(text) == name
+
+
+@pytest.mark.parametrize("text", [
+    "remember my face",
+    "scan my face and remember me",
+    "remember me",
+    "learn my face",
+    "scan me",
+    "memorize my face",
+])
+def test_parse_enroll_command_unnamed(text):
+    assert parse_enroll_command(text) == ENROLL_NEEDS_NAME  # "" sentinel
+
+
+@pytest.mark.parametrize("text", [
+    "remember that I like tea",   # memory command, not enrolment
+    "remember to buy milk",       # reminder, not enrolment
+    "what's your name",
+    "I'm David",                  # name intro — handled by parse_enrollment
+    "this is a french press",     # object teach
+])
+def test_parse_enroll_command_rejects(text):
+    assert parse_enroll_command(text) is None
+
+
+def test_enroll_command_and_name_intro_dont_collide():
+    # A name intro is NOT an explicit command; an explicit command is NOT a
+    # name intro. They're routed separately in main.py.
+    assert parse_enroll_command("I'm David") is None
+    assert parse_enrollment("remember my face") is None
 
 
 # ── service (with injected fake embedders) ───────────────────────────────────

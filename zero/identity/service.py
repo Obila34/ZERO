@@ -61,6 +61,47 @@ def parse_enrollment(text: str) -> str | None:
     return None
 
 
+# Explicit "learn my face" style commands — distinct from a name introduction.
+# NAMED forms carry the name ("remember me as David"); UNNAMED ones ask ZERO to
+# enrol the current speaker without giving a name ("remember my face", "scan
+# me"). Careful NOT to collide with the memory command "remember that ..." or a
+# reminder "remember to ..." — those have no "me"/"my face"/"scan".
+ENROLL_NEEDS_NAME = ""  # sentinel: it's an enrol command, but no name was given
+
+_ENROLL_CMD_NAMED = (
+    re.compile(r"\b(?:remember|enroll|enrol|register|learn)\s+me\s+as\s+"
+               r"([A-Za-z][A-Za-z'\-]+(?: [A-Z][A-Za-z'\-]+)?)", re.IGNORECASE),
+    re.compile(r"\bremember\s+my\s+face\s+as\s+"
+               r"([A-Za-z][A-Za-z'\-]+(?: [A-Z][A-Za-z'\-]+)?)", re.IGNORECASE),
+)
+_ENROLL_CMD_UNNAMED = re.compile(
+    r"\b(?:remember|learn|memori[sz]e|scan)\s+my\s+face\b"
+    r"|\bscan\s+me\b"
+    r"|\bremember\s+me\b(?!\s+as)"
+    r"|\b(?:learn|enroll|enrol|register)\s+me\b(?!\s+as)",
+    re.IGNORECASE)
+
+
+def parse_enroll_command(text: str) -> str | None:
+    """Explicit face-enrolment request. Returns the NAME if one was given, the
+    ``ENROLL_NEEDS_NAME`` sentinel ('') if it's an enrol request with no name,
+    or None if this isn't an enrolment command at all."""
+    t = text.strip().rstrip(".!?")
+    if len(t.split()) > 12:
+        return None
+    for rx in _ENROLL_CMD_NAMED:
+        m = rx.search(t)
+        if m:
+            name = " ".join(m.group(1).split())
+            parts = name.split()
+            if any(p.lower().strip("'-") in _NOT_NAMES for p in parts):
+                return ENROLL_NEEDS_NAME
+            return " ".join(p[:1].upper() + p[1:] for p in parts)
+    if _ENROLL_CMD_UNNAMED.search(t):
+        return ENROLL_NEEDS_NAME
+    return None
+
+
 class IdentityService:
     def __init__(self, registry: PersonRegistry, fuser: IdentityFuser,
                  voice_embedder=None, face_recognizer=None,
