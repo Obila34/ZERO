@@ -121,18 +121,21 @@ perception:
     change_threshold: 0.40    # consecutive-turn voice cosine below this = new speaker
 
 proactive:
-  # ZERO speaking without a wake word — greeting a recognised face, asking a
-  # queued curiosity question. Gated hard: known people only, cooldowns, a
-  # global hourly cap, quiet hours. Timers/reminders the user explicitly set
-  # always announce.
+  # ZERO speaking without a wake word — a time-aware greeting when someone
+  # appears, a queued curiosity question or an ambient remark when they linger.
+  # Still gated hard: cooldowns, a global hourly cap, and quiet hours keep it
+  # from being annoying. Timers/reminders the user set always announce.
   enabled: true
+  engage_unknown: true        # greet/engage ANYONE the camera sees, not just
+                              # enrolled faces. false = known people only.
   quiet_hours: [22, 7]        # no proactive speech from 22:00 to 07:00 ([] = off)
   greet_cooldown_s: 14400     # re-greet the same person at most every 4h
   curiosity_cooldown_s: 1800  # at most one curiosity question per 30 min
-  max_per_hour: 6             # global proactive utterance cap
+  remark_cooldown_s: 300      # at most one ambient remark per 5 min
+  max_per_hour: 6             # global proactive utterance cap (hard ceiling)
   presence_reset_s: 1200      # away this long -> next arrival greets again
   check_interval_s: 3.0       # idle watcher tick
-  linger_s: 45                # person present this long before a question
+  linger_s: 45                # person present this long before a question/remark
 
 preferences:
   enabled: true                # "speak slower" / "keep it short" -> stored as

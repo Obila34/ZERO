@@ -488,13 +488,16 @@ def build_proactive(cfg: Config, *, events, eyes, identity, memory, is_idle):
             max_pending=cfg.get("learning.curiosity.max_pending", 20),
         )
     quiet = cfg.get("proactive.quiet_hours", [22, 7])
+    engage_unknown = cfg.get("proactive.engage_unknown", False)
     policy = InteractionPolicy(
         enabled=True,
         greet_cooldown_s=cfg.get("proactive.greet_cooldown_s", 4 * 3600),
         curiosity_cooldown_s=cfg.get("proactive.curiosity_cooldown_s", 1800),
+        remark_cooldown_s=cfg.get("proactive.remark_cooldown_s", 300),
         max_per_hour=cfg.get("proactive.max_per_hour", 6),
         quiet_hours=tuple(quiet) if quiet else None,
         presence_reset_s=cfg.get("proactive.presence_reset_s", 1200),
+        engage_unknown=engage_unknown,
     )
     if eyes is None and identity is None and curiosity is None:
         log.info("proactive on, but no signal sources — watcher not started")
@@ -505,6 +508,7 @@ def build_proactive(cfg: Config, *, events, eyes, identity, memory, is_idle):
         check_interval_s=cfg.get("proactive.check_interval_s", 3.0),
         linger_before_question_s=cfg.get("proactive.linger_s", 45.0),
         consolidate_interval_s=cfg.get("proactive.consolidate_interval_s", 1800),
+        engage_unknown=engage_unknown,
     )
     return triggers, curiosity, policy
 

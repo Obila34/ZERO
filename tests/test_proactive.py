@@ -62,9 +62,13 @@ class FakeEyes:
     def __init__(self):
         self.frame = None
         self.unknowns: list[str] = []
+        self.labels: set[str] = set()
 
     def current_frame(self):
         return self.frame
+
+    def visible_labels(self):
+        return set(self.labels)
 
     def recent_unknowns(self, within_s=3600.0):
         out, self.unknowns = self.unknowns, []
@@ -90,9 +94,10 @@ class FakeMemory:
         return {"forgotten": 0, "insights": 0}
 
 
-def _trigger(tmp_path, eyes, identity, memory=None, curiosity=None, **kw):
+def _trigger(tmp_path, eyes, identity, memory=None, curiosity=None,
+             policy=None, **kw):
     return TriggerSource(
-        events=EventBus(), policy=_policy(greet_cooldown_s=3600),
+        events=EventBus(), policy=policy or _policy(greet_cooldown_s=3600),
         eyes=eyes, identity=identity, curiosity=curiosity, memory=memory,
         is_idle=lambda: True, **kw)
 
@@ -170,3 +175,71 @@ def test_not_idle_means_no_ticks(tmp_path):
     time.sleep(0.15)
     t.stop()
     assert t._events.drain() == []                     # busy: watcher stays out
+
+
+# ── engage_unknown: greet/engage anyone the camera sees ──────────────────────
+def test_may_greet_unknown_gated_by_flag():
+    off = _policy(greet_cooldown_s=3600, engage_unknown=False)
+    assert off.may_greet(None) is False                # stranger off by default
+    on = _policy(greet_cooldown_s=3600, engage_unknown=True)
+    assert on.may_greet(None) is True                  # ...on when enabled
+
+
+def test_may_remark_cooldown():
+    p = _policy(remark_cooldown_s=300)
+    now = time.time()
+    assert p.may_remark(now) is True
+    p.spoke("remark", None, now)
+    assert p.may_remark(now + 100) is False
+    assert p.may_remark(now + 400) is True
+
+
+def test_engage_unknown_greets_present_person(tmp_path):
+    eyes, ident = FakeEyes(), FakeIdentity()   # identity returns STRANGER
+    eyes.frame = object()
+    eyes.labels = {"person", "cup"}            # YOLO sees a person
+    t = _trigger(tmp_path, eyes, ident,
+                 policy=_policy(greet_cooldown_s=3600, engage_unknown=True),
+                 engage_unknown=True)
+    t._tick(time.time())
+    events = t._events.drain()
+    assert len(events) == 1 and events[0].kind == "greet"
+    assert events[0].person_id is None          # unrecognised
+    assert events[0].meta["open_conversation"] is True
+
+
+def test_unknown_ignored_when_engage_disabled(tmp_path):
+    eyes, ident = FakeEyes(), FakeIdentity()
+    eyes.frame = object()
+    eyes.labels = {"person"}
+    t = _trigger(tmp_path, eyes, ident)         # engage_unknown defaults False
+    t._tick(time.time())
+    assert t._events.drain() == []
+
+
+def test_lingering_unknown_gets_ambient_remark(tmp_path):
+    eyes, ident = FakeEyes(), FakeIdentity()
+    eyes.frame = object()
+    eyes.labels = {"person"}
+    t = _trigger(tmp_path, eyes, ident,
+                 policy=_policy(greet_cooldown_s=3600, remark_cooldown_s=1,
+                                engage_unknown=True),
+                 engage_unknown=True, linger_before_question_s=10.0)
+    now = time.time()
+    t._policy.spoke("greet", None, now - 4000)  # already greeted, past cooldown
+    t._tick(now)                                # arrival (greet on cooldown)
+    t._events.drain()
+    t._tick(now + 15)                           # lingered -> ambient remark
+    events = t._events.drain()
+    assert len(events) == 1 and events[0].kind == "remark"
+
+
+def test_greeting_text_is_time_aware(tmp_path):
+    import time as _t
+
+    eyes, ident = FakeEyes(), FakeIdentity()
+    t = _trigger(tmp_path, eyes, ident)
+    morning = _t.mktime(_t.strptime("2026-07-04 09:00", "%Y-%m-%d %H:%M"))
+    evening = _t.mktime(_t.strptime("2026-07-04 20:00", "%Y-%m-%d %H:%M"))
+    assert t._greeting_text("David", morning) == "Good morning, David. Good to see you."
+    assert t._greeting_text("David", evening) == "Good evening, David. Good to see you."

@@ -2,9 +2,11 @@
 
 A daemon thread that, ONLY while ZERO is idle, periodically:
 
-  1. looks for a known face in the current frame → greeting event
-     ("Hey David, welcome back") that also OPENS a conversation;
-  2. when a known person lingers, surfaces one queued curiosity question;
+  1. sees who's in front of it → a time-aware greeting that OPENS a
+     conversation. A known face is greeted by name; an unrecognised person is
+     greeted with an ice-breaker when engage_unknown is on.
+  2. when that person lingers, surfaces a queued curiosity question, or a
+     generic ambient remark if there's none — keeping the interaction alive;
   3. runs the silent idle-learning tick: memory consolidation and turning
      unfamiliar-object sightings into queued questions (never spoken to an
      empty room — asked later, opportunistically).
@@ -14,6 +16,7 @@ It posts Events on the bus, which main.py drains at safe moments.
 """
 from __future__ import annotations
 
+import random
 import threading
 import time
 
@@ -24,6 +27,30 @@ from zero.utils.logging import get_logger
 
 log = get_logger("proactive")
 
+# Openers for someone ZERO doesn't recognise. The conversation flows to the LLM
+# on their reply; these just break the ice without needing the model.
+_UNKNOWN_OPENERS = (
+    "{tod}! I don't think we've met — I'm Zero. What are you working on?",
+    "Oh, hey there. {tod}. What brings you by?",
+    "{tod}. I'm Zero — nice to see someone around. What are you up to?",
+)
+# Ambient remarks to keep a lingering conversation alive when there's no queued
+# question. Deliberately open-ended so the LLM can take it anywhere.
+_AMBIENT_REMARKS = (
+    "You've been at it a while — how's it going over there?",
+    "Still busy? I'm here if you want to talk something through.",
+    "Anything I can help with while you work?",
+)
+
+
+def _time_of_day(now: float) -> str:
+    h = time.localtime(now).tm_hour
+    if h < 12:
+        return "Good morning"
+    if h < 17:
+        return "Good afternoon"
+    return "Good evening"
+
 
 class TriggerSource:
     def __init__(self, *, events: EventBus, policy: InteractionPolicy,
@@ -31,7 +58,8 @@ class TriggerSource:
                  memory=None, is_idle=lambda: False,
                  check_interval_s: float = 3.0,
                  linger_before_question_s: float = 45.0,
-                 consolidate_interval_s: float = 1800.0):
+                 consolidate_interval_s: float = 1800.0,
+                 engage_unknown: bool = False):
         self._events = events
         self._policy = policy
         self._eyes = eyes
@@ -42,10 +70,11 @@ class TriggerSource:
         self.check_interval_s = float(check_interval_s)
         self.linger_s = float(linger_before_question_s)
         self.consolidate_interval_s = float(consolidate_interval_s)
+        self._engage_unknown = bool(engage_unknown)
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
         self._present_since: float | None = None
-        self._present_person: tuple[int, str] | None = None
+        self._present_person: tuple[int | None, str | None] | None = None
         self._last_consolidate = 0.0
 
     # ── lifecycle ─────────────────────────────────────────────────────────────
@@ -83,19 +112,24 @@ class TriggerSource:
             return
 
         pid, name = person
-        if self._present_person is None or self._present_person[0] != pid:
+        prev_pid = self._present_person[0] if self._present_person else object()
+        if self._present_person is None or prev_pid != pid:
+            # Someone new arrived (or an unknown became a known face).
             self._present_person, self._present_since = person, now
             if self._policy.may_greet(pid, now):
+                text = self._greeting_text(name, now)
                 self._events.post(Event(
-                    kind="greet", text=f"Hey {name}, welcome back.",
-                    person_id=pid, meta={"open_conversation": True}))
+                    kind="greet", text=text, person_id=pid,
+                    meta={"open_conversation": True}))
                 self._policy.spoke("greet", pid, now)
-                log.info("greeting %s", name)
+                log.info("greeting %s", name or "someone")
             return
 
-        # Same person lingering: one curiosity question, opportunistically.
-        if (self._curiosity is not None and self._present_since is not None
-                and now - self._present_since >= self.linger_s
+        # Same person lingering: a queued curiosity question first, else a
+        # generic ambient remark — either way, keep the interaction alive.
+        if self._present_since is None or now - self._present_since < self.linger_s:
+            return
+        if (self._curiosity is not None
                 and self._policy.may_ask_curiosity(pid, now)):
             q = self._curiosity.next_question(pid)
             if q is not None:
@@ -106,17 +140,39 @@ class TriggerSource:
                     meta={"open_conversation": True}))
                 self._policy.spoke("curiosity", pid, now)
                 log.info("asking: %s", text)
+                return
+        if self._policy.may_remark(now):
+            self._events.post(Event(
+                kind="remark", text=random.choice(_AMBIENT_REMARKS),
+                person_id=pid, meta={"open_conversation": True}))
+            self._policy.spoke("remark", pid, now)
+            log.info("ambient remark")
 
-    def _look_for_person(self) -> tuple[int, str] | None:
-        """A known face in the current frame, via identity's face channel."""
-        if self._eyes is None or self._identity is None:
+    def _greeting_text(self, name: str | None, now: float) -> str:
+        """Time-aware greeting — named for people ZERO knows, an ice-breaker
+        for those it doesn't."""
+        tod = _time_of_day(now)
+        if name:
+            return f"{tod}, {name}. Good to see you."
+        return random.choice(_UNKNOWN_OPENERS).format(tod=tod)
+
+    def _look_for_person(self) -> tuple[int | None, str | None] | None:
+        """Who (or whether someone) is in front of ZERO right now:
+        (pid, name) for a known face; (None, None) for an unrecognised person
+        when engage_unknown is on; None if no one is there."""
+        if self._eyes is None:
             return None
         frame = self._eyes.current_frame()
-        if frame is None:
-            return None
-        result = self._identity.identify(frame_rgb=frame)
-        if result.is_known:
-            return result.person_id, result.name
+        if self._identity is not None and frame is not None:
+            result = self._identity.identify(frame_rgb=frame)
+            if result.is_known:
+                return result.person_id, result.name
+        if self._engage_unknown:
+            try:
+                if "person" in self._eyes.visible_labels():
+                    return None, None            # present, but unrecognised
+            except Exception:  # a scene read must never break the watcher
+                pass
         return None
 
     def _idle_learning(self, now: float) -> None:
