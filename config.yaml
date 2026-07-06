@@ -191,7 +191,7 @@ wake:
   engine: openwakeword
   # openWakeWord ships pretrained words; for a true "Hey Zero" train a custom model.
   # Start with a built-in like "hey_jarvis" to prove the pipeline, then swap.
-  model: hey_jarvis
+  model: hey_zero
   threshold: 0.5
 
 vad:
@@ -207,7 +207,7 @@ vad:
   aggressiveness: 3 # webrtc 0-3; 3 = most aggressive at rejecting background murmur
   energy_threshold: 350 # int16 RMS a single frame must exceed to count as speech
   min_utterance_rms:
-    100 # PROXIMITY GATE: drop a whole utterance quieter than this
+    150 # PROXIMITY GATE: drop a whole utterance quieter than this
     # on average (background people are quieter than you).
     # 0 = off (calibrate first: run and read the "utterance:
     # rms=" logs for your voice vs background, then set between).
