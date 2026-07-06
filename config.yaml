@@ -191,7 +191,7 @@ wake:
   engine: openwakeword
   # openWakeWord ships pretrained words; for a true "Hey Zero" train a custom model.
   # Start with a built-in like "hey_jarvis" to prove the pipeline, then swap.
-  model: hey_zero
+  model: hey_jarvis
   threshold: 0.5
 
 vad:
