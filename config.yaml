@@ -2,17 +2,20 @@
 # needs a code change to swap a stage (local today, cloud later).
 
 audio:
-  sample_rate: 16000        # 16 kHz mono everywhere in the pipeline
-  block_ms: 30              # frame size for capture / VAD
-  input_device: USB Audio Device  # C-Media dongle at hw:3,0. PortAudio may report
-                                  # 0 input channels until the mic is unmuted at
-                                  # the ALSA layer (alsamixer -c 3, F4=capture).
-  input_gain: 16.0          # software boost for quiet mics. This USB dongle
-                            # captures very low (speech landed ~184-346 RMS at
-                            # gain 12) — 16 lifts it clear of the min_utterance_rms
-                            # gate below. 1.0 = off. Raise toward 20 if still quiet.
-  output_device: pipewire   # routes to PipeWire's default sink = the BT speaker
-                            # (needs the pipewire-alsa package). Use Headphones for 3.5mm jack.
+  sample_rate: 16000 # 16 kHz mono everywhere in the pipeline
+  block_ms: 30 # frame size for capture / VAD
+  input_device:
+    USB Audio Device # C-Media dongle at hw:3,0. PortAudio may report
+    # 0 input channels until the mic is unmuted at
+    # the ALSA layer (alsamixer -c 3, F4=capture).
+  input_gain:
+    16.0 # software boost for quiet mics. This USB dongle
+    # captures very low (speech landed ~184-346 RMS at
+    # gain 12) — 16 lifts it clear of the min_utterance_rms
+    # gate below. 1.0 = off. Raise toward 20 if still quiet.
+  output_device:
+    pipewire # routes to PipeWire's default sink = the BT speaker
+    # (needs the pipewire-alsa package). Use Headphones for 3.5mm jack.
 
 privacy:
   # Bystander handling for voices ZERO does not recognise:
@@ -22,8 +25,8 @@ privacy:
   # Known (enrolled) people always get full service. Erasure is always
   # honoured: "forget that", "forget everything about me".
   bystander_mode: guarded
-  indicator_gpio_pin:        # LED pin for the visible "I'm listening" signal
-                             # (e.g. 17). Blank = log-only indicator.
+  indicator_gpio_pin: # LED pin for the visible "I'm listening" signal
+    # (e.g. 17). Blank = log-only indicator.
 
 conversation:
   # After waking once, ZERO stays in a flowing conversation (no wake word between
@@ -49,29 +52,30 @@ conversation:
     ack: ["Mm-hmm.", "Sure."]
 
 memory:
-  enabled: true              # remember durable facts across sessions (SQLite)
-  path: zero_memory.sqlite   # single file on disk; survives reboots
-  max_facts: 30              # cap injected facts so the prompt stays small/fast
-  recent_episodes: 3         # one-line summaries of recent conversations injected at
-                             # the start, so ZERO recalls the ARC of past chats (0 = off)
-  max_stored_facts: 200      # storage caps (oldest pruned) so the DB never grows
-  max_stored_episodes: 100   # forever — injection caps above only limit the prompt
+  enabled: true # remember durable facts across sessions (SQLite)
+  path: zero_memory.sqlite # single file on disk; survives reboots
+  max_facts: 30 # cap injected facts so the prompt stays small/fast
+  recent_episodes:
+    3 # one-line summaries of recent conversations injected at
+    # the start, so ZERO recalls the ARC of past chats (0 = off)
+  max_stored_facts: 200 # storage caps (oldest pruned) so the DB never grows
+  max_stored_episodes: 100 # forever — injection caps above only limit the prompt
 
   # Human-like recall: memories are activation-ranked (relevance x recency x
   # importance, Generative-Agents style) instead of dumped wholesale. Semantic
   # relevance needs embeddings; the GPU Ollama provides them over the existing
   # tunnel, with an offline hashing fallback so recall degrades, never breaks.
   embeddings:
-    backend: auto            # auto (ollama if llm.host set, else hash) | ollama | hash | off
-    ollama_model:            # blank = reuse llm.model for /api/embeddings
-    hash_dim: 256            # fallback hashing-embedder dimension
+    backend: auto # auto (ollama if llm.host set, else hash) | ollama | hash | off
+    ollama_model: # blank = reuse llm.model for /api/embeddings
+    hash_dim: 256 # fallback hashing-embedder dimension
   retrieval:
-    top_k: 6                 # memories surfaced per recall
-    half_life_days: 14       # recency decay half-life
-    min_activation: 0.05     # below this a memory doesn't surface at all
+    top_k: 6 # memories surfaced per recall
+    half_life_days: 14 # recency decay half-life
+    min_activation: 0.05 # below this a memory doesn't surface at all
   forgetting:
-    enabled: true            # gentle decay: old + unimportant + never-recalled
-    max_age_days: 90         # ...memories fade after this long untouched
+    enabled: true # gentle decay: old + unimportant + never-recalled
+    max_age_days: 90 # ...memories fade after this long untouched
 
 learning:
   # Few-shot object learning: "this is a french press" binds the current
@@ -79,13 +83,14 @@ learning:
   objects:
     enabled: true
     db_path: zero_objects.sqlite
-    clip_model_path:           # optional CLIP image-encoder ONNX; blank = the
-                               # offline histogram embedder (color+shape)
-    match_threshold: 0.80      # cosine needed to override a detector label (local hist)
+    clip_model_path: # optional CLIP image-encoder ONNX; blank = the
+      # offline histogram embedder (color+shape)
+    match_threshold: 0.80 # cosine needed to override a detector label (local hist)
     match_threshold_clip: 0.72 # threshold when the remote CLIP embedder is active
     max_samples_per_object: 5
-    unknown_conf: 0.45         # detections below this and unlearned count as
-                               # "unfamiliar" -> curiosity queue
+    unknown_conf:
+      0.45 # detections below this and unlearned count as
+      # "unfamiliar" -> curiosity queue
   # Curiosity: while ALONE, learn silently (consolidate memory, log unknown
   # objects, queue questions); ask when a known person is around. ZERO never
   # talks to an empty room.
@@ -103,9 +108,9 @@ perception:
   # models) instead of blinding ZERO — and recovers per-call.
   remote:
     enabled: true
-    base_url: http://127.0.0.1:8000   # vision server through the tunnel
-    timeout_s: 5.0                    # face/speaker/CLIP calls
-    detect_timeout_s: 10.0            # detection (first call loads YOLO11x)
+    base_url: http://127.0.0.1:8000 # vision server through the tunnel
+    timeout_s: 5.0 # face/speaker/CLIP calls
+    detect_timeout_s: 10.0 # detection (first call loads YOLO11x)
     jpeg_quality: 80
 
   # Reading HOW things are said. Affect fuses voice prosody + a text valence
@@ -113,12 +118,12 @@ perception:
   # confident reads reach the LLM — as tone guidance, never spoken diagnosis.
   affect:
     enabled: true
-    face_model_path:          # optional FER+ ONNX (64x64 gray); blank = voice+text only
+    face_model_path: # optional FER+ ONNX (64x64 gray); blank = voice+text only
   # Turn-level diarization: notice when a DIFFERENT person takes over,
   # using the per-utterance voice embeddings identity already computes.
   diarize:
     enabled: true
-    change_threshold: 0.40    # consecutive-turn voice cosine below this = new speaker
+    change_threshold: 0.40 # consecutive-turn voice cosine below this = new speaker
 
 proactive:
   # ZERO speaking without a wake word — a time-aware greeting when someone
@@ -126,20 +131,22 @@ proactive:
   # Still gated hard: cooldowns, a global hourly cap, and quiet hours keep it
   # from being annoying. Timers/reminders the user set always announce.
   enabled: true
-  engage_unknown: true        # greet/engage ANYONE the camera sees, not just
-                              # enrolled faces. false = known people only.
-  quiet_hours: [22, 7]        # no proactive speech from 22:00 to 07:00 ([] = off)
-  greet_cooldown_s: 14400     # re-greet the same person at most every 4h
-  curiosity_cooldown_s: 1800  # at most one curiosity question per 30 min
-  remark_cooldown_s: 300      # at most one ambient remark per 5 min
-  max_per_hour: 6             # global proactive utterance cap (hard ceiling)
-  presence_reset_s: 1200      # away this long -> next arrival greets again
-  check_interval_s: 3.0       # idle watcher tick
-  linger_s: 45                # person present this long before a question/remark
+  engage_unknown:
+    true # greet/engage ANYONE the camera sees, not just
+    # enrolled faces. false = known people only.
+  quiet_hours: [22, 7] # no proactive speech from 22:00 to 07:00 ([] = off)
+  greet_cooldown_s: 14400 # re-greet the same person at most every 4h
+  curiosity_cooldown_s: 1800 # at most one curiosity question per 30 min
+  remark_cooldown_s: 300 # at most one ambient remark per 5 min
+  max_per_hour: 6 # global proactive utterance cap (hard ceiling)
+  presence_reset_s: 1200 # away this long -> next arrival greets again
+  check_interval_s: 3.0 # idle watcher tick
+  linger_s: 45 # person present this long before a question/remark
 
 preferences:
-  enabled: true                # "speak slower" / "keep it short" -> stored as
-                               # standing behaviour + engine knobs where possible
+  enabled:
+    true # "speak slower" / "keep it short" -> stored as
+    # standing behaviour + engine knobs where possible
 
 tools:
   # The hands: real actions routed in three tiers — regex intents (instant),
@@ -156,29 +163,29 @@ identity:
   # voice-only, missing voice model -> face-only, neither -> anonymous mode.
   enabled: true
   db_path: zero_identity.sqlite
-  max_samples_per_kind: 5    # stored embedding samples per person per channel
-  reinforce_threshold: 0.70  # confident joint matches refresh stored samples
+  max_samples_per_kind: 5 # stored embedding samples per person per channel
+  reinforce_threshold: 0.70 # confident joint matches refresh stored samples
   voice:
-    model_path: models/voiceid/voxceleb_ECAPA512_LM.onnx  # reuses the voiceid model
+    model_path: models/voiceid/voxceleb_ECAPA512_LM.onnx # reuses the voiceid model
   face:
     # ArcFace-style ONNX face embedder (512-d), e.g. w600k_r50.onnx from
     # InsightFace buffalo_l. Blank/missing = voice-only identity.
     model_path: models/identity/arcface.onnx
-    min_size: 60             # smallest face (px) worth matching
+    min_size: 60 # smallest face (px) worth matching
   fusion:
-    w_face: 0.55             # weights are normalized; face is the steadier signal
+    w_face: 0.55 # weights are normalized; face is the steadier signal
     w_voice: 0.45
-    threshold: 0.50          # fused (both channels agree) accept
-    face_threshold: 0.42     # single-channel accepts are stricter by nature
+    threshold: 0.50 # fused (both channels agree) accept
+    face_threshold: 0.42 # single-channel accepts are stricter by nature
     voice_threshold: 0.45
 
 voiceid:
   # "Only my voice" — verify each utterance is the enrolled owner before acting.
   # Enroll once on the device:  python test_voiceid.py enroll
-  enabled: false             # flip to true AFTER you've enrolled + downloaded the model
+  enabled: false # flip to true AFTER you've enrolled + downloaded the model
   model_path: models/voiceid/voxceleb_ECAPA512_LM.onnx
   profile_path: voiceprint.npy
-  threshold: 0.45            # owner ~0.55-0.70, others ~0.25-0.35 (tuned on PC)
+  threshold: 0.45 # owner ~0.55-0.70, others ~0.25-0.35 (tuned on PC)
 
 wake:
   engine: openwakeword
@@ -188,30 +195,33 @@ wake:
   threshold: 0.5
 
 vad:
-  engine: webrtc            # webrtc (energy-based, catches quiet mics) <- chosen |
-                            # silero (ONNX, sharper on clean audio but STRICTER —
-                            # can miss a quiet mic; lower silero_threshold if so).
-  silero_model: models/vad/silero_vad.onnx   # downloaded by setup_pi.sh
-  silero_threshold: 0.3     # speech-probability to accept (default silero is
-                            # 0.5; lower = more sensitive, for quiet mics)
-  silence_ms: 700           # trailing silence that ends an utterance (too low cuts you off mid-sentence)
-  aggressiveness: 3         # webrtc 0-3; 3 = most aggressive at rejecting background murmur
-  energy_threshold: 350     # int16 RMS a single frame must exceed to count as speech
-  min_utterance_rms: 200    # PROXIMITY GATE: drop a whole utterance quieter than this
-                            # on average (background people are quieter than you).
-                            # 0 = off (calibrate first: run and read the "utterance:
-                            # rms=" logs for your voice vs background, then set between).
-  max_utterance_ms: 15000   # hard cap so STT input stays bounded
-  speech_pad_ms: 200        # keep a little audio either side of speech
+  engine:
+    webrtc # webrtc (energy-based, catches quiet mics) <- chosen |
+    # silero (ONNX, sharper on clean audio but STRICTER —
+    # can miss a quiet mic; lower silero_threshold if so).
+  silero_model: models/vad/silero_vad.onnx # downloaded by setup_pi.sh
+  silero_threshold:
+    0.3 # speech-probability to accept (default silero is
+    # 0.5; lower = more sensitive, for quiet mics)
+  silence_ms: 700 # trailing silence that ends an utterance (too low cuts you off mid-sentence)
+  aggressiveness: 3 # webrtc 0-3; 3 = most aggressive at rejecting background murmur
+  energy_threshold: 350 # int16 RMS a single frame must exceed to count as speech
+  min_utterance_rms:
+    200 # PROXIMITY GATE: drop a whole utterance quieter than this
+    # on average (background people are quieter than you).
+    # 0 = off (calibrate first: run and read the "utterance:
+    # rms=" logs for your voice vs background, then set between).
+  max_utterance_ms: 15000 # hard cap so STT input stays bounded
+  speech_pad_ms: 200 # keep a little audio either side of speech
 
 stt:
   # GPU offload: send audio to large-v3-turbo on the GPU (Whisper server over the
   # SSH tunnel). Turbo-quality at ~1s, instead of 29s on the Pi CPU.
-  engine: remote                              # remote (GPU turbo) | whispercpp (local)
+  engine: remote # remote (GPU turbo) | whispercpp (local)
   remote_url: http://127.0.0.1:9000/transcribe
   remote_timeout: 30
-  language:                 # blank = server default (en) | sw | auto (Whisper
-                            # detects — best for English/Swahili code-switching)
+  language: # blank = server default (en) | sw | auto (Whisper
+    # detects — best for English/Swahili code-switching)
   # If the remote fails (tunnel down), fail over to this local engine per-utterance
   # — built lazily on first failure; the remote is retried every turn so quality
   # comes back the moment the tunnel does. Needs the whispercpp model + pywhispercpp
@@ -222,8 +232,8 @@ stt:
   # base.en is the CPU sweet spot (~1.5s). large-v3-turbo on the Pi CPU = 29s/clip.
   model: base.en
   model_path: models/whisper/ggml-base.en.bin
-  threads: 4                # use all 4 Pi cores during transcription
-  audio_ctx: 768            # cap encoder window (0=full/30s). 768 ~halves encode for short turns
+  threads: 4 # use all 4 Pi cores during transcription
+  audio_ctx: 768 # cap encoder window (0=full/30s). 768 ~halves encode for short turns
   # Biases the decoder toward conversational phrasing, cutting single-phoneme
   # mishears like "what's your aim" -> "what's your name". Keep it short.
   initial_prompt: "A natural spoken conversation with a voice assistant named Zero."
@@ -234,18 +244,19 @@ llm:
   # Gemma4 (8B) runs there at ~100 tok/s. Local fallback: host 127.0.0.1:11434 +
   # model qwen2.5:3b-instruct (needs the Pi's own Ollama running).
   host: http://127.0.0.1:11435
-  model: gemma4:latest       # 8B on the GPU via tunnel
-  temperature: 0.3           # low = factual & stable; 0.7 was too loose for a Q&A assistant
-  max_tokens: 500            # ~1-2 spoken sentences — snappier replies, fewer pauses
-                             # (caps runaway answers; raise if you want longer ones)
+  model: gemma4:latest # 8B on the GPU via tunnel
+  temperature: 0.3 # low = factual & stable; 0.7 was too loose for a Q&A assistant
+  max_tokens:
+    500 # ~1-2 spoken sentences — snappier replies, fewer pauses
+    # (caps runaway answers; raise if you want longer ones)
   # Cache-friendly history: append-only most turns (fast ~2s), and only trim back
   # to `history_turns` once it grows past `history_trim_at`. Keeps the 3B fast
   # WITHOUT shrinking the model — the ~10-15s spikes came from trimming every turn.
-  history_turns: 3           # size we keep after a trim
-  history_trim_at: 8         # let it grow to this many turns before trimming
+  history_turns: 3 # size we keep after a trim
+  history_trim_at: 8 # let it grow to this many turns before trimming
 
 tts:
-  engine: orpheus           # orpheus (GPU, natural) | piper (local fallback) | fish
+  engine: orpheus # orpheus (GPU, natural) | piper (local fallback) | fish
   # If the remote Orpheus fails (tunnel down), speak through local Piper instead of
   # going silently mute — the different voice IS the "degraded mode" signal. Built
   # lazily on first failure; the remote is retried every sentence. Needs the piper
@@ -258,13 +269,13 @@ tts:
     voice: tara
     timeout: 30
   piper:
-    binary: piper/piper       # extracted arm64 release (relative to repo root)
+    binary: piper/piper # extracted arm64 release (relative to repo root)
     voice: models/piper/en_US-amy-medium.onnx
-    length_scale: 1.0       # base speaking rate (orchestrator nudges per-segment)
+    length_scale: 1.0 # base speaking rate (orchestrator nudges per-segment)
   fish:
     # OpenAudio S1-mini — expressive mode. PyTorch/CPU build, NOT the MLX build.
     model_dir: models/fish/openaudio-s1-mini
-    precision: int8         # int8 | int4 | fp16  (transformer quantization)
+    precision: int8 # int8 | int4 | fp16  (transformer quantization)
     # codec stays fp16 regardless (GAN — quantizing degrades audio)
     # Inference command, finalized in the Phase-6 spike. Placeholders:
     # {model_dir} {text} {out}. Must write a WAV to {out}. Leave null until set.
@@ -274,8 +285,9 @@ vision:
   # ZERO's eyes. The camera + YOLO11n + color loop runs continuously in the
   # background (perception is never on the critical path); the wake word that
   # starts a conversation makes ZERO *attend* to what it's already seeing.
-  enabled: true             # needs a camera + requirements-vision.txt installed.
-                            # Off = voice-only (unchanged pipeline).
+  enabled:
+    true # needs a camera + requirements-vision.txt installed.
+    # Off = voice-only (unchanged pipeline).
 
   # Set true ONLY if llm.model is a vision-capable build (e.g. a multimodal Gemma
   # 3 / Qwen2-VL). Then the keyframe itself is handed to the LLM on visual turns.
@@ -283,56 +295,61 @@ vision:
   # raw-image understanding. Verify with: ollama show <model> (look for "vision").
   multimodal: true
 
-  max_items: 15              # most objects named in the detector HINT (counts only)
+  max_items: 15 # most objects named in the detector HINT (counts only)
 
   # Live preview: SEE what ZERO sees (camera feed + detection boxes) while it runs.
   preview: true
-  preview_mode: auto        # auto | window | web
-                            #  window = an OpenCV desktop window (needs a monitor)
-                            #  web    = an MJPEG stream in a browser — works on a
-                            #           HEADLESS Pi: open http://<pi-ip>:8008/
-                            #  auto   = window if a display is detected, else web
-                            #           (so it just works on a laptop AND a Pi).
-  preview_host: 127.0.0.1   # web mode bind address. 127.0.0.1 = private (view via
-                            #   ssh -L 8008:localhost:8008 pi@<host>, then browse
-                            #   http://localhost:8008/). Set 0.0.0.0 to expose the
-                            #   feed directly on the LAN (unauthenticated — only on
-                            #   a trusted home network).
-  preview_port: 8008        # web mode: browse to http://<host>:<port>/
-  preview_scale: 1.0        # enlarge the 640x480 view (e.g. 1.5 = 960x720)
-  detect_interval_s: 0.1    # min seconds between detections (~10/s) for near
-                            # real-time presence. Each is an HTTP round trip +
-                            # GPU YOLO11x — fine on LAN/Tailscale when compute
-                            # isn't the limit. Raise toward 0.4 if the tunnel
-                            # or GPU gets saturated; 0 = as fast as possible.
+  preview_mode:
+    auto # auto | window | web
+    #  window = an OpenCV desktop window (needs a monitor)
+    #  web    = an MJPEG stream in a browser — works on a
+    #           HEADLESS Pi: open http://<pi-ip>:8008/
+    #  auto   = window if a display is detected, else web
+    #           (so it just works on a laptop AND a Pi).
+  preview_host:
+    127.0.0.1 # web mode bind address. 127.0.0.1 = private (view via
+    #   ssh -L 8008:localhost:8008 pi@<host>, then browse
+    #   http://localhost:8008/). Set 0.0.0.0 to expose the
+    #   feed directly on the LAN (unauthenticated — only on
+    #   a trusted home network).
+  preview_port: 8008 # web mode: browse to http://<host>:<port>/
+  preview_scale: 1.0 # enlarge the 640x480 view (e.g. 1.5 = 960x720)
+  detect_interval_s:
+    0.1 # min seconds between detections (~10/s) for near
+    # real-time presence. Each is an HTTP round trip +
+    # GPU YOLO11x — fine on LAN/Tailscale when compute
+    # isn't the limit. Raise toward 0.4 if the tunnel
+    # or GPU gets saturated; 0 = as fast as possible.
 
   # On a visual turn ZERO hands the multimodal LLM a few RECENT frames (not one
   # frozen pose) so it can see motion/action — a raised hand, someone mid-turn.
-  frames_per_look: 2        # keyframes sent per visual turn (2-3 shows motion; 1 =
-                            # single frame). Each is a small JPEG over the tunnel.
-  look_window_s: 1.0        # sample those frames from roughly the last N seconds.
+  frames_per_look:
+    2 # keyframes sent per visual turn (2-3 shows motion; 1 =
+    # single frame). Each is a small JPEG over the tunnel.
+  look_window_s: 1.0 # sample those frames from roughly the last N seconds.
 
   camera:
-    index: 0                # /dev/video0 (the Brio webcam doubles as mic + camera)
-    width: 640              # stream geometry — small so YOLO11n keeps up on the Pi
+    index: 1 # /dev/video0 (the Brio webcam doubles as mic + camera)
+    width: 640 # stream geometry — small so YOLO11n keeps up on the Pi
     height: 480
     request_fps: 30
-    mjpg: true              # request MJPG from the camera. USB webcams (BRIO) can't
-                            # sustain raw YUYV at this res/fps and return no frames;
-                            # MJPG fixes it. Set false only if your camera lacks MJPG.
+    mjpg:
+      true # request MJPG from the camera. USB webcams (BRIO) can't
+      # sustain raw YUYV at this res/fps and return no frames;
+      # MJPG fixes it. Set false only if your camera lacks MJPG.
 
   detect:
     # yolo11s is markedly more accurate than yolo11n on small/cluttered objects —
     # same COCO-80 vocabulary, but detects more of them, more reliably. Swap back
     # to yolo11n.onnx if the Pi CPU can't keep up.
-    model_path: yolo11s.onnx  # ONNX (NMS baked in) — runs on onnxruntime, NO torch
+    model_path: yolo11s.onnx # ONNX (NMS baked in) — runs on onnxruntime, NO torch
     confidence: 0.35
-    iou: 0.45               # informational: NMS is already inside the ONNX graph
-    device: cpu             # 'cpu' (Pi) | 'cuda' (onnxruntime CUDA EP, if present)
-    imgsz: 640              # must match what export_yolo_onnx.py used
-    classes: []             # COCO classes to keep. [] = keep ALL 80 (recommended:
-                            # "identify many objects"). List specific names to
-                            # filter, e.g. [person, cup, laptop].
+    iou: 0.45 # informational: NMS is already inside the ONNX graph
+    device: cpu # 'cpu' (Pi) | 'cuda' (onnxruntime CUDA EP, if present)
+    imgsz: 640 # must match what export_yolo_onnx.py used
+    classes: [] # COCO classes to keep. [] = keep ALL 80 (recommended:
+      # "identify many objects"). List specific names to
+      # filter, e.g. [person, cup, laptop].
 
     # ── Open vocabulary (YOLO-World) ─────────────────────────────────────────
     # To go BEYOND the 80 COCO classes, export a YOLO-World model with a custom
@@ -340,13 +357,14 @@ vision:
     # and point model_path at it. The exporter writes a sibling "<model>.names.json"
     # holding the prompt words; the detector auto-loads it (no config needed), but
     # you can force a specific list here:
-    names_path:             # e.g. yolo_world.names.json — blank = auto-detect / COCO-80
+    names_path: # e.g. yolo_world.names.json — blank = auto-detect / COCO-80
 
   color:
-    top_n: 0                # 0 = skip pixel color-naming entirely. The multimodal
-                            # LLM reads real colors off the frame, and pixel-sampled
-                            # names ("blue person") were the clinical-sounding source.
-                            # Raise only if you run text-only (no keyframes to the LLM).
+    top_n:
+      0 # 0 = skip pixel color-naming entirely. The multimodal
+      # LLM reads real colors off the frame, and pixel-sampled
+      # names ("blue person") were the clinical-sounding source.
+      # Raise only if you run text-only (no keyframes to the LLM).
     center_crop: 0.6
     min_saturation: 50
     min_value: 40
@@ -364,12 +382,13 @@ vision:
     url: http://127.0.0.1:8000
     health_path: /health
     facts_path: /facts
-    analyze_path: /analyze  # long-tail naming: the Qwen2-VL VLM (server/vision/vlm)
-                            # describes objects the COCO/YOLO-World detector can't.
-    health_timeout_s: 5.0   # snappy so fallback to local-only is quick
+    analyze_path:
+      /analyze # long-tail naming: the Qwen2-VL VLM (server/vision/vlm)
+      # describes objects the COCO/YOLO-World detector can't.
+    health_timeout_s: 5.0 # snappy so fallback to local-only is quick
     facts_timeout_s: 15.0
     analyze_timeout_s: 30.0 # the VLM is heavier than depth-only /facts
-    jpeg_quality: 80        # keyframe JPEG quality sent up the tunnel
+    jpeg_quality: 80 # keyframe JPEG quality sent up the tunnel
 
     # When multimodal:false (the main LLM can't see), route VISUAL turns to the GPU
     # VLM so ZERO can still name arbitrary objects from the frame. Ignored when the
