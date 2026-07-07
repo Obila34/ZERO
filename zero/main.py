@@ -33,7 +33,7 @@ from zero.tools.base import ToolContext
 from zero.vision.learned import parse_object_teach
 from zero.llm.persona import build_system_prompt
 from zero.state import State, can_transition
-from zero.tts.orchestrator import split_sentences
+from zero.tts.orchestrator import split_sentences, strip_asides
 from zero.utils.logging import get_logger, setup_logging
 
 log = get_logger("main")
@@ -173,6 +173,7 @@ class Zero:
         )
         self.state = State.IDLE
         self._interrupt = False  # set by the barge-in monitor to stop playback
+        self._audio_playing = False  # True only while sound leaves the speaker
         self._bargein_frames = None   # the interrupting words, fed to the next STT
         self._was_interrupted = False  # tell the LLM it got cut off, once
         self._mood = MoodTracker()     # cross-turn emotional state
@@ -988,6 +989,9 @@ class Zero:
         audio_q: "queue.Queue" = queue.Queue(maxsize=32)
         stop_evt = threading.Event()  # tells the producer to abandon synthesis
         played = -1                   # index into `full` of the last sentence heard
+        # Anything the model writes in (parens) is a hallucinated "note" — it
+        # must never be spoken, and never enter history via `full`.
+        chunks = strip_asides(chunks)
 
         def put_piece(item) -> bool:
             """Queue an audio piece without ever blocking forever: on barge-in the
@@ -1058,6 +1062,7 @@ class Zero:
                     try:  # race: real audio within the grace window wins
                         item = audio_q.get(timeout=self._filler_grace_s)
                     except queue.Empty:
+                        self._audio_playing = True  # arms speech barge-in
                         yield pending_filler
                         pending_filler = None
                         continue
@@ -1072,6 +1077,7 @@ class Zero:
                              time.monotonic() - self._t_reply_start)
                     spoke_any = True
                 played = idx
+                self._audio_playing = True  # arms speech barge-in
                 yield piece
 
         # Barge-in: the monitor (started by the caller) keeps the mic live and
@@ -1079,6 +1085,7 @@ class Zero:
         # ZERO never says its own wake word, so its voice won't false-trigger).
         self.speaker.play_stream(audio_gen(), self.voice.sample_rate,
                                  should_stop=self._should_interrupt)
+        self._audio_playing = False
 
         if self._interrupt:
             # Shut the whole pipeline down and unblock the producer, then return
@@ -1112,6 +1119,7 @@ class Zero:
         needed — natural interruption). Returns (stop_event, thread) — both
         None if barge-in is off / no mic."""
         self._interrupt = False
+        self._audio_playing = False
         self._bargein_frames = None
         if self.text_mode or not self.cfg.get("conversation.barge_in", True):
             return None, None
@@ -1140,7 +1148,8 @@ class Zero:
                     if self.wake.process(frame):
                         self._interrupt = True
                         return
-                    if speech is not None and speech.update(frame):
+                    if (speech is not None
+                            and speech.update(frame, active=self._audio_playing)):
                         self._bargein_frames = speech.frames
                         self._interrupt = True
                         log.info("barge-in: user spoke over the reply")

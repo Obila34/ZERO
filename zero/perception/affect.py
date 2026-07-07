@@ -81,7 +81,10 @@ class MoodTracker:
         else:
             self._streak_label, self._streak = label, (1 if label != "neutral" else 0)
         note = None
-        if label != "neutral" and (r.notable or self._streak >= 2):
+        # "calm" gets NO note: it's the default state of most conversation, and
+        # a small model can't resist narrating it ("you sound calm today") —
+        # it still reaches the voice's pacing via the returned label.
+        if label not in ("neutral", "calm") and (r.notable or self._streak >= 2):
             persists = " — and has for a few turns now" if self._streak >= 2 else ""
             note = (f"(The speaker sounds {label} right now{persists} — "
                     "let that shape your tone, don't comment on it.)")

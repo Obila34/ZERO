@@ -38,14 +38,22 @@ class SpeechBargeIn:
         self._misses = 0           # dropout tolerance inside a run
         self._ring: deque = deque(maxlen=max(1, keep_ms // self._block_ms))
 
-    def update(self, frame: np.ndarray) -> bool:
+    def update(self, frame: np.ndarray, active: bool = True) -> bool:
         """Feed one mic frame; True the moment sustained foreground speech is
-        detected. Never raises."""
+        detected. ``active`` = audio is REALLY coming out of the speaker right
+        now — before that there is no echo to calibrate against, and the wake
+        word is the only interrupt (otherwise the user's own trailing speech,
+        arriving before the reply's first audio, fires a false barge-in).
+        Never raises."""
         self._ring.append(frame)
+        if not active:
+            self._run = 0
+            return False
         rms = float(np.sqrt(np.mean(frame.astype(np.float32) ** 2)))
         self._seen += 1
         if self._seen <= self._learn_blocks:
-            # Learning window: assume it's all echo; track the loudest of it.
+            # Learning window (first frames of REAL playback): all echo;
+            # track the loudest of it.
             self._floor = max(self._floor, rms) if self._floor else rms
             return False
         gate = max(self._min_rms, self._ratio * self._floor)
@@ -56,8 +64,12 @@ class SpeechBargeIn:
             if self._run >= self._trigger_blocks:
                 return True
         else:
-            # Slow floor adaptation on background frames (reply loudness varies).
-            self._floor = 0.95 * self._floor + 0.05 * rms
+            # Slow floor adaptation — but only while playback sound is
+            # actually audible. Adapting on silence (inter-sentence gaps)
+            # decayed the floor to nothing, so the NEXT sentence's own echo
+            # fired a false barge-in mid-reply.
+            if rms > 0.3 * self._floor:
+                self._floor = 0.95 * self._floor + 0.05 * rms
             self._misses += 1
             if self._misses > 1:  # allow a single-frame dropout inside a run
                 self._run = 0

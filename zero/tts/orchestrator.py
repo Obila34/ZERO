@@ -47,6 +47,27 @@ def split_sentences(text: str) -> list[str]:
     return [s for s in out if s]
 
 
+def strip_asides(chunks):
+    """Drop everything inside (parentheses) from a streamed reply, statefully
+    across chunk and sentence boundaries — including a paren the model never
+    closes. The persona forbids the model writing notes, but a small model
+    sometimes imitates the note protocol anyway; whatever it writes in parens
+    must NEVER reach the voice ("parentheses: I see a person..." read aloud)."""
+    depth = 0
+    for chunk in chunks:
+        out = []
+        for ch in chunk:
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                if depth:
+                    depth -= 1
+            elif depth == 0:
+                out.append(ch)
+        if out:
+            yield "".join(out)
+
+
 def _strip_emphasis(text: str) -> str:
     return re.sub(r"\*(\w+)\*", r"\1", text)
 
