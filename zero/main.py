@@ -303,13 +303,20 @@ class Zero:
         if self.memory is not None:
             self.convo.set_memory(self.memory.as_block())
 
+    def _warmup_messages(self) -> list:
+        """The exact prefix the first conversation will send (system prompt +
+        memory block), so warmup pre-fills the prompt cache and the first turn
+        skips the multi-second prefill."""
+        self._start_conversation()
+        return [*self.convo.messages(), {"role": "user", "content": "hi"}]
+
     # -- text mode ----------------------------------------------------------
     def run_text(self) -> None:
         """Type-to-chat: tests the brain (LLM + memory + conversation) with no mic,
         Piper or Whisper needed. Useful for validating the GPU LLM offload."""
         warmup = getattr(self.llm, "warmup", None)
         if callable(warmup):
-            warmup()
+            warmup(self._warmup_messages())
         print("\nZERO text mode — type to chat. Say 'goodbye' to reset, Ctrl-C to quit.\n")
         self._start_conversation()
         try:
@@ -347,10 +354,11 @@ class Zero:
 
     # -- main loop ----------------------------------------------------------
     def run(self) -> None:
-        # Pin the LLM in RAM now so the first real reply isn't a ~28s cold load.
+        # Pin the LLM in RAM now — with the real prefix, so the first reply
+        # pays neither the cold load nor the persona+memory prefill.
         warmup = getattr(self.llm, "warmup", None)
         if callable(warmup):
-            warmup()
+            warmup(self._warmup_messages())
         self.mic.start()
         # Open the eyes BEFORE the wake loop so perception is already running when
         # the user speaks — the scene is pre-computed, never on the critical path.

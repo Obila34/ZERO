@@ -37,22 +37,34 @@ class OllamaLLM(LLM):
         self.num_ctx = int(num_ctx)
         self._session = requests.Session()  # keep-alive across turns
 
-    def warmup(self) -> None:
-        """Load the model into RAM at startup so the first real query is fast."""
+    def warmup(self, messages: list[Message] | None = None) -> None:
+        """Load the model into RAM at startup so the first real query is fast.
+
+        Must use the SAME options as stream() — a different num_ctx makes
+        Ollama rebuild the runner on the first real request (a multi-second
+        first-token stall). Passing the real system prompt as ``messages``
+        also pre-fills the prefix cache, so the first turn skips the big
+        persona+memory prefill entirely.
+        """
         try:
             log.info("warming up %s (loading into RAM)...", self.model)
             self._session.post(
                 f"{self.host}/api/chat",
                 json={
                     "model": self.model,
-                    "messages": [{"role": "user", "content": "hi"}],
+                    "messages": messages or [{"role": "user", "content": "hi"}],
                     "stream": False,
                     "keep_alive": self.keep_alive,
-                    "options": {"num_predict": 1},
+                    "think": False,
+                    "options": {
+                        "temperature": self.temperature,
+                        "num_predict": 1,
+                        "num_ctx": self.num_ctx,
+                    },
                 },
                 timeout=180,
             ).raise_for_status()
-            log.info("LLM warm and pinned in RAM")
+            log.info("LLM warm and pinned in RAM (prefix cached)")
         except requests.RequestException as e:
             log.warning("LLM warmup failed (will load on first query): %s", e)
 

@@ -48,10 +48,10 @@ class ToolAwareLLM:
         self._ctx = context_provider or (lambda: ToolContext())
 
     # ── the LLM surface main.py expects ──────────────────────────────────────
-    def warmup(self):
+    def warmup(self, messages=None):
         warmup = getattr(self._llm, "warmup", None)
         if callable(warmup):
-            return warmup()
+            return warmup(messages)
 
     def stream(self, messages):
         user_text = self._last_user_text(messages)
