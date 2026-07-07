@@ -9,11 +9,11 @@ audio:
     # 0 input channels until the mic is unmuted at
     # the ALSA layer (alsamixer -c 3, F4=capture).
   input_gain:
-    1.0 # OFF. This card-3 USB mic captures HOT (raw speech
-    # ~1000 RMS) — the old 16.0 was tuned for a much quieter
-    # dongle and drove every frame into hard clipping
-    # (peak 32767), which broke endpointing AND barge-in.
-    # Raise only if the "utterance: rms=" logs read < 300.
+    6.0 # MIDDLE ground. 16.0 clipped this card-3 mic (peak
+    # 32767); 1.0 was too quiet for the wake word / VAD to
+    # fire. 6.0 lifts normal speech to a healthy level
+    # without clipping. Tune from the "utterance: rms="
+    # logs: aim rms ~2000-6000, peak well under 32767.
   output_device:
     pipewire # routes to PipeWire's default sink = the BT speaker
     # (needs the pipewire-alsa package). Use Headphones for 3.5mm jack.
@@ -218,13 +218,17 @@ vad:
     600 # utterances with less speech than this wait DOUBLE the
     # silence before ending — slow starters ("um...") aren't cut
     # off, finished sentences still commit fast. 0 = off.
-  aggressiveness: 3 # webrtc 0-3; 3 = most aggressive at rejecting background murmur
-  energy_threshold: 350 # int16 RMS a single frame must exceed to count as speech
+  aggressiveness: 2 # webrtc 0-3; 2 lets the VAD catch quieter/softer speech
+    # (3 was rejecting too much once the gain dropped)
+  energy_threshold:
+    150 # int16 RMS a single frame must exceed to count as speech.
+    # LOW on purpose: the webrtc VAD is the real speech detector,
+    # this is just a gentle floor so silence/hum can't start a
+    # capture. Was 350 — a wall that dropped real speech.
   min_utterance_rms:
-    100 # PROXIMITY GATE: drop a whole utterance quieter than this
-    # on average. Kept LOW on purpose: sad/tired people speak
-    # quietly, and dropping their words is a human-feel bug.
-    # 0 = off (calibrate with the "utterance: rms=" logs).
+    30 # PROXIMITY GATE: drop a whole utterance quieter than this
+    # on average. Kept very LOW: sad/tired people speak quietly,
+    # and dropping their words is a human-feel bug. 0 = off.
   max_utterance_ms: 15000 # hard cap so STT input stays bounded
   speech_pad_ms: 200 # keep a little audio either side of speech
 
