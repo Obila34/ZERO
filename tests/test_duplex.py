@@ -148,6 +148,51 @@ class TestSceneChanges:
         assert eyes.scene_changes() == []   # inside cooldown: swallowed
 
 
+class TestStripAsides:
+    def _run(self, chunks):
+        from zero.tts.orchestrator import strip_asides
+
+        return "".join(strip_asides(iter(chunks)))
+
+    def test_plain_text_passes_through(self):
+        assert self._run(["Hey", " there."]) == "Hey there."
+
+    def test_note_spanning_sentences_and_chunks_is_dropped(self):
+        chunks = ["Sure thing. (parentheses: No one is visible",
+                  " right now. The speaker sounds calm. )", " Anyway."]
+        assert self._run(chunks) == "Sure thing.  Anyway."
+
+    def test_unclosed_paren_suppresses_to_end(self):
+        assert self._run(["Okay. (I notice the person is", " sitting there."]) \
+            == "Okay. "
+
+
+class TestBargeInActiveGate:
+    def test_no_trigger_before_audio_plays(self):
+        d = SpeechBargeIn(is_speech=lambda f: True, block_ms=BLOCK_MS,
+                          learn_ms=90, trigger_ms=90, ratio=2.0, min_rms=250)
+        assert not any(d.update(_frame(5000), active=False) for _ in range(30))
+
+    def test_silence_does_not_decay_the_echo_floor(self):
+        d = SpeechBargeIn(is_speech=lambda f: True, block_ms=BLOCK_MS,
+                          learn_ms=90, trigger_ms=90, ratio=2.0, min_rms=250)
+        for _ in range(3):
+            d.update(_frame(3000))          # learn: loud reply echo
+        for _ in range(50):
+            d.update(_frame(10))            # inter-sentence silence
+        # next sentence's own echo (same level as the floor) must NOT trigger
+        assert not any(d.update(_frame(3000)) for _ in range(20))
+
+
+class TestCalmIsNeverNoted:
+    def test_calm_shapes_voice_but_produces_no_note(self):
+        t = MoodTracker()
+        label = note = None
+        for _ in range(4):
+            label, note = t.update(AffectResult("calm", 0.2, 0.1, 0.6))
+        assert label == "calm" and note is None
+
+
 class TestOrpheusCueMap:
     def test_hmm_and_pause_are_performed_not_deleted(self):
         assert _to_orpheus("[hmm] let me think [pause] okay") == \
