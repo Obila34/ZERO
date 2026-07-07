@@ -41,8 +41,17 @@ def detector_hint(detections: Sequence[Detection], max_items: int = 10) -> str:
     if not detections:
         return ""
     counts: Counter = Counter(d.label for d in detections)
+    # Salience order: biggest box first (what a person would notice), not raw
+    # counts — 15 tiny background chairs must not outrank the guitar in hand.
+    area: dict = {}
+    for d in detections:
+        a = d.bbox[2] * d.bbox[3]
+        if a > area.get(d.label, 0):
+            area[d.label] = a
     parts: list[str] = []
-    for label, n in counts.most_common(max_items):
+    for label in sorted(counts, key=lambda l: area.get(l, 0),
+                        reverse=True)[:max_items]:
+        n = counts[label]
         noun = _plural(label, n)
         qty = "a" if n == 1 else str(n)
         parts.append(f"{qty} {noun}")

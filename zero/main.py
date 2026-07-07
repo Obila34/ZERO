@@ -177,6 +177,7 @@ class Zero:
         self._bargein_frames = None   # the interrupting words, fed to the next STT
         self._was_interrupted = False  # tell the LLM it got cut off, once
         self._mood = MoodTracker()     # cross-turn emotional state
+        self._stt_lock = threading.Lock()  # serialize speculative vs final STT
         self._memory_thread: threading.Thread | None = None  # background fact save
 
         # Voice-only extras (need the voice/mic): owner verification + spoken fillers.
@@ -452,7 +453,33 @@ class Zero:
             else:
                 self.mic.drain()  # drop audio captured while speaking/thinking
                 frames_src = self.mic.frames()
-            utterance = self.endpointer.capture(frames_src, idle_timeout_s=idle_s)
+            # Speculative STT: the moment the user PAUSES (well before the
+            # endpoint confirms), start transcribing the audio so far — the
+            # STT round trip overlaps the silence wait. Skipped when a gate
+            # (voiceid / strict privacy) must run before any transcription.
+            spec: dict = {}
+            allow_spec = (self.voiceid is None
+                          and not (self.privacy is not None
+                                   and getattr(self.privacy, "mode", "") == "strict"))
+
+            def _on_pause(audio_i16):
+                res: dict = {}
+
+                def run():
+                    with self._stt_lock:
+                        try:
+                            res["text"] = self.stt.transcribe(
+                                audio_i16.astype("float32") / 32768.0, sr)
+                        except Exception as e:
+                            log.debug("speculative stt failed: %s", e)
+                spec["audio"], spec["res"] = audio_i16, res
+                spec["thread"] = t = threading.Thread(
+                    target=run, name="stt-spec", daemon=True)
+                t.start()
+
+            utterance = self.endpointer.capture(
+                frames_src, idle_timeout_s=idle_s,
+                on_speech_pause=_on_pause if allow_spec else None)
 
             if utterance is None or getattr(utterance, "size", 0) == 0:
                 log.info("Sleeping… (no speech for %.0fs — say the wake word to talk again)",
@@ -475,17 +502,31 @@ class Zero:
                 log.debug("owner verified (voice score %.2f)", score)
 
             # Transcribe IN PARALLEL with identity/diarization below — they only
-            # need the audio, not the text. Strict privacy keeps the old order
-            # (an unknown voice must not be transcribed at all in strict mode).
+            # need the audio, not the text. Reuse the speculative transcription
+            # when its pause became the actual endpoint (the audio it saw is a
+            # verbatim prefix of the final utterance and only silence follows).
             stt_result: dict = {}
             stt_thread = None
-            if not (self.privacy is not None
-                    and getattr(self.privacy, "mode", "") == "strict"):
+            spec_a = spec.get("audio")
+            # Tail bound: more than ~2x the silence window after the spec pause
+            # means speech resumed / max-cap fired — the spec text is a prefix.
+            slack = int(sr * (2 * self.cfg.get("vad.silence_ms", 450)
+                              + self.cfg.get("vad.speech_pad_ms", 200) + 400) / 1000)
+            if (spec_a is not None
+                    and 0 <= utterance.size - spec_a.size <= slack
+                    and bool((utterance[:spec_a.size]
+                              == spec_a.astype("float32") / 32768.0).all())):
+                stt_thread, stt_result = spec["thread"], spec["res"]
+                log.debug("speculative STT reused (%.1fs head start)",
+                          (utterance.size - spec_a.size) / sr)
+            elif not (self.privacy is not None
+                      and getattr(self.privacy, "mode", "") == "strict"):
                 def _stt(u=utterance):
-                    try:
-                        stt_result["text"] = self.stt.transcribe(u, sr)
-                    except Exception as e:
-                        log.warning("stt failed: %s", e)
+                    with self._stt_lock:
+                        try:
+                            stt_result["text"] = self.stt.transcribe(u, sr)
+                        except Exception as e:
+                            log.warning("stt failed: %s", e)
                 stt_thread = threading.Thread(target=_stt, name="stt", daemon=True)
                 stt_thread.start()
 

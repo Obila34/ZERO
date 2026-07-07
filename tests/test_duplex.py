@@ -200,3 +200,53 @@ class TestOrpheusCueMap:
 
     def test_gasp_maps_to_native_tag(self):
         assert _to_orpheus("[gasps] no way") == "<gasp> no way"
+
+
+class TestSpeculativeSTT:
+    def test_pause_hook_fires_with_audio_so_far(self):
+        calls = []
+        flags = [True] * 4 + [False] * 30
+        ep = ScriptedEndpointer(flags, silence_ms=600)  # spec fires at 180ms
+        ep.capture(iter(_frame(2000) for _ in range(len(flags))),
+                   on_speech_pause=calls.append)
+        assert len(calls) == 1 and calls[0].size >= 4 * BLOCK
+
+    def test_hook_refires_on_each_pause(self):
+        flags = [True] * 4 + [False] * 8 + [True] * 4 + [False] * 30
+        calls = []
+        ep = ScriptedEndpointer(flags, silence_ms=600)
+        ep.capture(iter(_frame(2000) for _ in range(len(flags))),
+                   on_speech_pause=calls.append)
+        assert len(calls) == 2 and calls[1].size > calls[0].size
+
+    def test_hook_error_never_breaks_capture(self):
+        flags = [True] * 4 + [False] * 30
+        ep = ScriptedEndpointer(flags, silence_ms=600)
+        utt = ep.capture(iter(_frame(2000) for _ in range(len(flags))),
+                         on_speech_pause=lambda a: 1 / 0)
+        assert utt is not None and utt.size > 0
+
+
+class TestSalienceHint:
+    class _Det:
+        def __init__(self, label, area):
+            self.label = label
+            self.bbox = (0, 0, area, 1)
+
+    def test_biggest_box_outranks_raw_counts(self):
+        from zero.vision.phrasing import detector_hint
+
+        dets = [self._Det("chair", 10)] * 5 + [self._Det("guitar", 500)]
+        assert detector_hint(dets, max_items=2) == "a guitar, 5 chairs"
+
+
+class TestPersonCrop:
+    def test_no_people_returns_none(self):
+        from types import SimpleNamespace
+
+        from zero.vision.eyes import Eyes
+
+        eyes = Eyes(camera=None, detector=None, color_namer=None)
+        snap = SimpleNamespace(frame_rgb=np.zeros((100, 100, 3), dtype=np.uint8),
+                               detections=[])
+        assert eyes._person_crop(snap) is None

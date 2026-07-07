@@ -34,6 +34,10 @@ class _BaseEndpointer:
         # the trailing silence before ending — slow starters ("um...") aren't cut
         # off, while a finished sentence still commits fast. 0 = off.
         self.fast_end_speech_blocks = max(0, min_speech_for_fast_end_ms // block_ms)
+        # Speculative pause hook: this far into a silence run (well before the
+        # endpoint), capture() calls on_speech_pause(audio_so_far) so STT can
+        # start while we're still waiting to confirm the turn is over.
+        self.spec_blocks = max(1, 180 // block_ms)
         # int16 RMS a single frame must exceed to count as speech. Rejects quieter
         # background voices/room noise that the VAD alone would accept. 0 = off.
         self.energy_threshold = energy_threshold
@@ -62,7 +66,8 @@ class _BaseEndpointer:
             return False
 
     def capture(self, frames: Iterable[np.ndarray],
-                idle_timeout_s: float | None = None) -> np.ndarray | None:
+                idle_timeout_s: float | None = None,
+                on_speech_pause=None) -> np.ndarray | None:
         """Collect one utterance from the owner. Returns the audio, or None only on
         a true idle timeout (no speech for `idle_timeout_s`). A too-quiet utterance
         (background) is NOT an idle timeout — we drop it and keep listening, so a
@@ -112,6 +117,12 @@ class _BaseEndpointer:
                         trailing_silence = 0
                     else:
                         trailing_silence += 1
+                        if (on_speech_pause is not None
+                                and trailing_silence == self.spec_blocks):
+                            try:  # speculative STT must never break capture
+                                on_speech_pause(np.concatenate(collected))
+                            except Exception as e:
+                                log.debug("speech-pause hook failed: %s", e)
                         need = self.silence_blocks
                         if (self.fast_end_speech_blocks
                                 and len(collected) - trailing_silence

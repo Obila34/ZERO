@@ -307,6 +307,11 @@ class Eyes:
             frames = self._scene.recent_frames(self._frames_per_look,
                                                self._look_window_s)
             images = [b for b in (self._encode(f) for f in frames) if b]
+            # Attention crop: a tight crop of the largest person, so the LLM
+            # reads faces, expressions and held objects the wide frame blurs.
+            crop = self._person_crop(snap)
+            if crop:
+                images.append(crop)
         text = phrasing.detector_hint(self._with_learned(snap), self._max_items)
         # Long-tail naming: when the main LLM can't see (multimodal off) but the
         # GPU VLM is reachable, ask it to describe the frame so ZERO can still name
@@ -317,6 +322,24 @@ class Eyes:
             if described:
                 text = f"{text}; {described}" if text else described
         return VisualContext(text=text, images=images)
+
+    def _person_crop(self, snap) -> Optional[str]:
+        """Encoded crop (15% margin) of the largest person in frame, or None."""
+        frame = snap.frame_rgb
+        if frame is None:
+            return None
+        people = [d for d in snap.detections if d.label.lower() == "person"]
+        if not people:
+            return None
+        big = max(people, key=lambda d: d.bbox[2] * d.bbox[3])
+        x, y, w, h = (int(v) for v in big.bbox)
+        H, W = frame.shape[:2]
+        mx, my = int(w * 0.15), int(h * 0.15)
+        crop = frame[max(0, y - my):min(H, y + h + my),
+                     max(0, x - mx):min(W, x + w + mx)]
+        if crop.size == 0:
+            return None
+        return self._encode(crop)
 
     def describe(self, question: str = "") -> Optional[str]:
         """Ask the GPU VLM (Qwen2-VL) to describe the current keyframe in words.
