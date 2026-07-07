@@ -272,9 +272,10 @@ llm:
     500 # ~1-2 spoken sentences — snappier replies, fewer pauses
     # (caps runaway answers; raise if you want longer ones)
   num_ctx:
-    8192 # explicit context size. Ollama's default can silently
-    # truncate system prompt + memory + history, which also
-    # shifts the cached prefix (slow AND amnesiac).
+    4096 # explicit context size. Big enough for persona + memory +
+    # 6 turns, but HALF the KV-cache VRAM of 8192 — the GPU is
+    # shared (Gemma + Whisper + Orpheus + YOLO11x + CLIP + faces)
+    # and 8192 was tipping it into OOM. Raise only with headroom.
   # Cache-friendly history: append-only most turns (fast ~2s), and only trim back
   # to `history_turns` once it grows past `history_trim_at`.
   history_turns: 6 # size we keep after a trim (3 felt like a goldfish)
