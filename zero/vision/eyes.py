@@ -304,12 +304,14 @@ class Eyes:
         snap = self._scene.snapshot()
         images: list[str] = []
         if self._multimodal:
-            frames = self._scene.recent_frames(self._frames_per_look,
-                                               self._look_window_s)
-            images = [b for b in (self._encode(f) for f in frames) if b]
-            # Attention crop: a tight crop of the largest person, so the LLM
+            # Attention crop: a tight crop of the largest person so the LLM
             # reads faces, expressions and held objects the wide frame blurs.
+            # It REPLACES one wide frame (total stays frames_per_look) so a
+            # tight shared GPU doesn't get an extra image to encode per turn.
             crop = self._person_crop(snap)
+            n_wide = max(1, self._frames_per_look - (1 if crop else 0))
+            frames = self._scene.recent_frames(n_wide, self._look_window_s)
+            images = [b for b in (self._encode(f) for f in frames) if b]
             if crop:
                 images.append(crop)
         text = phrasing.detector_hint(self._with_learned(snap), self._max_items)

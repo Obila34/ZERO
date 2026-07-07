@@ -8,6 +8,7 @@ by VoiceOrchestrator, not here — Piper just speaks plain words.
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -21,11 +22,22 @@ log = get_logger("tts.piper")
 
 class PiperTTS(TTS):
     def __init__(self, binary: str, voice: str, length_scale: float = 1.0):
+        # Validate NOW so a missing binary trips FallbackTTS's build-once guard
+        # instead of failing every single sentence (the error flood when the
+        # Orpheus tunnel drops on a box where Piper was never installed).
+        if not self._resolve_binary(binary):
+            raise FileNotFoundError(f"piper binary not found: {binary}")
         self.binary = binary
         self.voice = str(voice)
         self.length_scale = length_scale
         self.sample_rate = self._read_sample_rate(voice)
         log.info("Piper ready (voice=%s, %d Hz)", Path(voice).name, self.sample_rate)
+
+    @staticmethod
+    def _resolve_binary(binary: str) -> bool:
+        if "/" in binary:
+            return Path(binary).is_file()
+        return shutil.which(binary) is not None
 
     @staticmethod
     def _read_sample_rate(voice: str) -> int:

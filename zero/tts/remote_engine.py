@@ -54,8 +54,16 @@ class RemoteTTS(TTS):
         self.sample_rate = sample_rate
         self.timeout = timeout
         # Keep-alive: reuse one connection instead of a TCP+HTTP handshake per
-        # sentence — shaves tens of ms off first-audio for every sentence.
+        # sentence — shaves tens of ms off first-audio for every sentence. Retry
+        # connect failures with a FRESH connection so a stale pooled socket
+        # (server/tunnel restarted between turns) recovers instead of erroring.
         self._session = requests.Session()
+        from requests.adapters import HTTPAdapter
+        from urllib3.util.retry import Retry
+
+        retry = Retry(total=2, connect=2, read=0, backoff_factor=0.2,
+                      status_forcelist=(502, 503, 504))
+        self._session.mount("http://", HTTPAdapter(max_retries=retry))
         log.info("remote TTS (orpheus) -> %s (voice=%s)", url, voice)
 
     def synthesize_stream(self, text: str) -> Iterator[np.ndarray]:
