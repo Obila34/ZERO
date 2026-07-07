@@ -57,7 +57,8 @@ class Eyes:
                  preview: bool = False, preview_scale: float = 1.0,
                  preview_mode: str = "auto", preview_host: str = "127.0.0.1",
                  preview_port: int = 8008, learned=None,
-                 unknown_conf: float = 0.45):
+                 unknown_conf: float = 0.45,
+                 change_note_cooldown_s: float = 120.0):
         self._camera = camera
         self._detector = detector
         self._color = color_namer
@@ -88,6 +89,19 @@ class Eyes:
         self._unknown_conf = float(unknown_conf)
         self._unknowns: dict[str, float] = {}   # label -> last seen ts
         self._unknowns_lock = threading.Lock()
+        # Scene diffing: debounced appear/disappear events -> spontaneous
+        # remarks. A label must be present (or gone) STABLE_S before it counts.
+        self._change_cooldown_s = float(change_note_cooldown_s)
+        self._change_lock = threading.Lock()
+        self._changes: list[str] = []
+        self._last_change_note = 0.0
+        self._started_at = 0.0
+        self._first_seen: dict[str, float] = {}
+        self._last_seen: dict[str, float] = {}
+        self._stable: set[str] = set()
+
+    _STABLE_S = 2.0      # presence/absence must persist this long to count
+    _SETTLE_S = 8.0      # startup grace: the initial scene isn't "new"
 
     # ── lifecycle ────────────────────────────────────────────────────────────
     def start(self) -> None:
@@ -111,6 +125,7 @@ class Eyes:
                 port=self._preview_port, jpeg_quality=self._jpeg_quality,
             )
         self._stop.clear()
+        self._started_at = time.time()
         self._thread = threading.Thread(target=self._loop, name="Eyes", daemon=True)
         self._thread.start()
         log.info("eyes open — perceiving continuously")
@@ -143,10 +158,57 @@ class Eyes:
             # Always publish the frame + whatever detections we got, so a broken
             # detector never makes it look like the camera is blind.
             self._scene.update(detections, frame_rgb=frame)
+            self._track_changes(detections)
             if self._preview_sink is not None and self._preview_sink.ok:
                 self._preview_sink.show(frame, detections)
             if self._detect_interval > 0:
                 time.sleep(self._detect_interval)
+
+    def _track_changes(self, detections) -> None:
+        """Debounced scene diffing: record labels that stably appear/disappear,
+        as phrased remark candidates consumed by scene_changes()."""
+        now = time.time()
+        if now - self._started_at < self._SETTLE_S:
+            for d in detections:  # seed the baseline silently
+                lbl = d.label.lower()
+                self._first_seen.setdefault(lbl, now)
+                self._last_seen[lbl] = now
+                self._stable.add(lbl)
+            return
+        labels = {d.label.lower() for d in detections}
+        events: list[str] = []
+        for lbl in labels:
+            self._last_seen[lbl] = now
+            first = self._first_seen.setdefault(lbl, now)
+            if lbl not in self._stable and now - first >= self._STABLE_S:
+                self._stable.add(lbl)
+                events.append("someone new is in view" if lbl == "person"
+                              else f"a {lbl} just came into view")
+        for lbl in list(self._stable):
+            if lbl in labels:
+                continue
+            if now - self._last_seen.get(lbl, 0.0) >= self._STABLE_S:
+                self._stable.discard(lbl)
+                self._first_seen.pop(lbl, None)
+                if lbl != "person":  # person-left is proactive/identity's job
+                    events.append(f"the {lbl} is no longer in view")
+        if events:
+            with self._change_lock:
+                self._changes = (self._changes + events)[-4:]
+
+    def scene_changes(self) -> list[str]:
+        """Pending phrased scene-change remarks (max 2), rate-limited by the
+        cooldown; draining clears them. [] when nothing new or too soon."""
+        now = time.time()
+        with self._change_lock:
+            if not self._changes:
+                return []
+            if now - self._last_change_note < self._change_cooldown_s:
+                self._changes.clear()  # stale by the time we may speak again
+                return []
+            out, self._changes = self._changes[:2], []
+            self._last_change_note = now
+            return out
 
     def _fill_colors(self, frame_rgb, detections) -> None:
         # Only name the N largest boxes — color is the costly per-object step.

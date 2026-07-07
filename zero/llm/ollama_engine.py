@@ -24,6 +24,7 @@ class OllamaLLM(LLM):
         temperature: float = 0.7,
         max_tokens: int = 160,
         keep_alive: str | int = -1,
+        num_ctx: int = 8192,
     ):
         self.host = host.rstrip("/")
         self.model = model
@@ -31,12 +32,16 @@ class OllamaLLM(LLM):
         self.max_tokens = max_tokens
         # -1 pins the model in RAM indefinitely so it never cold-reloads (~28s on Pi).
         self.keep_alive = keep_alive
+        # Explicit context size: Ollama's default can silently truncate the
+        # system prompt + memory + history, which also shifts the cached prefix.
+        self.num_ctx = int(num_ctx)
+        self._session = requests.Session()  # keep-alive across turns
 
     def warmup(self) -> None:
         """Load the model into RAM at startup so the first real query is fast."""
         try:
             log.info("warming up %s (loading into RAM)...", self.model)
-            requests.post(
+            self._session.post(
                 f"{self.host}/api/chat",
                 json={
                     "model": self.model,
@@ -63,10 +68,11 @@ class OllamaLLM(LLM):
             "options": {
                 "temperature": self.temperature,
                 "num_predict": self.max_tokens,
+                "num_ctx": self.num_ctx,
             },
         }
         try:
-            resp = requests.post(
+            resp = self._session.post(
                 f"{self.host}/api/chat", json=payload, stream=True, timeout=120
             )
             resp.raise_for_status()

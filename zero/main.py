@@ -28,6 +28,7 @@ from zero.factory import (
 from zero.privacy.guard import parse_forget_command
 from zero.identity.service import parse_enroll_command, parse_enrollment
 from zero.memory.preferences import apply_rate_delta, parse_preference
+from zero.perception.affect import MoodTracker
 from zero.tools.base import ToolContext
 from zero.vision.learned import parse_object_teach
 from zero.llm.persona import build_system_prompt
@@ -172,10 +173,14 @@ class Zero:
         )
         self.state = State.IDLE
         self._interrupt = False  # set by the barge-in monitor to stop playback
+        self._bargein_frames = None   # the interrupting words, fed to the next STT
+        self._was_interrupted = False  # tell the LLM it got cut off, once
+        self._mood = MoodTracker()     # cross-turn emotional state
         self._memory_thread: threading.Thread | None = None  # background fact save
 
         # Voice-only extras (need the voice/mic): owner verification + spoken fillers.
         self._filler_prob = self.cfg.get("conversation.filler_probability", 0.5)
+        self._filler_grace_s = self.cfg.get("conversation.filler_grace_ms", 600) / 1000.0
         self._fillers = {}
         self._person = None  # IdentityResult of the current speaker (or None)
         if not text_mode:
@@ -420,6 +425,8 @@ class Zero:
             self._pending_opener = None
         if self.speaker_tracker is not None:
             self.speaker_tracker.reset()   # a new conversation, a clean slate
+        self._mood.reset()
+        self._was_interrupted = False  # a stale note must not leak across chats
         sr = self.cfg.get("audio.sample_rate", 16000)
         idle_s = self.cfg.get("conversation.sleep_timeout_ms", 30000) / 1000.0
         log.info("conversation open — just talk (say 'goodbye' to stop)")
@@ -428,8 +435,15 @@ class Zero:
             self._drain_events()  # timers/reminders land at turn boundaries
             self._to(State.LISTENING)
             self.mic.resume()  # re-open the mic for the user's turn
-            self.mic.drain()   # drop audio captured while we were speaking/thinking
-            utterance = self.endpointer.capture(self.mic.frames(), idle_timeout_s=idle_s)
+            # On a speech barge-in the interrupting words were already captured —
+            # feed them into this capture so the user never repeats themselves.
+            stash, self._bargein_frames = self._bargein_frames, None
+            if stash:
+                frames_src = itertools.chain(stash, self.mic.frames())
+            else:
+                self.mic.drain()  # drop audio captured while speaking/thinking
+                frames_src = self.mic.frames()
+            utterance = self.endpointer.capture(frames_src, idle_timeout_s=idle_s)
 
             if utterance is None or getattr(utterance, "size", 0) == 0:
                 log.info("Sleeping… (no speech for %.0fs — say the wake word to talk again)",
@@ -451,10 +465,30 @@ class Zero:
                     continue
                 log.debug("owner verified (voice score %.2f)", score)
 
+            # Transcribe IN PARALLEL with identity/diarization below — they only
+            # need the audio, not the text. Strict privacy keeps the old order
+            # (an unknown voice must not be transcribed at all in strict mode).
+            stt_result: dict = {}
+            stt_thread = None
+            if not (self.privacy is not None
+                    and getattr(self.privacy, "mode", "") == "strict"):
+                def _stt(u=utterance):
+                    try:
+                        stt_result["text"] = self.stt.transcribe(u, sr)
+                    except Exception as e:
+                        log.warning("stt failed: %s", e)
+                stt_thread = threading.Thread(target=_stt, name="stt", daemon=True)
+                stt_thread.start()
+
             # Who is speaking? Face (current frame) + voice (this utterance),
             # fused. Local + fast; never on the critical path of a failure.
             frame = self.eyes.current_frame() if self.eyes is not None else None
             self._turn_notes = []
+            if self._was_interrupted:
+                self._was_interrupted = False
+                self._turn_notes.append(
+                    "(You were interrupted mid-sentence a moment ago — don't "
+                    "restart the old answer; just respond to what they say now.)")
             if self.identity is not None:
                 ident = self.identity.identify(audio=utterance, frame_rgb=frame)
                 self._person = ident if ident.is_known else None
@@ -477,7 +511,11 @@ class Zero:
                     continue
             self._memory_allowed = decision.store_memory if decision else True
 
-            text = self.stt.transcribe(utterance, sr).strip()
+            if stt_thread is not None:
+                stt_thread.join(timeout=self.cfg.get("stt.remote_timeout", 30) + 5)
+                text = (stt_result.get("text") or "").strip()
+            else:
+                text = self.stt.transcribe(utterance, sr).strip()
             if not text:
                 continue  # misfire / noise — keep listening, stay in conversation
 
@@ -507,14 +545,16 @@ class Zero:
                 self.convo.add_assistant(line)
                 continue
 
-            # Affect: a coarse read of tone (voice prosody + words + face).
-            # Only notable, confident reads reach the LLM — never a guess.
+            # Affect: per-turn read folded into a cross-turn mood (EMA). The
+            # mood steers the LLM's tone note AND the voice's delivery.
             if self.affect is not None:
-                mood = self.affect.estimate(utterance, sr, text, frame_rgb=frame)
-                if mood.notable:
-                    self._turn_notes.append(
-                        f"(The speaker sounds {mood.label} right now — "
-                        "let that shape your tone, don't comment on it.)")
+                read = self.affect.estimate(utterance, sr, text, frame_rgb=frame)
+                label, mood_note = self._mood.update(read)
+                if mood_note:
+                    self._turn_notes.append(mood_note)
+                set_mood = getattr(self.voice, "set_mood", None)
+                if callable(set_mood):
+                    set_mood(label)
 
             # Self-state narration: when a stage is running on its fallback,
             # ZERO knows — and can be upfront instead of sounding "off".
@@ -604,16 +644,20 @@ class Zero:
             # real answer flows in with little or no added delay.
             chunks, llm_stop = self._stream_in_background(messages)
             self._to(State.SPEAKING)
-            # Barge-in covers the filler AND the reply, so the wake word can cut
-            # ZERO off at any point while it's making sound.
+            # Barge-in covers the filler AND the reply, so speech or the wake
+            # word can cut ZERO off at any point while it's making sound.
             monitor = self._start_bargein()
             try:
-                self._play_filler(text)
-                reply = "" if self._interrupt else self._speak_streaming(chunks, llm_stop)
+                # The filler RACES the real reply: it only plays if no reply
+                # audio arrived within the grace window, so a fast answer is
+                # never delayed by a canned "let me think".
+                reply = self._speak_streaming(chunks, llm_stop,
+                                              filler_audio=self._pick_filler(text))
             finally:
                 self._stop_bargein(monitor)
             if self._interrupt:
                 llm_stop.set()  # stop generating a reply nobody is listening to
+                self._was_interrupted = True
                 log.info("barge-in: stopped speaking to listen")
             # Store only what was actually SPOKEN — after a barge-in the model must
             # not "remember" saying sentences the user never heard.
@@ -709,6 +753,19 @@ class Zero:
             except Exception as e:  # recall must never break a turn
                 log.debug("recall failed: %s", e)
         turn_notes = list(getattr(self, "_turn_notes", []) or [])
+
+        # Spontaneous visual awareness: debounced scene changes ("a guitar just
+        # came into view") surface as a note the LLM may mention — or not.
+        if self.eyes is not None:
+            try:
+                changes = self.eyes.scene_changes()
+                if changes:
+                    turn_notes.append(
+                        f"(You just noticed: {'; '.join(changes)}. Bring it up "
+                        "only if it feels natural — otherwise let it go.)")
+            except Exception:  # a scene read must never break a turn
+                pass
+
         if not (note or images or id_note or presence_note or recall_note
                 or turn_notes):
             return messages
@@ -902,21 +959,21 @@ class Zero:
             return "ack"
         return "default"
 
-    def _play_filler(self, user_text: str) -> None:
-        """Play one pre-synthesized filler chosen to match what the user said.
-        Interruptible: the barge-in monitor is already running, so the wake word
-        cuts a filler off just like it cuts off a reply."""
+    def _pick_filler(self, user_text: str):
+        """One pre-synthesized filler matched to what the user said, or None.
+        Handed to _speak_streaming, which plays it only if the real reply's
+        audio hasn't arrived within the grace window."""
         if random.random() > self._filler_prob:
-            return
+            return None
         category = self._filler_category(user_text)
         audios = self._fillers.get(category) or self._fillers.get("default") or []
         if not audios:
-            return
+            return None
         log.debug("filler category: %s", category)
-        self.speaker.play(random.choice(audios), self.voice.sample_rate,
-                          should_stop=self._should_interrupt)
+        return random.choice(audios)
 
-    def _speak_streaming(self, chunks, llm_stop: threading.Event) -> str:
+    def _speak_streaming(self, chunks, llm_stop: threading.Event,
+                         filler_audio=None) -> str:
         """Stream the reply: a producer thread turns the LLM text into sentences and
         streams each sentence's AUDIO CHUNKS onto a queue, while a single gapless
         output stream plays them as they arrive. First audio lands ~200ms after the
@@ -995,8 +1052,18 @@ class Zero:
 
         def audio_gen():
             nonlocal played, spoke_any
+            pending_filler = filler_audio
             while True:
-                item = audio_q.get()
+                if pending_filler is not None:
+                    try:  # race: real audio within the grace window wins
+                        item = audio_q.get(timeout=self._filler_grace_s)
+                    except queue.Empty:
+                        yield pending_filler
+                        pending_filler = None
+                        continue
+                    pending_filler = None
+                else:
+                    item = audio_q.get()
                 if item is None:
                     return
                 idx, piece = item
@@ -1040,14 +1107,29 @@ class Zero:
         return self._interrupt
 
     def _start_bargein(self):
-        """Run the wake detector on the live mic during playback. Returns
-        (stop_event, thread) — both None if barge-in is off / no mic."""
+        """Keep the mic live during playback and interrupt on EITHER the wake
+        word OR sustained user speech over the reply (echo-aware, no wake word
+        needed — natural interruption). Returns (stop_event, thread) — both
+        None if barge-in is off / no mic."""
         self._interrupt = False
+        self._bargein_frames = None
         if self.text_mode or not self.cfg.get("conversation.barge_in", True):
             return None, None
         self.mic.resume()
         self.mic.drain()   # drop the tail of our own audio captured a moment ago
         self.wake.reset()
+        speech = None
+        if self.cfg.get("conversation.barge_in_on_speech", True):
+            from zero.audio.bargein import SpeechBargeIn
+
+            speech = SpeechBargeIn(
+                is_speech=self.endpointer.is_speech_frame,
+                block_ms=self.cfg.get("audio.block_ms", 30),
+                learn_ms=self.cfg.get("conversation.barge_in_learn_ms", 900),
+                trigger_ms=self.cfg.get("conversation.barge_in_speech_ms", 300),
+                ratio=self.cfg.get("conversation.barge_in_ratio", 2.0),
+                min_rms=self.cfg.get("conversation.barge_in_min_rms", 250),
+            )
         stop = threading.Event()
 
         def monitor():
@@ -1057,6 +1139,11 @@ class Zero:
                 try:
                     if self.wake.process(frame):
                         self._interrupt = True
+                        return
+                    if speech is not None and speech.update(frame):
+                        self._bargein_frames = speech.frames
+                        self._interrupt = True
+                        log.info("barge-in: user spoke over the reply")
                         return
                 except Exception as e:  # never let the monitor crash playback
                     log.debug("barge-in monitor error: %s", e)

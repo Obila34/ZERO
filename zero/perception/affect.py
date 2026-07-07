@@ -43,10 +43,63 @@ class AffectResult:
 
     @property
     def notable(self) -> bool:
-        return self.label != "neutral" and self.confidence >= 0.5
+        return self.label != "neutral" and self.confidence >= 0.35
 
 
 NEUTRAL = AffectResult("neutral", 0.5, 0.0, 0.0)
+
+
+class MoodTracker:
+    """Cross-turn mood: an EMA over per-turn affect reads, so a single noisy
+    estimate never whipsaws the tone, and a mood that PERSISTS gets said even
+    when each individual read is low-confidence."""
+
+    def __init__(self, alpha: float = 0.4):
+        self._alpha = float(alpha)
+        self._arousal: float | None = None
+        self._valence: float | None = None
+        self._streak_label = "neutral"
+        self._streak = 0
+
+    def reset(self) -> None:
+        self._arousal = self._valence = None
+        self._streak_label, self._streak = "neutral", 0
+
+    def update(self, r: AffectResult) -> tuple[str, str | None]:
+        """Fold one turn's read in. Returns (mood_label, note_or_None) — the
+        note is prompt-ready tone guidance for the LLM."""
+        if r.confidence > 0.15:
+            if self._arousal is None:
+                self._arousal, self._valence = r.arousal, r.valence
+            else:
+                a = self._alpha
+                self._arousal = (1 - a) * self._arousal + a * r.arousal
+                self._valence = (1 - a) * self._valence + a * r.valence
+        label = self._label()
+        if label != "neutral" and label == self._streak_label:
+            self._streak += 1
+        else:
+            self._streak_label, self._streak = label, (1 if label != "neutral" else 0)
+        note = None
+        if label != "neutral" and (r.notable or self._streak >= 2):
+            persists = " — and has for a few turns now" if self._streak >= 2 else ""
+            note = (f"(The speaker sounds {label} right now{persists} — "
+                    "let that shape your tone, don't comment on it.)")
+        return label, note
+
+    def _label(self) -> str:
+        if self._arousal is None:
+            return "neutral"
+        a, v = self._arousal, self._valence or 0.0
+        if a >= 0.6 and v >= 0:
+            return "excited"
+        if a >= 0.6:
+            return "frustrated"
+        if a <= 0.35 and v < 0:
+            return "down"
+        if a <= 0.35:
+            return "calm"
+        return "neutral"
 
 
 def _pitch_hz(audio_f: np.ndarray, sr: int) -> float:
@@ -190,7 +243,7 @@ class AffectEstimator:
         # the evidence is strong. "Calm" is the weakest claim of all — pure
         # prosody (one channel) must not produce it, or every quiet flat
         # sentence gets annotated.
-        if label in ("excited", "frustrated", "down") and confidence < 0.5:
+        if label in ("excited", "frustrated", "down") and confidence < 0.35:
             label = "neutral"
         if label == "calm" and confidence <= 0.5:
             label = "neutral"

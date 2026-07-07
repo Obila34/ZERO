@@ -37,15 +37,24 @@ conversation:
   # naturally (persona-level; pairs with stt.language below).
   multilingual: true
 
-  # Barge-in: while ZERO is speaking, the mic stays live and listens for the wake
-  # word — say it again to cut the reply off and talk. Echo-safe (ZERO never says
-  # its own wake word). Set false to disable.
+  # Barge-in: while ZERO is speaking, the mic stays live — say the wake word OR
+  # just talk over it to cut the reply off. Speech barge-in is echo-aware: it
+  # learns the reply's own echo level first, then triggers on sustained speech
+  # well above it, and the interrupting words are fed straight into the next
+  # turn (no need to repeat yourself). Set false to disable all barge-in.
   barge_in: true
+  barge_in_on_speech: true # false = wake-word-only interruption
+  barge_in_learn_ms: 900 # echo-floor learning window at reply start
+  barge_in_speech_ms: 300 # sustained speech needed to trigger the interrupt
+  barge_in_ratio: 2.0 # foreground must be this x louder than the echo floor
+  barge_in_min_rms: 250 # absolute int16 RMS floor for foreground speech
 
   # Tiny neutral backchannel that fits ANY input (a committal "let me think" on a
-  # casual "how are you" breaks the illusion). Played only sometimes, just to cover
-  # the brief wait before the reply. Lower probability now the LLM is fast on GPU.
-  filler_probability: 0.5
+  # casual "how are you" breaks the illusion). Played only sometimes, and only if
+  # the real reply's audio hasn't already arrived within the grace window — a
+  # fast answer is never delayed by a filler.
+  filler_probability: 0.25
+  filler_grace_ms: 600
   fillers:
     question: ["Mm.", "Okay.", "Hmm."]
     default: ["Mm.", "Right.", "Okay."]
@@ -203,14 +212,18 @@ vad:
   silero_threshold:
     0.3 # speech-probability to accept (default silero is
     # 0.5; lower = more sensitive, for quiet mics)
-  silence_ms: 700 # trailing silence that ends an utterance (too low cuts you off mid-sentence)
+  silence_ms: 450 # trailing silence that ends an utterance (adaptive: see below)
+  min_speech_for_fast_end_ms:
+    600 # utterances with less speech than this wait DOUBLE the
+    # silence before ending — slow starters ("um...") aren't cut
+    # off, finished sentences still commit fast. 0 = off.
   aggressiveness: 3 # webrtc 0-3; 3 = most aggressive at rejecting background murmur
   energy_threshold: 350 # int16 RMS a single frame must exceed to count as speech
   min_utterance_rms:
-    200 # PROXIMITY GATE: drop a whole utterance quieter than this
-    # on average (background people are quieter than you).
-    # 0 = off (calibrate first: run and read the "utterance:
-    # rms=" logs for your voice vs background, then set between).
+    100 # PROXIMITY GATE: drop a whole utterance quieter than this
+    # on average. Kept LOW on purpose: sad/tired people speak
+    # quietly, and dropping their words is a human-feel bug.
+    # 0 = off (calibrate with the "utterance: rms=" logs).
   max_utterance_ms: 15000 # hard cap so STT input stays bounded
   speech_pad_ms: 200 # keep a little audio either side of speech
 
@@ -220,8 +233,10 @@ stt:
   engine: remote # remote (GPU turbo) | whispercpp (local)
   remote_url: http://127.0.0.1:9000/transcribe
   remote_timeout: 30
-  language: # blank = server default (en) | sw | auto (Whisper
-    # detects — best for English/Swahili code-switching)
+  language:
+    auto # blank = server default (en) | sw | auto (Whisper detects —
+    # best for English/Swahili code-switching; matches
+    # conversation.multilingual above)
   # If the remote fails (tunnel down), fail over to this local engine per-utterance
   # — built lazily on first failure; the remote is retried every turn so quality
   # comes back the moment the tunnel does. Needs the whispercpp model + pywhispercpp
@@ -245,15 +260,20 @@ llm:
   # model qwen2.5:3b-instruct (needs the Pi's own Ollama running).
   host: http://127.0.0.1:11435
   model: gemma4:latest # 8B on the GPU via tunnel
-  temperature: 0.3 # low = factual & stable; 0.7 was too loose for a Q&A assistant
+  temperature:
+    0.6 # a playful persona at 0.3 reads flat; the prompt's honesty
+    # clauses do the factual guarding, not the temperature
   max_tokens:
     500 # ~1-2 spoken sentences — snappier replies, fewer pauses
     # (caps runaway answers; raise if you want longer ones)
+  num_ctx:
+    8192 # explicit context size. Ollama's default can silently
+    # truncate system prompt + memory + history, which also
+    # shifts the cached prefix (slow AND amnesiac).
   # Cache-friendly history: append-only most turns (fast ~2s), and only trim back
-  # to `history_turns` once it grows past `history_trim_at`. Keeps the 3B fast
-  # WITHOUT shrinking the model — the ~10-15s spikes came from trimming every turn.
-  history_turns: 3 # size we keep after a trim
-  history_trim_at: 8 # let it grow to this many turns before trimming
+  # to `history_turns` once it grows past `history_trim_at`.
+  history_turns: 6 # size we keep after a trim (3 felt like a goldfish)
+  history_trim_at: 12 # let it grow to this many turns before trimming
 
 tts:
   engine: orpheus # orpheus (GPU, natural) | piper (local fallback) | fish
@@ -295,7 +315,12 @@ vision:
   # raw-image understanding. Verify with: ollama show <model> (look for "vision").
   multimodal: true
 
-  max_items: 15 # most objects named in the detector HINT (counts only)
+  max_items: 6 # most objects named in the detector HINT (counts only)
+
+  # Spontaneous visual remarks: stable scene changes (an object appearing /
+  # disappearing for 2s+) surface as a note the LLM MAY mention mid-conversation
+  # ("oh, is that new?"). Rate-limited so it never gets chatty.
+  change_note_cooldown_s: 120
 
   # Live preview: SEE what ZERO sees (camera feed + detection boxes) while it runs.
   preview: true

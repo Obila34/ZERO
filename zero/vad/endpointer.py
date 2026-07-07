@@ -23,12 +23,17 @@ log = get_logger("vad")
 class _BaseEndpointer:
     def __init__(self, sample_rate: int, silence_ms: int, max_utterance_ms: int,
                  speech_pad_ms: int, block_ms: int, energy_threshold: float = 0.0,
-                 min_utterance_rms: float = 0.0):
+                 min_utterance_rms: float = 0.0,
+                 min_speech_for_fast_end_ms: int = 0):
         self.sample_rate = sample_rate
         self.block_ms = block_ms
         self.silence_blocks = max(1, silence_ms // block_ms)
         self.max_blocks = max(1, max_utterance_ms // block_ms)
         self.pad_blocks = max(0, speech_pad_ms // block_ms)
+        # Adaptive endpoint: an utterance with less speech than this waits DOUBLE
+        # the trailing silence before ending — slow starters ("um...") aren't cut
+        # off, while a finished sentence still commits fast. 0 = off.
+        self.fast_end_speech_blocks = max(0, min_speech_for_fast_end_ms // block_ms)
         # int16 RMS a single frame must exceed to count as speech. Rejects quieter
         # background voices/room noise that the VAD alone would accept. 0 = off.
         self.energy_threshold = energy_threshold
@@ -48,6 +53,13 @@ class _BaseEndpointer:
             return True
         rms = float(np.sqrt(np.mean(frame.astype(np.float32) ** 2)))
         return rms >= self.energy_threshold
+
+    def is_speech_frame(self, frame: np.ndarray) -> bool:
+        """Frame-level speech check for callers outside capture() (barge-in)."""
+        try:
+            return self._is_speech(frame)
+        except Exception:
+            return False
 
     def capture(self, frames: Iterable[np.ndarray],
                 idle_timeout_s: float | None = None) -> np.ndarray | None:
@@ -100,7 +112,12 @@ class _BaseEndpointer:
                         trailing_silence = 0
                     else:
                         trailing_silence += 1
-                        if trailing_silence >= self.silence_blocks:
+                        need = self.silence_blocks
+                        if (self.fast_end_speech_blocks
+                                and len(collected) - trailing_silence
+                                < self.fast_end_speech_blocks):
+                            need = self.silence_blocks * 2
+                        if trailing_silence >= need:
                             break
                     if len(collected) >= self.max_blocks:
                         log.info("utterance hit max length cap")

@@ -23,12 +23,15 @@ from zero.utils.logging import get_logger
 log = get_logger("tts.remote")
 
 # ZERO's shared cue tags -> Orpheus native tags. Unmapped cues are stripped.
+# [hmm] / [pause] have no native tag — rendered as text Orpheus performs
+# naturally (a spoken "Hmm," / an ellipsis pause) instead of being deleted.
 _CUE_MAP = {
     "[laughs]": " <laugh> ",
     "[chuckles]": " <chuckle> ",
     "[sighs]": " <sigh> ",
-    "[hmm]": " ",
-    "[pause]": " ",
+    "[gasps]": " <gasp> ",
+    "[hmm]": " Hmm, ",
+    "[pause]": " ... ",
 }
 _LEFTOVER_CUE = re.compile(r"\[[a-z]+\]")
 _EMPHASIS = re.compile(r"\*(\w+)\*")
@@ -50,6 +53,9 @@ class RemoteTTS(TTS):
         self.voice = voice
         self.sample_rate = sample_rate
         self.timeout = timeout
+        # Keep-alive: reuse one connection instead of a TCP+HTTP handshake per
+        # sentence — shaves tens of ms off first-audio for every sentence.
+        self._session = requests.Session()
         log.info("remote TTS (orpheus) -> %s (voice=%s)", url, voice)
 
     def synthesize_stream(self, text: str) -> Iterator[np.ndarray]:
@@ -59,7 +65,7 @@ class RemoteTTS(TTS):
         if not text:
             return
         try:
-            resp = requests.post(
+            resp = self._session.post(
                 self.stream_url, json={"text": text, "voice": self.voice},
                 stream=True, timeout=self.timeout,
             )
@@ -69,7 +75,9 @@ class RemoteTTS(TTS):
             return
         leftover = b""
         try:
-            for raw in resp.iter_content(chunk_size=8192):
+            # 2048 B = 1024 samples ≈ 43 ms @ 24 kHz — first sound lands ~4x
+            # sooner than the old 8192 B chunks.
+            for raw in resp.iter_content(chunk_size=2048):
                 if not raw:
                     continue
                 buf = leftover + raw
@@ -88,7 +96,7 @@ class RemoteTTS(TTS):
         if not text:
             return np.zeros(0, dtype=np.float32)
         try:
-            resp = requests.post(
+            resp = self._session.post(
                 self.url, json={"text": text, "voice": self.voice},
                 timeout=self.timeout,
             )

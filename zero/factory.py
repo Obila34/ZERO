@@ -38,6 +38,7 @@ def build_endpointer(cfg: Config):
         aggressiveness=cfg.get("vad.aggressiveness", 3),
         energy_threshold=cfg.get("vad.energy_threshold", 350),
         min_utterance_rms=cfg.get("vad.min_utterance_rms", 0),
+        min_speech_for_fast_end_ms=cfg.get("vad.min_speech_for_fast_end_ms", 600),
         silero_model=str(cfg.resolve_path("vad.silero_model",
                                           "models/vad/silero_vad.onnx")),
         silero_threshold=cfg.get("vad.silero_threshold", 0.5),
@@ -88,6 +89,7 @@ def build_llm(cfg: Config) -> LLM:
             model=cfg.get("llm.model", "llama3.2:3b"),
             temperature=cfg.get("llm.temperature", 0.7),
             max_tokens=cfg.get("llm.max_tokens", 160),
+            num_ctx=cfg.get("llm.num_ctx", 8192),
         )
     raise ValueError(f"unknown llm engine: {engine}")
 
@@ -340,6 +342,7 @@ def build_vision(cfg: Config):
         preview_port=cfg.get("vision.preview_port", 8008),
         learned=learned,
         unknown_conf=cfg.get("learning.objects.unknown_conf", 0.45),
+        change_note_cooldown_s=cfg.get("vision.change_note_cooldown_s", 120.0),
     )
 
 
