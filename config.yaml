@@ -9,10 +9,11 @@ audio:
     # 0 input channels until the mic is unmuted at
     # the ALSA layer (alsamixer -c 3, F4=capture).
   input_gain:
-    16.0 # software boost for quiet mics. This USB dongle
-    # captures very low (speech landed ~184-346 RMS at
-    # gain 12) — 16 lifts it clear of the min_utterance_rms
-    # gate below. 1.0 = off. Raise toward 20 if still quiet.
+    1.0 # OFF. This card-3 USB mic captures HOT (raw speech
+    # ~1000 RMS) — the old 16.0 was tuned for a much quieter
+    # dongle and drove every frame into hard clipping
+    # (peak 32767), which broke endpointing AND barge-in.
+    # Raise only if the "utterance: rms=" logs read < 300.
   output_device:
     pipewire # routes to PipeWire's default sink = the BT speaker
     # (needs the pipewire-alsa package). Use Headphones for 3.5mm jack.
