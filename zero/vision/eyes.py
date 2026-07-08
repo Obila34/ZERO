@@ -99,6 +99,12 @@ class Eyes:
         self._first_seen: dict[str, float] = {}
         self._last_seen: dict[str, float] = {}
         self._stable: set[str] = set()
+        # Per-instance IoU tracks — "the SAME cup moved", not just labels
+        # coming and going. Only its "moved" events are consumed here (the
+        # label-level diffing above already covers appear/disappear).
+        from zero.vision.tracker import IouTracker
+
+        self._tracker = IouTracker()
 
     _STABLE_S = 2.0      # presence/absence must persist this long to count
     _SETTLE_S = 8.0      # startup grace: the initial scene isn't "new"
@@ -159,6 +165,7 @@ class Eyes:
             # detector never makes it look like the camera is blind.
             self._scene.update(detections, frame_rgb=frame)
             self._track_changes(detections)
+            self._track_motion(detections)
             if self._preview_sink is not None and self._preview_sink.ok:
                 self._preview_sink.show(frame, detections)
             if self._detect_interval > 0:
@@ -195,6 +202,25 @@ class Eyes:
         if events:
             with self._change_lock:
                 self._changes = (self._changes + events)[-4:]
+
+    def _track_motion(self, detections) -> None:
+        """Per-instance motion: 'the cup just moved' remark candidates. People
+        move constantly — identity/proactive own them, so they're excluded."""
+        try:
+            dets = [d for d in detections
+                    if getattr(d, "bbox", None) is not None
+                    and d.label.lower() != "person"]
+            events = self._tracker.update(dets, time.time())
+        except Exception as e:  # motion tracking must never break perception
+            log.debug("motion tracking failed: %s", e)
+            return
+        if time.time() - self._started_at < self._SETTLE_S:
+            return  # tracker state warms up silently
+        moved = [f"the {label} just moved"
+                 for kind, label in events if kind == "moved"]
+        if moved:
+            with self._change_lock:
+                self._changes = (self._changes + moved)[-4:]
 
     def scene_changes(self) -> list[str]:
         """Pending phrased scene-change remarks (max 2), rate-limited by the

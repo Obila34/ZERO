@@ -44,6 +44,7 @@ class MicCapture:
         self._stream: sd.InputStream | None = None
         self._dropped = 0  # frames dropped since last warning (throttled logging)
         self._paused = False  # gate capture while ZERO thinks/speaks (echo guard)
+        self.aec = None  # optional echo canceller (zero/audio/aec.py)
         # Resample state — populated only when the device rejects our target rate.
         self._native_rate: int | None = None
         self._resample_up: int | None = None
@@ -72,6 +73,8 @@ class MicCapture:
         if self.gain != 1.0:
             mono = mono * self.gain  # boost a quiet mic (clipped on the next line)
         pcm16 = np.clip(mono * 32768.0, -32768, 32767).astype(np.int16)
+        if self.aec is not None:
+            pcm16 = self.aec.process(pcm16)  # subtract ZERO's own playback
         try:
             self._q.put_nowait(pcm16.copy())
         except queue.Full:

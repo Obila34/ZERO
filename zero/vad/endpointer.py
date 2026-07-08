@@ -67,7 +67,8 @@ class _BaseEndpointer:
 
     def capture(self, frames: Iterable[np.ndarray],
                 idle_timeout_s: float | None = None,
-                on_speech_pause=None) -> np.ndarray | None:
+                on_speech_pause=None,
+                should_hold=None) -> np.ndarray | None:
         """Collect one utterance from the owner. Returns the audio, or None only on
         a true idle timeout (no speech for `idle_timeout_s`). A too-quiet utterance
         (background) is NOT an idle timeout — we drop it and keep listening, so a
@@ -83,6 +84,7 @@ class _BaseEndpointer:
             preroll: list[np.ndarray] = []  # lead-in so the first word isn't clipped
             trailing_silence = 0
             started = False
+            hold_until = 0  # semantic hold: extended endpoint (blocks), 0 = none
 
             for frame in frames_iter:
                 is_voice = self._is_speech(frame)  # VAD only
@@ -115,6 +117,7 @@ class _BaseEndpointer:
                     # inside a sentence must NOT end it (the fragmentation bug).
                     if is_voice:
                         trailing_silence = 0
+                        hold_until = 0  # speech resumed — a fresh endpoint decision
                     else:
                         trailing_silence += 1
                         if (on_speech_pause is not None
@@ -128,8 +131,23 @@ class _BaseEndpointer:
                                 and len(collected) - trailing_silence
                                 < self.fast_end_speech_blocks):
                             need = self.silence_blocks * 2
+                        if hold_until:
+                            need = max(need, hold_until)
                         if trailing_silence >= need:
-                            break
+                            # Semantic hold (once per pause): the early partial
+                            # transcript says the user is mid-thought ("...and")
+                            # — wait one more silence window before committing.
+                            hold = False
+                            if hold_until == 0 and should_hold is not None:
+                                try:
+                                    hold = bool(should_hold())
+                                except Exception as e:
+                                    log.debug("hold hook failed: %s", e)
+                            if hold:
+                                hold_until = trailing_silence + self.silence_blocks
+                                log.debug("semantic hold: mid-thought pause")
+                            else:
+                                break
                     if len(collected) >= self.max_blocks:
                         log.info("utterance hit max length cap")
                         break

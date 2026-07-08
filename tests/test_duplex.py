@@ -250,3 +250,78 @@ class TestPersonCrop:
         snap = SimpleNamespace(frame_rgb=np.zeros((100, 100, 3), dtype=np.uint8),
                                detections=[])
         assert eyes._person_crop(snap) is None
+
+
+class TestSemanticHold:
+    def test_mid_thought_words_and_punctuation(self):
+        from zero.main import ends_mid_thought
+
+        assert ends_mid_thought("I went to the store and")
+        assert ends_mid_thought("so what I mean is,")
+        assert ends_mid_thought("could you get me the")
+        assert not ends_mid_thought("what time is it")
+        assert not ends_mid_thought("")
+
+    def test_hold_extends_endpoint_once(self):
+        # 5 speech + long silence; hold=True once -> ends at 2x silence window.
+        flags = [True] * 5 + [False] * 30
+        calls = []
+
+        def hold():
+            calls.append(1)
+            return True
+
+        ep = ScriptedEndpointer(flags, silence_ms=90,
+                                min_speech_for_fast_end_ms=0)
+        utt = ep.capture(iter(_frame(2000) for _ in range(len(flags))),
+                         should_hold=hold)
+        assert len(calls) == 1                       # asked once, not re-held
+        assert utt is not None and utt.size == 11 * BLOCK  # 5 speech + 6 sil
+
+    def test_no_hold_ends_at_normal_window(self):
+        flags = [True] * 5 + [False] * 30
+        ep = ScriptedEndpointer(flags, silence_ms=90,
+                                min_speech_for_fast_end_ms=0)
+        utt = ep.capture(iter(_frame(2000) for _ in range(len(flags))),
+                         should_hold=lambda: False)
+        assert utt is not None and utt.size == 8 * BLOCK   # 5 speech + 3 sil
+
+
+class TestIouTracker:
+    class _Det:
+        def __init__(self, label, bbox):
+            self.label = label
+            self.bbox = bbox
+
+    def _cup(self, x=10):
+        return self._Det("cup", (x, 10, 20, 20))
+
+    def test_confirm_then_gone(self):
+        from zero.vision.tracker import IouTracker
+
+        tr = IouTracker(confirm_s=1.0, lost_s=1.0)
+        assert tr.update([self._cup()], now=0.0) == []      # tentative
+        assert ("new", "cup") in tr.update([self._cup()], now=1.5)
+        assert ("gone", "cup") in tr.update([], now=3.5)
+
+    def test_same_object_moving_fires_moved_not_new(self):
+        from zero.vision.tracker import IouTracker
+
+        tr = IouTracker(confirm_s=0.5, lost_s=2.0, move_frac=0.75,
+                        move_cooldown_s=0.0)
+        tr.update([self._cup(10)], now=0.0)
+        tr.update([self._cup(10)], now=1.0)                 # confirmed
+        evs = tr.update([self._cup(35)], now=1.2)           # big jump, IoU ok?
+        # 25px shift on a 20x20 box > 0.75*diag(28)=21 -> moved
+        assert ("moved", "cup") in evs or ("new", "cup") not in evs
+
+    def test_move_cooldown_suppresses_repeats(self):
+        from zero.vision.tracker import IouTracker
+
+        tr = IouTracker(confirm_s=0.0, lost_s=5.0, move_frac=0.5,
+                        move_cooldown_s=100.0)
+        tr.update([self._cup(10)], now=0.0)
+        tr.update([self._cup(10)], now=0.1)                 # confirm
+        tr.update([self._cup(25)], now=0.2)                 # moved #1
+        evs = tr.update([self._cup(40)], now=0.3)           # inside cooldown
+        assert ("moved", "cup") not in evs

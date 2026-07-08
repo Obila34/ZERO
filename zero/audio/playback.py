@@ -17,9 +17,13 @@ log = get_logger("audio.playback")
 
 
 class Speaker:
-    def __init__(self, device: int | str | None = None, chunk_ms: int = 50):
+    def __init__(self, device: int | str | None = None, chunk_ms: int = 50,
+                 echo_ref=None):
         self.device = device
         self.chunk_ms = chunk_ms
+        # AEC far-end feed: every chunk written to the device is also pushed
+        # here so the mic side can subtract it (zero/audio/aec.py).
+        self.echo_ref = echo_ref
 
     def play(
         self,
@@ -46,6 +50,8 @@ class Speaker:
                     return False
                 block = audio[start : start + chunk]
                 stream.write(block.reshape(-1, 1))
+                if self.echo_ref is not None:
+                    self.echo_ref.push(block, sample_rate)
         return True
 
     def play_stream(
@@ -75,7 +81,10 @@ class Speaker:
                     if should_stop is not None and should_stop():
                         log.info("playback interrupted (barge-in)")
                         return False
-                    stream.write(audio[start : start + sub].reshape(-1, 1))
+                    block = audio[start : start + sub]
+                    stream.write(block.reshape(-1, 1))
+                    if self.echo_ref is not None:
+                        self.echo_ref.push(block, sample_rate)
             return True
         finally:
             if stream is not None:

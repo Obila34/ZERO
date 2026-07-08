@@ -108,6 +108,29 @@ def _mentions_visible_object(text_lower: str, labels) -> bool:
     return False
 
 
+# Words that end a transcript when the thought ISN'T finished — conjunctions,
+# prepositions, articles, fillers. Used by semantic endpointing: a pause after
+# "...and" means keep listening, not "reply now". Deliberately excludes words
+# that legitimately end sentences (pronouns, "it", "that").
+_MID_THOUGHT_WORDS = frozenset((
+    "and", "or", "but", "so", "because", "then", "if", "when", "while",
+    "with", "without", "to", "of", "for", "from", "in", "on", "at", "by",
+    "as", "than", "the", "a", "an", "my", "your", "our", "their", "his",
+    "um", "uh", "like", "plus", "also", "though", "although", "unless",
+    "until", "whether", "gonna", "wanna", "versus",
+))
+
+
+def ends_mid_thought(text: str) -> bool:
+    t = (text or "").strip().lower()
+    if not t:
+        return False
+    if t.endswith((",", "-", "—", ":")):
+        return True
+    words = re.findall(r"[a-z']+", t)
+    return bool(words) and words[-1] in _MID_THOUGHT_WORDS
+
+
 def is_visual_question(text: str, visible_labels=()) -> bool:
     t = text.lower()
     words = {w.strip(" .!?,;:'\"") for w in t.split()}
@@ -146,7 +169,21 @@ class Zero:
                 device=self.cfg.get("audio.input_device"),
                 gain=self.cfg.get("audio.input_gain", 1.0),
             )
-            self.speaker = Speaker(device=self.cfg.get("audio.output_device"))
+            echo_ref = None
+            if self.cfg.get("audio.aec.enabled", False):
+                from zero.audio.aec import EchoReference, SpeexAEC
+
+                try:
+                    echo_ref = EchoReference(sr)
+                    self.mic.aec = SpeexAEC(
+                        echo_ref, frame_size=self.mic.block_size,
+                        sample_rate=sr,
+                        filter_ms=self.cfg.get("audio.aec.filter_ms", 200))
+                except Exception as e:  # missing speexdsp — run without AEC
+                    echo_ref = None
+                    log.warning("AEC unavailable (pip install speexdsp): %s", e)
+            self.speaker = Speaker(device=self.cfg.get("audio.output_device"),
+                                   echo_ref=echo_ref)
             self.wake = build_wake(self.cfg)
             self.endpointer = build_endpointer(self.cfg)
             self.stt = build_stt(self.cfg)
@@ -477,9 +514,17 @@ class Zero:
                     target=run, name="stt-spec", daemon=True)
                 t.start()
 
+            def _hold() -> bool:
+                # Semantic endpointing: if the speculative transcript for THIS
+                # pause is back and reads mid-thought, hold the endpoint open.
+                res = spec.get("res") or {}
+                return ends_mid_thought(res.get("text", ""))
+
             utterance = self.endpointer.capture(
                 frames_src, idle_timeout_s=idle_s,
-                on_speech_pause=_on_pause if allow_spec else None)
+                on_speech_pause=_on_pause if allow_spec else None,
+                should_hold=_hold if (allow_spec and self.cfg.get(
+                    "vad.semantic_hold", True)) else None)
 
             if utterance is None or getattr(utterance, "size", 0) == 0:
                 log.info("Sleeping… (no speech for %.0fs — say the wake word to talk again)",
