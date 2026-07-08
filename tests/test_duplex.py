@@ -325,3 +325,26 @@ class TestIouTracker:
         tr.update([self._cup(25)], now=0.2)                 # moved #1
         evs = tr.update([self._cup(40)], now=0.3)           # inside cooldown
         assert ("moved", "cup") not in evs
+
+
+class TestStripStageDirections:
+    def _run(self, *chunks):
+        from zero.tts.orchestrator import strip_asides
+
+        return "".join(strip_asides(iter(chunks)))
+
+    def test_multiword_star_span_dropped(self):
+        assert self._run("Hey there ", "*smiles slightly* ", "how are you") \
+            == "Hey there  how are you"
+
+    def test_single_word_emphasis_kept(self):
+        assert self._run("that is *really* good") == "that is *really* good"
+
+    def test_star_span_across_chunks_dropped(self):
+        assert self._run("Oh ", "*looks ", "at him* ", "okay") == "Oh  okay"
+
+    def test_parens_still_dropped(self):
+        assert self._run("Sure. (a note) done") == "Sure.  done"
+
+    def test_unclosed_star_flushed_as_words(self):
+        assert self._run("wait *what") == "wait what"

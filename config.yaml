@@ -301,11 +301,18 @@ tts:
   # binary + voice below. Blank = no fallback.
   fallback: piper
   orpheus:
-    # Quantized Orpheus TTS server on the GPU node, over an SSH tunnel (see
-    # server/orpheus_cpp_server.py). Voices: tara leah jess leo dan mia zac zoe.
+    # Orpheus TTS server on the GPU node, over an SSH tunnel. Male voices:
+    # leo dan zac; female: tara leah jess mia zoe. leo = the most natural,
+    # steady male voice. For BEST quality run the fp16 vLLM server
+    # (server/orpheus_server.py) instead of the quantized cpp one — same
+    # endpoints, higher fidelity, faster streaming (compute permitting).
     url: http://127.0.0.1:9100/tts
-    voice: tara
+    voice: leo
     timeout: 30
+    # Jitter buffer: pre-accumulate this much audio before playback starts, so
+    # a brief generation hiccup never underruns the speaker mid-word (the
+    # stutter). Costs this much added latency to first sound — cheap insurance.
+    prebuffer_ms: 300
   piper:
     binary: piper/piper # extracted arm64 release (relative to repo root)
     voice: models/piper/en_US-amy-medium.onnx

@@ -20,7 +20,7 @@ import wave
 
 import uvicorn
 from fastapi import FastAPI
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 from orpheus_tts import OrpheusModel
 
@@ -50,6 +50,16 @@ def tts(req: TTSReq):
         w.writeframes(audio)
     print(f"[orpheus] {time.time() - t:.2f}s -> {req.text[:60]!r}", flush=True)
     return Response(content=buf.getvalue(), media_type="audio/wav")
+
+
+@app.post("/tts_stream")
+def tts_stream(req: TTSReq):
+    """Stream raw int16 PCM (24 kHz mono) as vLLM generates it — first audio in
+    ~200ms. Mirrors orpheus_cpp_server so the Pi's RemoteTTS works unchanged."""
+    def gen():
+        for chunk in _model.generate_speech(prompt=req.text, voice=req.voice):
+            yield chunk
+    return StreamingResponse(gen(), media_type="application/octet-stream")
 
 
 def main() -> None:

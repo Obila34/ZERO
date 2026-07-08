@@ -52,7 +52,15 @@ if ! port_up 11434; then
 fi
 
 start whisper 9000 python server/whisper_server.py --model large-v3-turbo --port 9000
-start orpheus 9100 python server/orpheus_cpp_server.py --port 9100
+
+# Orpheus TTS. ORPHEUS_FP16=1 runs the full fp16 vLLM model (best quality +
+# fastest streaming, wants most of a GPU); default is the quantized cpp build
+# that shares a 16 GB card. Both expose /tts and /tts_stream identically.
+if [[ "${ORPHEUS_FP16:-0}" == "1" ]]; then
+  start orpheus 9100 python server/orpheus_server.py --port 9100
+else
+  start orpheus 9100 python server/orpheus_cpp_server.py --port 9100
+fi
 
 # Vision (FastAPI app lives in server/vision; run from there so its relative
 # imports + config.yaml resolve). uvicorn binds 0.0.0.0:8000.

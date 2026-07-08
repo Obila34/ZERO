@@ -48,12 +48,17 @@ def split_sentences(text: str) -> list[str]:
 
 
 def strip_asides(chunks):
-    """Drop everything inside (parentheses) from a streamed reply, statefully
-    across chunk and sentence boundaries — including a paren the model never
-    closes. The persona forbids the model writing notes, but a small model
-    sometimes imitates the note protocol anyway; whatever it writes in parens
-    must NEVER reach the voice ("parentheses: I see a person..." read aloud)."""
+    """Drop non-speech the model writes into a streamed reply, statefully
+    across chunk and sentence boundaries:
+
+    * (parentheses) — imitations of the sensory-note protocol, including a
+      paren the model never closes;
+    * *multi-word star spans* — stage directions ("*smiles slightly*").
+      Single-word *emphasis* keeps its word (the engines strip the stars).
+
+    Whatever survives here is what gets SPOKEN, so this is the last gate."""
     depth = 0
+    star: list | None = None  # buffered content of an open *span*
     for chunk in chunks:
         out = []
         for ch in chunk:
@@ -62,10 +67,24 @@ def strip_asides(chunks):
             elif ch == ")":
                 if depth:
                     depth -= 1
-            elif depth == 0:
+            elif depth:
+                continue
+            elif ch == "*":
+                if star is None:
+                    star = []
+                else:
+                    span = "".join(star)
+                    if span and " " not in span.strip():
+                        out.append(f"*{span}*")  # emphasis — keep for engines
+                    star = None  # multi-word = stage direction — dropped
+            elif star is not None:
+                star.append(ch)
+            else:
                 out.append(ch)
         if out:
             yield "".join(out)
+    if star:  # unclosed * at end of reply — flush as ordinary words
+        yield "".join(star)
 
 
 def _strip_emphasis(text: str) -> str:

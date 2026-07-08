@@ -182,8 +182,10 @@ class Zero:
                 except Exception as e:  # missing speexdsp — run without AEC
                     echo_ref = None
                     log.warning("AEC unavailable (pip install speexdsp): %s", e)
-            self.speaker = Speaker(device=self.cfg.get("audio.output_device"),
-                                   echo_ref=echo_ref)
+            self.speaker = Speaker(
+                device=self.cfg.get("audio.output_device"),
+                echo_ref=echo_ref,
+                prebuffer_ms=self.cfg.get("tts.orpheus.prebuffer_ms", 0))
             self.wake = build_wake(self.cfg)
             self.endpointer = build_endpointer(self.cfg)
             self.stt = build_stt(self.cfg)
