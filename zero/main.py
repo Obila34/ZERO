@@ -497,7 +497,11 @@ class Zero:
             # STT round trip overlaps the silence wait. Skipped when a gate
             # (voiceid / strict privacy) must run before any transcription.
             spec: dict = {}
+            # Speculation only pays off when STT is the FAST remote. While it's
+            # degraded to the slow local CPU engine, speculating just runs that
+            # ~5s job twice (pause + endpoint) — so skip it and transcribe once.
             allow_spec = (self.voiceid is None
+                          and not getattr(self.stt, "degraded", False)
                           and not (self.privacy is not None
                                    and getattr(self.privacy, "mode", "") == "strict"))
 
