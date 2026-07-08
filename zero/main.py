@@ -312,17 +312,27 @@ class Zero:
         sets = self.cfg.get("conversation.fillers", self._DEFAULT_FILLERS)
         out: dict[str, list] = {}
         total = 0
+        misses = 0  # consecutive empty synths — the TTS is cold/down/mute
         for category, phrases in sets.items():
             audios = []
             for phrase in phrases:
+                if misses >= 2:  # stop hammering a dead TTS at 30s/call
+                    break
                 try:
                     audio = self.voice.synthesize(phrase)
-                    if getattr(audio, "size", 0):
-                        audios.append(audio)
-                        total += 1
                 except Exception as e:  # never block startup on a filler
+                    audio = None
                     log.debug("filler synth failed for %r: %s", phrase, e)
+                if getattr(audio, "size", 0):
+                    audios.append(audio)
+                    total += 1
+                    misses = 0
+                else:
+                    misses += 1
             out[category] = audios
+        if misses >= 2:
+            log.warning("filler pre-synth aborted — TTS not responding; fillers "
+                        "off this session (the real reply voice is unaffected)")
         log.info("pre-synthesized %d fillers across %d categories", total, len(out))
         return out
 
