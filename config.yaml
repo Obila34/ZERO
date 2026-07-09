@@ -383,8 +383,11 @@ vision:
     # single frame). Each is a small JPEG over the tunnel.
   look_window_s: 1.0 # sample those frames from roughly the last N seconds.
 
+    # BRIO exposes /dev/video0-3; only video0 (index 0) is the capture node,
+    # the others are metadata and fail to open. If 0 ever gives no frames on a
+    # re-enumeration, try 2 (the BRIO's second capture node).
   camera:
-    index: 1 # /dev/video0 (the Brio webcam doubles as mic + camera)
+    index: 0
     width: 640 # stream geometry — small so YOLO11n keeps up on the Pi
     height: 480
     request_fps: 30
