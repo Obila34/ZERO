@@ -20,6 +20,10 @@ from typing import Callable
 
 import numpy as np
 
+from zero.utils.logging import get_logger
+
+log = get_logger("audio.bargein")
+
 
 class SpeechBargeIn:
     def __init__(self, is_speech: Callable[[np.ndarray], bool],
@@ -55,6 +59,13 @@ class SpeechBargeIn:
             # Learning window (first frames of REAL playback): all echo;
             # track the loudest of it.
             self._floor = max(self._floor, rms) if self._floor else rms
+            if self._seen == self._learn_blocks:
+                # The calibration line: your voice must beat `gate` to
+                # interrupt. If it never triggers, lower barge_in_ratio /
+                # barge_in_min_rms; if it self-triggers, raise them.
+                log.info("barge-in armed: echo floor %.0f, speech gate %.0f",
+                         self._floor, max(self._min_rms,
+                                          self._ratio * self._floor))
             return False
         gate = max(self._min_rms, self._ratio * self._floor)
         foreground = rms >= gate and self._is_speech(frame)

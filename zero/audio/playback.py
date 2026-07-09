@@ -27,6 +27,10 @@ class Speaker:
         # Jitter buffer: hold this much audio before starting play_stream, so a
         # transient TTS generation slowdown can't underrun the device mid-word.
         self.prebuffer_ms = int(prebuffer_ms)
+        # True only while samples are ACTUALLY being written to the device —
+        # the barge-in detector keys its echo calibration off this, so it must
+        # not include prebuffering time (when the room is still silent).
+        self.playing = False
 
     def play(
         self,
@@ -41,21 +45,25 @@ class Speaker:
         audio = np.asarray(audio, dtype=np.float32)
         chunk = max(1, int(sample_rate * self.chunk_ms / 1000))
 
-        with sd.OutputStream(
-            samplerate=sample_rate,
-            device=self.device,
-            channels=1,
-            dtype="float32",
-        ) as stream:
-            for start in range(0, audio.size, chunk):
-                if should_stop is not None and should_stop():
-                    log.info("playback interrupted (barge-in)")
-                    return False
-                block = audio[start : start + chunk]
-                stream.write(block.reshape(-1, 1))
-                if self.echo_ref is not None:
-                    self.echo_ref.push(block, sample_rate)
-        return True
+        try:
+            with sd.OutputStream(
+                samplerate=sample_rate,
+                device=self.device,
+                channels=1,
+                dtype="float32",
+            ) as stream:
+                self.playing = True
+                for start in range(0, audio.size, chunk):
+                    if should_stop is not None and should_stop():
+                        log.info("playback interrupted (barge-in)")
+                        return False
+                    block = audio[start : start + chunk]
+                    stream.write(block.reshape(-1, 1))
+                    if self.echo_ref is not None:
+                        self.echo_ref.push(block, sample_rate)
+            return True
+        finally:
+            self.playing = False
 
     def play_stream(
         self,
@@ -86,6 +94,7 @@ class Speaker:
                                          device=self.device, channels=1,
                                          dtype="float32")
                 stream.start()
+                self.playing = True  # sound is now really leaving the device
             stream.write(block.reshape(-1, 1))
             if self.echo_ref is not None:
                 self.echo_ref.push(block, sample_rate)
@@ -113,6 +122,7 @@ class Speaker:
                         return False
             return True
         finally:
+            self.playing = False
             if stream is not None:
                 stream.stop()
                 stream.close()

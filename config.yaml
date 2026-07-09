@@ -55,7 +55,12 @@ conversation:
   barge_in_on_speech: true # false = wake-word-only interruption
   barge_in_learn_ms: 900 # echo-floor learning window at reply start
   barge_in_speech_ms: 300 # sustained speech needed to trigger the interrupt
-  barge_in_ratio: 2.0 # foreground must be this x louder than the echo floor
+  barge_in_ratio:
+    1.6 # foreground must be this x louder than the echo floor. At normal
+    # speaking levels (rms ~500-850 at gain 6) 2.0 made interruption
+    # impossible whenever the reply echo topped ~400 rms. Watch the
+    # "barge-in armed: ... speech gate" log line: your voice must beat
+    # the gate. Self-triggers = raise; never triggers = lower.
   barge_in_min_rms: 250 # absolute int16 RMS floor for foreground speech
 
   # Tiny neutral backchannel that fits ANY input (a committal "let me think" on a
