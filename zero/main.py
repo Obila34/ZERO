@@ -219,7 +219,8 @@ class Zero:
         self._memory_thread: threading.Thread | None = None  # background fact save
         self._summary_thread: threading.Thread | None = None  # rolling compaction
         self._face_name = None         # who the camera recognises (log/perception only)
-        self._session_people: dict[int, int] = {}  # person_id -> turns, this session
+        self._turn_durable_pid = None  # speaker to CREDIT durable memory this turn (or None)
+        self._session_log: list[tuple] = []  # (durable_pid, role, text) for per-person save
         self._welcomed: set[int] = set()  # people greeted "welcome back" this session
 
         # Voice-only extras (need the voice/mic): owner verification + spoken fillers.
@@ -491,7 +492,7 @@ class Zero:
         self._mood.reset()
         self._was_interrupted = False  # a stale note must not leak across chats
         self._face_name = None
-        self._session_people = {}      # who took part (by voice) this session
+        self._session_log = []         # per-turn (speaker, role, text) for per-person memory
         self._welcomed = set()         # welcome-back fires once per person
         sr = self.cfg.get("audio.sample_rate", 16000)
         idle_s = self.cfg.get("conversation.sleep_timeout_ms", 30000) / 1000.0
@@ -608,6 +609,7 @@ class Zero:
                 self._turn_notes.append(
                     "(You were interrupted mid-sentence a moment ago — don't "
                     "restart the old answer; just respond to what they say now.)")
+            self._turn_durable_pid = None  # only a CONFIDENT voice credits memory
             if self.identity is not None:
                 # Sessions are owned by VOICE — the speaker's voice decides whose
                 # memories this turn belongs to; the face is perception only.
@@ -622,10 +624,13 @@ class Zero:
                 self._person = ident if ident.is_known else None
                 self._face_name = face_name
                 if ident.is_known:
-                    # Track participation (for the per-person "last conversation"
-                    # written at the end) and welcome a known voice back once.
-                    self._session_people[ident.person_id] = (
-                        self._session_people.get(ident.person_id, 0) + 1)
+                    # Persist this turn under the speaker ONLY when the voice is
+                    # confident enough: a borderline match still talks (live), but
+                    # must not write into someone else's permanent memory. This is
+                    # what keeps a multi-speaker session from cross-contaminating.
+                    write_min = self.cfg.get("identity.session.write_min_score", 0.55)
+                    if ident.score >= write_min:
+                        self._turn_durable_pid = ident.person_id
                     welcome = self._welcome_back_note(ident)
                     if welcome:
                         self._turn_notes.append(welcome)
@@ -770,6 +775,9 @@ class Zero:
 
             # Store the RAW utterance so history stays clean and cache-friendly.
             self.convo.add_user(text)
+            # Tag the turn with its (confident) speaker so end-of-session memory can
+            # be split per person instead of lumped onto one owner.
+            self._session_log.append((self._turn_durable_pid, "user", text))
             self._t_reply_start = time.monotonic()  # end-of-STT marker for timing
             # Fold in what ZERO currently sees as an EPHEMERAL note on THIS turn
             # only — the note + keyframes are attached to the outgoing copy of the
@@ -800,6 +808,8 @@ class Zero:
             # not "remember" saying sentences the user never heard.
             if reply:
                 self.convo.add_assistant(reply)
+                self._session_log.append(
+                    (self._turn_durable_pid, "assistant", reply))
                 log.info("reply: %r", reply)
 
     # -- vision -------------------------------------------------------------
@@ -1029,44 +1039,52 @@ class Zero:
             log.warning("compaction failed: %s", e)
 
     def _end_conversation(self) -> None:
-        """On sleep/stop: extract durable facts from the chat into long-term memory
-        (two extra LLM passes) on a BACKGROUND thread, so ZERO goes back to
-        listening for the wake word immediately instead of being deaf for seconds.
-        The transcript is snapshotted first — the next conversation may reset the
-        history while the save is still running."""
-        if (self.memory is not None and self.convo._history
+        """On sleep/stop: split the chat by speaker and save each person's durable
+        memory on a BACKGROUND thread, so ZERO goes back to listening for the wake
+        word immediately instead of being deaf for seconds. The speaker log is
+        snapshotted first — the next conversation may reset it while the save is
+        still running."""
+        if (self.memory is not None and self._session_log
                 and getattr(self, "_memory_allowed", True)):
-            transcript = self.convo.transcript()
-            # Sessions are voice-owned: snapshot everyone who took part (by voice)
-            # so each gets their durable 'last conversation' record.
-            participants = dict(self._session_people)
+            # Sessions are voice-owned: hand over the per-turn (speaker, role, text)
+            # log so memory is written PER PERSON, never lumped onto one owner.
+            session_log = list(self._session_log)
             self._memory_thread = threading.Thread(
-                target=self._save_memories, args=(transcript, participants),
+                target=self._save_memories, args=(session_log,),
                 name="memory-save", daemon=True,
             )
             self._memory_thread.start()
         self._person = None  # identity does not persist across conversations
         self._to(State.IDLE)
 
-    def _save_memories(self, transcript: str,
-                       participants: dict | None = None) -> None:
-        participants = participants or {}
-        # Facts + the global episode are attributed to the PRIMARY speaker (the
-        # one with the most turns); anonymous when nobody was recognised.
-        primary = max(participants, key=participants.get) if participants else None
-        try:
-            self._extract_facts(transcript, primary)
-        except Exception as e:  # never let memory break the loop
-            log.warning("memory extraction failed: %s", e)
-        summary = None
-        try:
-            summary = self._summarize_session(transcript, primary)  # episodic memory
-        except Exception as e:
-            log.warning("session summary failed: %s", e)
-        # Durable per-person 'last conversation': EVERY known participant gets it,
-        # so each is greeted with what you discussed when they next return.
-        if summary and self.cfg.get("memory.last_conversation.enabled", True):
-            for pid in participants:
+    def _save_memories(self, session_log: list | None = None) -> None:
+        """Per-speaker durable memory. The session is voice-owned, so we split it
+        by speaker and draw facts + a summary + the last-conversation record from
+        ONLY each person's own turns — nobody's memory is contaminated by another
+        speaker who was in the room. Turns without a confident speaker fall into a
+        global (anonymous) bucket that still records a rough episode."""
+        session_log = session_log or []
+        by_person: dict = {}
+        for pid, role, text in session_log:
+            by_person.setdefault(pid, []).append(f"{role}: {text}")
+        for pid, lines in by_person.items():
+            # A stray one-word turn isn't a conversation worth mining.
+            user_chars = sum(len(ln) for ln in lines if ln.startswith("user: "))
+            if user_chars < 15:
+                continue
+            transcript = "\n".join(lines)
+            try:
+                self._extract_facts(transcript, pid)
+            except Exception as e:  # never let memory break the loop
+                log.warning("fact extraction failed for %s: %s", pid, e)
+            summary = None
+            try:
+                summary = self._summarize_session(transcript, pid)  # episodic memory
+            except Exception as e:
+                log.warning("session summary failed for %s: %s", pid, e)
+            # Durable 'last conversation' for THIS person, from THIS person's turns.
+            if (summary and pid is not None
+                    and self.cfg.get("memory.last_conversation.enabled", True)):
                 try:
                     self.memory.set_last_conversation(pid, summary)
                 except Exception as e:

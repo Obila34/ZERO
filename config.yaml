@@ -212,6 +212,13 @@ identity:
   # mid-conversation becomes the new owner (live handover, per turn).
   session:
     voice_only: true
+    # Durable memory (facts + the per-person last-conversation) is written for a
+    # turn only when its voice match clears THIS bar — stricter than the live
+    # accept (fusion.voice_threshold), so a borderline turn can't persist into the
+    # wrong person's permanent memory. Live conversation still responds at the
+    # lower bar; only what gets *saved* is held to the higher one. Turns below it
+    # are folded into an anonymous bucket, not mis-credited to a nearby speaker.
+    write_min_score: 0.55
   voice:
     model_path: models/voiceid/voxceleb_ECAPA512_LM.onnx # reuses the voiceid model
   face:
