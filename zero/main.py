@@ -219,6 +219,7 @@ class Zero:
         self._memory_thread: threading.Thread | None = None  # background fact save
         self._summary_thread: threading.Thread | None = None  # rolling compaction
         self._face_name = None         # who the camera recognises (log/perception only)
+        self._last_id_key = None       # last identity note attached (dedup across turns)
         self._turn_durable_pid = None  # speaker to CREDIT durable memory this turn (or None)
         self._session_log: list[tuple] = []  # (durable_pid, role, text) for per-person save
         self._welcomed: set[int] = set()  # people greeted "welcome back" this session
@@ -492,6 +493,7 @@ class Zero:
         self._mood.reset()
         self._was_interrupted = False  # a stale note must not leak across chats
         self._face_name = None
+        self._last_id_key = None       # fresh conversation: re-introduce who's here
         self._session_log = []         # per-turn (speaker, role, text) for per-person memory
         self._welcomed = set()         # welcome-back fires once per person
         sr = self.cfg.get("audio.sample_rate", 16000)
@@ -862,12 +864,23 @@ class Zero:
         # OWNS the session). Voice-only recognition (they're talking off-camera)
         # must NOT let ZERO claim it can see them.
         id_note = ""
+        id_key = None
         face_name = getattr(self, "_face_name", None)
         if face_name:
+            id_key = ("face", face_name)
             id_note = f"(You can see {face_name} — you recognise their face.)"
         elif ident is not None and ident.is_known:
+            id_key = ("voice", ident.name)
             id_note = (f"(You recognise {ident.name}'s voice, but you can't "
                        "see their face in the camera right now.)")
+        # Attach it only when recognition CHANGES (first sighting, a new person,
+        # a face appearing) or the user asks a visual question. Repeating it every
+        # turn fed the model greeting-fodder — it kept re-greeting mid-topic
+        # ("hey Greg, you look good today") instead of staying on the subject.
+        if (id_note and id_key == getattr(self, "_last_id_key", None)
+                and not self._is_visual(text)):
+            id_note = ""
+        self._last_id_key = id_key
 
         # Decisive presence fact so "can you see me?" is answered from reality.
         presence_note = ""
@@ -904,13 +917,19 @@ class Zero:
 
         # Spontaneous visual awareness: debounced scene changes ("a guitar just
         # came into view") surface as a note the LLM may mention — or not.
-        if self.eyes is not None:
+        # NEVER while the person is asking something: answering "which planet
+        # did Thanos visit" with "is that a remote on the table?" reads as not
+        # listening. Ungated, the changes stay queued (and self-expire) until a
+        # calmer turn.
+        if self.eyes is not None and self._filler_category(text) != "question":
             try:
                 changes = self.eyes.scene_changes()
                 if changes:
                     turn_notes.append(
-                        f"(You just noticed: {'; '.join(changes)}. Bring it up "
-                        "only if it feels natural — otherwise let it go.)")
+                        f"(You just noticed: {'; '.join(changes)}. Mention it "
+                        "only if the current topic has wound down — never "
+                        "derail what they're talking about; otherwise just "
+                        "let it go.)")
             except Exception:  # a scene read must never break a turn
                 pass
 
