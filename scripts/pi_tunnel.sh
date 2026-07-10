@@ -6,9 +6,11 @@
 #   local :9000  -> GPU :9000    Whisper (STT)
 #   local :9100  -> GPU :9100    Orpheus (TTS)
 #   local :8000  -> GPU :8000    Vision (depth + scene facts)
+#   local :8080  -> GPU :8080    SearXNG (web search)
 #
 # These local ports match config.yaml (llm.host, stt.remote_url, tts.orpheus.url,
-# vision.gpu.url). autossh restarts the tunnel if the link drops, so the Pi keeps
+# vision.gpu.url, tools.websearch.url). autossh restarts the tunnel if the link
+# drops, so the Pi keeps
 # working across Wi-Fi blips. For across-reboot persistence, enable the systemd
 # unit in scripts/systemd/zero-tunnel.service instead.
 #
@@ -27,6 +29,7 @@ FORWARDS=(
   -L 9000:localhost:9000
   -L 9100:localhost:9100
   -L 8000:localhost:8000
+  -L 8080:localhost:8080
 )
 
 # SSH options tuned for an UNATTENDED tunnel that may cross networks (Tailscale):

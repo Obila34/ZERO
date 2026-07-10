@@ -38,6 +38,13 @@ _T1_REMIND = re.compile(
 _T1_TIME = re.compile(
     r"\bwhat(?:'s| is)? (?:the )?(?:time|date|day)\b|\bwhat time is it\b",
     re.IGNORECASE)
+# Explicit "search the web for X" / "google X" — captures the query after the
+# command. Deliberately narrow: bare "look up" is left OUT (it's ambiguous with
+# recalling from memory); only web/internet/online/google count.
+_WEBSEARCH_RE = re.compile(
+    r"\b(?:search(?:\s+the)?\s+(?:web|internet|online)|google)\b"
+    r"\s*(?:for|about)?\s*(?P<q>.*)$",
+    re.IGNORECASE)
 
 
 class ToolAwareLLM:
@@ -61,6 +68,17 @@ class ToolAwareLLM:
         if t1 is not None:
             log.info("tier-1 tool reply: %r", t1[:80])
             yield t1
+            return
+
+        # Explicit web-search request -> force the web tool, then let the LLM
+        # phrase the result. Without this the model tends to fall through to a
+        # memory tool and dead-end on "I don't have that info" for an obvious
+        # "search the web" ask.
+        wq = self._forced_websearch(user_text)
+        if wq is not None:
+            log.info("forced web_search: %r", wq[:80])
+            yield from self._run_and_rephrase(
+                messages, "", {"tool": "web_search", "args": {"query": wq}})
             return
 
         # Tier 2/3: stream and sniff for a JSON tool call.
@@ -115,6 +133,25 @@ class ToolAwareLLM:
         if _T1_TIME.search(text) and self._registry.get("time") is not None:
             return self._registry.get("time").safe_run({}, ctx)
         return None
+
+    def _forced_websearch(self, text: str) -> str | None:
+        """The query from an explicit 'search the web for X' request, when the
+        web_search tool is available. None when there's no web-search intent, no
+        tool, or no inline query (those fall through — the LLM can still tool-call
+        now that the tool exists, e.g. 'search the web and tell me' about the
+        previous turn)."""
+        if not text or self._registry.get("web_search") is None:
+            return None
+        m = _WEBSEARCH_RE.search(text)
+        if not m:
+            return None
+        q = m.group("q").strip(" ?.!,\"'")
+        # Trim trailing niceties so the query is just the thing to look up.
+        q = re.sub(r"\b(?:and\s+)?(?:tell|let|show)\s+me\b.*$", "", q,
+                   flags=re.IGNORECASE)
+        q = re.sub(r"\b(?:for me|please|right now)\b", "", q, flags=re.IGNORECASE)
+        q = q.strip(" ?.!,\"'")
+        return q if len(q) >= 3 else None
 
     @staticmethod
     def _parse_call(reply: str) -> dict | None:

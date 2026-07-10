@@ -136,6 +136,44 @@ def test_router_tier1_reminder():
     assert len(tm.active()) == 1
 
 
+def test_router_explicit_websearch_is_forced():
+    from zero.tools.websearch import WebSearchTool
+
+    reg, _, _ = _registry()
+    reg.register(WebSearchTool(
+        "http://x", fetch=lambda q: [{"title": "R", "content": f"about {q}"}]))
+    llm = FakeLLM("France won two to one.")   # the rephrase pass
+    router = ToolAwareLLM(llm, reg)
+    out = _collect(router.stream(
+        [{"role": "user", "content": "search the web for who won the world cup"}]))
+    assert out == "France won two to one."
+    # The web result (carrying the query) was handed to the rephrase call.
+    assert any("who won the world cup" in str(m.get("content", "")).lower()
+               for m in llm.calls[-1])
+
+
+def test_router_websearch_falls_through_without_the_tool():
+    reg, _, _ = _registry()   # web_search NOT registered
+    llm = FakeLLM("I can't reach the web right now.")
+    router = ToolAwareLLM(llm, reg)
+    out = _collect(router.stream(
+        [{"role": "user", "content": "search the web for mars facts"}]))
+    assert out == "I can't reach the web right now."   # normal LLM path, no crash
+
+
+def test_router_bare_look_up_is_not_web_forced():
+    # "look up" alone is ambiguous (memory recall) — must NOT force web search.
+    from zero.tools.websearch import WebSearchTool
+
+    reg, _, _ = _registry()
+    reg.register(WebSearchTool("http://x", fetch=lambda q: [{"title": "R"}]))
+    llm = FakeLLM("Sure, here's what I recall.")
+    router = ToolAwareLLM(llm, reg)
+    out = _collect(router.stream(
+        [{"role": "user", "content": "look up what I told you about my sister"}]))
+    assert out == "Sure, here's what I recall."
+
+
 def test_router_tier2_json_tool_call_and_rephrase():
     reg, _, tm = _registry()
     llm = FakeLLM(
