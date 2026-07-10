@@ -20,8 +20,10 @@ log = get_logger("tools.websearch")
 
 class WebSearchTool(Tool):
     name = "web_search"
-    description = ("Look something up on the live internet — current events, "
-                   "facts you're unsure of, weather, prices.")
+    description = ("Search the live internet for anything you don't know or "
+                   "aren't sure of — current events, news, sports scores, "
+                   "release dates, weather, prices, recent facts. Prefer this "
+                   "over guessing or telling the person to look it up.")
     parameters = {"query": "what to search for"}
 
     def __init__(self, url: str, *, timeout: float = 8.0, max_results: int = 3,
@@ -31,35 +33,57 @@ class WebSearchTool(Tool):
         self._max = max(1, int(max_results))
         self._fetch = fetch or self._http_fetch  # injectable for tests / offline
 
-    def _http_fetch(self, query: str) -> list[dict]:
+    def _http_fetch(self, query: str):
         import requests  # lazy; already a project dependency
 
         r = requests.get(self._url,
                          params={"q": query, "format": "json"},
                          timeout=self._timeout)
         r.raise_for_status()
-        data = r.json()
-        return list(data.get("results") or [])
+        return r.json()  # full payload: results + answers + infoboxes + ...
+
+    def _summarize(self, payload) -> list[str]:
+        """Pull the best short lines out of a SearXNG payload, defensively:
+        direct ANSWERS first (they settle factual questions), then result
+        snippets. Tolerates a bare results list (the injected/test contract) and
+        skips any entry that isn't the expected shape — a stray string in the
+        results must never crash a turn."""
+        results, answers = [], []
+        if isinstance(payload, dict):
+            results = payload.get("results") or []
+            answers = payload.get("answers") or []
+        elif isinstance(payload, list):
+            results = payload
+        lines: list[str] = []
+        for a in answers:  # answers may be strings OR dicts, depending on engine
+            text = a.get("answer") if isinstance(a, dict) else a
+            text = str(text or "").strip()
+            if text:
+                lines.append(text[:280])
+        for r in results:
+            if not isinstance(r, dict):
+                continue  # a non-dict result: skip it, don't explode
+            title = str(r.get("title") or "").strip()
+            content = str(r.get("content") or r.get("snippet") or "").strip()
+            line = (f"{title}: {content}" if title and content
+                    else (title or content)).strip()
+            if line:
+                lines.append(line[:280])
+            if len(lines) >= self._max:
+                break
+        return lines[: self._max]
 
     def run(self, args: dict, ctx: ToolContext) -> str:
         query = str(args.get("query", "") or "").strip()
         if not query:
             return "I didn't catch what to search for."
         try:
-            results = self._fetch(query) or []
+            payload = self._fetch(query)
         except Exception as e:  # offline / endpoint down — be honest, don't invent
             log.warning("web search failed: %s", e)
             return ("I can't reach the internet right now, so I can't look that "
                     "up — I'll go on what I already know.")
-        if not results:
-            return f"I searched the web for {query} but didn't find anything useful."
-        snippets = []
-        for r in results[: self._max]:
-            title = str(r.get("title") or "").strip()
-            content = str(r.get("content") or r.get("snippet") or "").strip()
-            line = f"{title}: {content}" if title and content else (title or content)
-            if line:
-                snippets.append(line[:280])
+        snippets = self._summarize(payload)
         if not snippets:
-            return f"I found results for {query} but couldn't read them clearly."
+            return f"I searched the web for {query} but didn't find anything useful."
         return f"Web results for {query}: " + " | ".join(snippets)

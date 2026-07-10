@@ -205,7 +205,20 @@ class Zero:
                 "Language: if the person speaks Swahili, or mixes Swahili and "
                 "English (Sheng-style), reply in the same language or mix, "
                 "naturally. Never point out the switch — just flow with it.")
-        system_prompt = build_system_prompt(tool_block, lang_block)
+        # Only nudge toward the web when the tool actually exists this session,
+        # so the model never reaches for a tool it doesn't have.
+        web_block = ""
+        if (self.cfg.get("tools.websearch.enabled", False)
+                and self.tool_registry is not None
+                and self.tool_registry.get("web_search") is not None):
+            web_block = (
+                "Staying current: when you're unsure of a fact — especially "
+                "anything current like news, sports scores, release dates or "
+                "prices — use the web_search tool to check before answering, "
+                "rather than guessing or telling the person to look it up "
+                "themselves. Only say you don't know if the search comes back "
+                "empty.")
+        system_prompt = build_system_prompt(tool_block, lang_block, web_block)
         self.convo = Conversation(
             system_prompt=system_prompt,
             history_turns=self.cfg.get("llm.history_turns", 3),
