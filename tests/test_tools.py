@@ -211,6 +211,61 @@ def test_router_string_args_are_coerced_not_crashed():
                for m in llm.calls[-1])
 
 
+def test_router_uncertainty_rescue_searches_instead_of_shrugging():
+    # "Not in my knowledge base" -> the model admits it -> we search the web and
+    # answer from live results instead of speaking the shrug.
+    from zero.tools.websearch import WebSearchTool
+
+    reg, _, _ = _registry()
+    reg.register(WebSearchTool(
+        "http://x", fetch=lambda q: [{"title": "Wiki", "content": f"facts on {q}"}]))
+    llm = FakeLLM(
+        "I don't have that on the tip of my tongue, honestly.",   # the shrug
+        "Season 2 lands this October.",                            # the rescue
+    )
+    router = ToolAwareLLM(llm, reg)
+    out = _collect(router.stream(
+        [{"role": "user", "content": "when does Black Clover season 2 release"}]))
+    assert out == "Season 2 lands this October."
+    assert "tip of my tongue" not in out                 # shrug never spoken
+    # The rescue searched the USER's question.
+    assert any("black clover season 2" in str(m.get("content", "")).lower()
+               for m in llm.calls[-1])
+
+
+def test_router_no_rescue_for_statements_or_smalltalk():
+    from zero.tools.websearch import WebSearchTool
+
+    reg, _, _ = _registry()
+    reg.register(WebSearchTool("http://x", fetch=lambda q: [{"title": "X"}]))
+    llm = FakeLLM("I don't really know her, to be honest.")
+    router = ToolAwareLLM(llm, reg)
+    out = _collect(router.stream(
+        [{"role": "user", "content": "I met Maria at the market."}]))   # statement
+    assert out == "I don't really know her, to be honest."   # spoken, no search
+
+
+def test_router_embedded_tool_json_is_executed_not_spoken():
+    # The model wraps a tool call in chatter — the JSON must be executed and
+    # phrased, never read out loud.
+    from zero.tools.websearch import WebSearchTool
+
+    reg, _, _ = _registry()
+    reg.register(WebSearchTool(
+        "http://x", fetch=lambda q: [{"title": "ESPN", "content": "France 2-0"}]))
+    llm = FakeLLM(
+        'Let me check on that for you. '
+        '{"tool": "web_search", "args": {"query": "france morocco score"}}',
+        "France took it two-nil.",
+    )
+    router = ToolAwareLLM(llm, reg)
+    out = _collect(router.stream(
+        [{"role": "user", "content": "I wonder about that Morocco game."}]))
+    assert '{"tool"' not in out                       # JSON never spoken
+    assert "Let me check on that for you." in out     # natural lead-in kept
+    assert "France took it two-nil." in out           # phrased result spoken
+
+
 def test_router_bare_look_up_is_not_web_forced():
     # "look up" alone is ambiguous (memory recall) — must NOT force web search.
     from zero.tools.websearch import WebSearchTool

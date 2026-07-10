@@ -242,6 +242,7 @@ class Zero:
         self._last_id_key = None       # last identity note attached (dedup across turns)
         self._turn_durable_pid = None  # speaker to CREDIT durable memory this turn (or None)
         self._turn_speaker = None      # who spoke, for the corpus (real pid / guest / None)
+        self._turn_voice_emb = None    # unfamiliar voiceprint awaiting the quality gate
         self._session_log: list[tuple] = []  # (durable_pid, role, text) for per-person save
         self._corpus_log: list[tuple] = []    # (speaker, role, text) for training data
         self._welcomed: set[int] = set()  # people greeted "welcome back" this session
@@ -416,6 +417,10 @@ class Zero:
                     continue
                 self._maybe_remember(text)
                 self.convo.add_user(text)
+                # Text mode has no identity — turns are anonymous, but they must
+                # still reach the session/corpus logs or nothing gets persisted.
+                self._session_log.append((None, "user", text))
+                self._corpus_log.append((None, "user", text))
                 self._t_reply_start = time.monotonic()
                 parts, first = [], True
                 for chunk in self.llm.stream(self.convo.messages()):
@@ -427,6 +432,8 @@ class Zero:
                 if reply:
                     print(f"zero> {reply}\n")
                     self.convo.add_assistant(reply)
+                    self._session_log.append((None, "assistant", reply))
+                    self._corpus_log.append((None, "assistant", reply))
                 else:
                     print("zero> (no reply — see log; check the tunnel/model)\n")
                 self._maybe_compact()  # rolling summary keeps context bounded
@@ -670,10 +677,11 @@ class Zero:
                     if welcome:
                         self._turn_notes.append(welcome)
                 elif self.guests is not None:
-                    # An unfamiliar voice: cluster it into a provisional guest so
-                    # different strangers — and their training data — stay apart,
-                    # instead of collapsing into one anonymous blob.
-                    self._turn_speaker = self.guests.assign(voice_emb)
+                    # An unfamiliar voice: remember the voiceprint, but DON'T
+                    # mint a guest yet — the transcript isn't in, and noise /
+                    # STT hallucinations were creating phantom guests. The
+                    # quality-gated assignment happens after the text check.
+                    self._turn_voice_emb = voice_emb
                 # Diarization: notice when a DIFFERENT person takes over.
                 if self.speaker_tracker is not None:
                     change_note = self.speaker_tracker.update(
@@ -700,6 +708,15 @@ class Zero:
                 text = self.stt.transcribe(utterance, sr).strip()
             if not text:
                 continue  # misfire / noise — keep listening, stay in conversation
+
+            # Provisional guest — only now that the turn has PROVEN itself real:
+            # a transcript with substance, enough speech, enough level. Without
+            # these gates, silence hallucinations were minting phantom guests.
+            if (self._turn_speaker is None and self.guests is not None
+                    and getattr(self, "_turn_voice_emb", None) is not None
+                    and self._guest_worthy(utterance, text, sr)):
+                self._turn_speaker = self.guests.assign(self._turn_voice_emb)
+            self._turn_voice_emb = None
 
             # Erasure on request: "forget that" / "forget everything about me".
             forget = parse_forget_command(text)
@@ -818,8 +835,12 @@ class Zero:
             # Tag the turn with its (confident) speaker so end-of-session memory can
             # be split per person instead of lumped onto one owner; the corpus log
             # keeps the fuller speaker (incl. provisional guests) for training data.
-            self._session_log.append((self._turn_durable_pid, "user", text))
-            self._corpus_log.append((self._turn_speaker, "user", text))
+            # Privacy is PER TURN: a turn the guard says not to store never enters
+            # either log — so a bystander's words are never persisted, and one
+            # stranger at the end can't void a known person's whole session.
+            if self._memory_allowed:
+                self._session_log.append((self._turn_durable_pid, "user", text))
+                self._corpus_log.append((self._turn_speaker, "user", text))
             self._t_reply_start = time.monotonic()  # end-of-STT marker for timing
             # Fold in what ZERO currently sees as an EPHEMERAL note on THIS turn
             # only — the note + keyframes are attached to the outgoing copy of the
@@ -850,9 +871,11 @@ class Zero:
             # not "remember" saying sentences the user never heard.
             if reply:
                 self.convo.add_assistant(reply)
-                self._session_log.append(
-                    (self._turn_durable_pid, "assistant", reply))
-                self._corpus_log.append((self._turn_speaker, "assistant", reply))
+                if self._memory_allowed:
+                    self._session_log.append(
+                        (self._turn_durable_pid, "assistant", reply))
+                    self._corpus_log.append(
+                        (self._turn_speaker, "assistant", reply))
                 log.info("reply: %r", reply)
 
     # -- vision -------------------------------------------------------------
@@ -995,6 +1018,22 @@ class Zero:
             last["images"] = images  # THIS turn only — not stored in history
         return [*messages[:-1], last]
 
+    def _guest_worthy(self, utterance, text: str, sr: int) -> bool:
+        """Should this turn mint (or match) a provisional guest? Real speech
+        only: enough words, enough duration, enough level. Whisper hallucinates
+        plausible text from near-silence ('Obrigado', subtitle credits) — those
+        junk turns must not create phantom guests or pollute the corpus."""
+        if len(text.split()) < self.cfg.get("identity.guests.min_words", 2):
+            return False
+        dur_ms = 1000.0 * getattr(utterance, "size", 0) / max(1, sr)
+        if dur_ms < self.cfg.get("identity.guests.min_ms", 1200):
+            return False
+        import numpy as np
+
+        rms = float(np.sqrt(np.mean(np.square(
+            utterance.astype("float64"))))) * 32768.0
+        return rms >= self.cfg.get("identity.guests.min_rms", 150)
+
     # -- returning-person recall --------------------------------------------
     @staticmethod
     def _humanize_gap(seconds: float) -> str:
@@ -1104,25 +1143,36 @@ class Zero:
         word immediately instead of being deaf for seconds. The speaker log is
         snapshotted first — the next conversation may reset it while the save is
         still running."""
-        # Privacy gate covers BOTH durable memory and the training corpus: a
-        # session ZERO isn't allowed to remember is one it doesn't record.
+        # Privacy is enforced PER TURN at log time (a guarded stranger's words
+        # never entered these logs), so anything present here may be persisted.
         if ((self.memory is not None or self.corpus is not None)
-                and (self._session_log or self._corpus_log)
-                and getattr(self, "_memory_allowed", True)):
+                and (self._session_log or self._corpus_log)):
             session_log = list(self._session_log)
             corpus_log = list(self._corpus_log)
+            # Let a still-running previous save finish first — two concurrent
+            # savers could interleave corpus lines and double-consolidate.
+            prev = self._memory_thread
             self._memory_thread = threading.Thread(
-                target=self._persist_session, args=(session_log, corpus_log),
+                target=self._persist_session,
+                args=(session_log, corpus_log, prev),
                 name="memory-save", daemon=True,
             )
             self._memory_thread.start()
+        # Clear immediately so a mode without _converse's reset (text mode)
+        # can't re-save this session's turns at the next end.
+        self._session_log = []
+        self._corpus_log = []
         self._person = None  # identity does not persist across conversations
         self._to(State.IDLE)
 
-    def _persist_session(self, session_log: list, corpus_log: list) -> None:
+    def _persist_session(self, session_log: list, corpus_log: list,
+                         prev: threading.Thread | None = None) -> None:
         """Background: save this session's training corpus AND per-person memory.
-        The corpus write is cheap (file append) and runs first so a slow memory
-        pass can't lose the raw data."""
+        Waits for the previous session's save (if still running) so writers never
+        overlap; the corpus write is cheap (file append) and runs first so a slow
+        memory pass can't lose the raw data."""
+        if prev is not None and prev.is_alive():
+            prev.join(timeout=60.0)
         try:
             self._save_corpus(corpus_log)
         except Exception as e:  # corpus must never break the loop

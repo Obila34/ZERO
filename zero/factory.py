@@ -170,7 +170,7 @@ def build_tools(cfg: Config, llm: LLM, memory, events, context_provider=None):
         from zero.tools.websearch import WebSearchTool
 
         registry.register(WebSearchTool(
-            url=cfg.get("tools.websearch.url", "http://127.0.0.1:8888/search"),
+            url=cfg.get("tools.websearch.url", "http://127.0.0.1:8080/search"),
             timeout=cfg.get("tools.websearch.timeout_s", 8.0),
             max_results=cfg.get("tools.websearch.max_results", 3),
         ))

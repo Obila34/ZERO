@@ -21,6 +21,7 @@ isn't allowed to remember is a session it doesn't record.
 from __future__ import annotations
 
 import json
+import threading
 import time
 from pathlib import Path
 
@@ -34,6 +35,7 @@ class Corpus:
         self._dir = Path(path)
         self._dir.mkdir(parents=True, exist_ok=True)
         self._file = self._dir / "interactions.jsonl"
+        self._lock = threading.Lock()  # JSONL lines must never interleave
         log.info("interaction corpus at %s", self._file)
 
     @staticmethod
@@ -50,7 +52,7 @@ class Corpus:
         ``{"role", "text"}`` turns. Returns the number of records written."""
         now = time.time()
         written = 0
-        with self._file.open("a", encoding="utf-8") as f:
+        with self._lock, self._file.open("a", encoding="utf-8") as f:
             for speaker, turns in turns_by_speaker.items():
                 clean = [{"role": t["role"], "text": t["text"].strip()}
                          for t in turns if (t.get("text") or "").strip()]

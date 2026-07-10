@@ -102,8 +102,14 @@ class ResilientEmbedder:
                 return v
             self._failures += 1
             if self._failures == self._max:
-                log.warning("primary embedder failing — switching to %s",
-                            self._fallback.name)
+                model = getattr(self._primary, "model", "?")
+                log.warning(
+                    "primary embedder (%s, model=%s) failing — semantic recall "
+                    "degraded to %s for this session. A chat model can't serve "
+                    "/api/embeddings: pull a real embedding model (e.g. `ollama "
+                    "pull nomic-embed-text`) and set "
+                    "memory.embeddings.ollama_model to it.",
+                    self._primary.name, model, self._fallback.name)
         return self._fallback.embed(text)
 
 

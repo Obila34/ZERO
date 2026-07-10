@@ -84,6 +84,18 @@ def test_compaction_keeps_context_bounded():
     assert convo.pending_snapshot() is None
 
 
+def test_stale_summary_after_reset_is_dropped():
+    # Race: a background compaction finishes AFTER the conversation ended.
+    # Its summary belongs to the dead session and must not ghost into the new one.
+    convo = Conversation("s", history_turns=3, trim_at_turns=8)
+    _fill_turns(convo, 12)
+    _, covered = convo.pending_snapshot()
+    convo.reset()                                   # session ended mid-compaction
+    convo.apply_summary("GHOST OF OLD SESSION", covered)
+    assert "GHOST" not in convo.messages()[0]["content"]
+    assert convo.pending_snapshot() is None
+
+
 def test_reset_clears_summary_and_pending():
     convo = Conversation("s", history_turns=3, trim_at_turns=8)
     _fill_turns(convo, 20)

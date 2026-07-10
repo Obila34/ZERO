@@ -99,7 +99,10 @@ memory:
   # tunnel, with an offline hashing fallback so recall degrades, never breaks.
   embeddings:
     backend: auto # auto (ollama if llm.host set, else hash) | ollama | hash | off
-    ollama_model: # blank = reuse llm.model for /api/embeddings
+    # A DEDICATED embedding model — a chat model (gemma) can't serve
+    # /api/embeddings, which silently degraded recall to hash-matching.
+    # One-time setup on the GPU node:  ollama pull nomic-embed-text
+    ollama_model: nomic-embed-text
     hash_dim: 256 # fallback hashing-embedder dimension
   retrieval:
     top_k: 6 # memories surfaced per recall
@@ -241,6 +244,12 @@ identity:
     db_path: zero_guests.sqlite
     match_threshold: 0.55 # voice cosine to treat two utterances as the same guest
     max_guests: 50
+    # Quality gates — a turn must prove it's REAL speech before it can mint or
+    # match a guest. Whisper hallucinates plausible text from near-silence
+    # (subtitle credits, 'Obrigado'), and those were creating phantom guests.
+    min_words: 2 # transcript must have at least this many words
+    min_ms: 1200 # utterance must be at least this long
+    min_rms: 150 # ...and at least this loud (int16 RMS)
   session:
     voice_only: true
     # Durable memory (facts + the per-person last-conversation) is written for a

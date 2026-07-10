@@ -80,8 +80,15 @@ class Conversation:
     def apply_summary(self, new_summary: str, covered: list[Message]) -> None:
         """Install the rolling summary and drop the turns it now covers. Safe to
         call from a background thread. Turns trimmed AFTER the snapshot stay
-        pending for the next pass."""
+        pending for the next pass.
+
+        Stale-apply guard: if the conversation was reset while the summary was
+        being computed (session ended), ``covered`` no longer matches the head of
+        ``_pending`` — the summary belongs to a dead conversation and is dropped,
+        so an old session can never ghost into a fresh one."""
         with self._lock:
+            if self._pending[:len(covered)] != covered:
+                return  # conversation moved on (reset) — stale summary, drop it
             self._running_summary = (new_summary or "").strip()
             self._pending = self._pending[len(covered):]
 

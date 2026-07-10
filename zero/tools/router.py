@@ -60,6 +60,18 @@ _LIVE_SIGNAL = re.compile(
     r"release\s+date|comes?\s+out|premieres?|out\s+yet|"
     r"latest|current(?:ly)?|price|costs?|news|headlines?|happened|results?|"
     r"weather|forecast|stock|20(?:2[4-9]|3\d))\b", re.IGNORECASE)
+# The reply-side safety net ("uncertainty rescue"): the persona instructs the
+# model to admit not knowing in recognisable phrasings. If a reply to a QUESTION
+# opens with one of these, we suppress it, web-search the question instead, and
+# answer from live results — that's "not in my knowledge base -> search" driven
+# by the model's own admission, no keyword list required.
+_UNSURE_RE = re.compile(
+    r"\b(?:i\s+(?:honestly\s+|really\s+)?(?:don'?t|do\s+not)\s+"
+    r"(?:know|have|recall|remember)|i'?m\s+not\s+(?:really\s+)?sure|"
+    r"tip\s+of\s+my\s+tongue|i\s+have\s+no\s+idea|i\s+wish\s+i\s+(?:knew|could))",
+    re.IGNORECASE)
+_RESCUE_SNIFF_CHARS = 120   # how much of the reply to inspect before giving up
+_JSON_MARKER = '{"tool'     # an embedded tool call inside spoken prose
 
 
 class ToolAwareLLM:
@@ -97,29 +109,121 @@ class ToolAwareLLM:
             return
 
         # Tier 2/3: stream and sniff for a JSON tool call.
+        # While the reply still *could* be an admission of not knowing, hold it
+        # back (up to _RESCUE_SNIFF_CHARS) — if it opens with "I don't know...",
+        # we search the web instead of speaking the shrug.
+        rescue_armed = self._rescue_armed(user_text)
         stream = self._llm.stream(messages)
         buffered = ""
         for chunk in stream:
             buffered += chunk
             probe = buffered.lstrip()
             if probe and not probe.startswith("{"):
-                # Plain chat: flush what we held, then pass through.
-                yield buffered
-                yield from stream
+                # Prose. Uncertainty rescue: an "I don't know" opener to a real
+                # question becomes a web search, not a spoken shrug.
+                if rescue_armed and _UNSURE_RE.search(probe):
+                    self._close(stream)
+                    log.info("uncertainty rescue -> web_search(%r)",
+                             user_text[:80])
+                    yield from self._run_and_rephrase(
+                        messages, "",
+                        {"tool": "web_search",
+                         "args": {"query": user_text.strip(" ?.!,")}})
+                    return
+                if rescue_armed and len(probe) < _RESCUE_SNIFF_CHARS:
+                    continue  # keep holding until we're sure it's not a shrug
+                # Plain chat: flush what we held, then pass through (guarding
+                # against a tool call embedded mid-prose).
+                yield from self._passthrough(buffered, stream, messages)
                 return
             if len(probe) >= _SNIFF_CHARS and '"tool"' not in probe[:_SNIFF_CHARS]:
-                yield buffered
-                yield from stream
+                yield from self._passthrough(buffered, stream, messages)
                 return
-        # Stream ended while still '{'-shaped: try the tool path.
+        # Stream ended while still held: last chance for both rescues.
         reply = buffered.strip()
         if not reply:
+            return
+        if not reply.lstrip().startswith("{"):
+            if rescue_armed and _UNSURE_RE.search(reply):
+                log.info("uncertainty rescue (full reply) -> web_search(%r)",
+                         user_text[:80])
+                yield from self._run_and_rephrase(
+                    messages, "",
+                    {"tool": "web_search",
+                     "args": {"query": user_text.strip(" ?.!,")}})
+                return
+            yield from self._passthrough(reply, iter(()), messages)
             return
         call = self._parse_call(reply)
         if call is None:
             yield buffered  # malformed JSON — speak it rather than go mute
             return
         yield from self._run_and_rephrase(messages, reply, call)
+
+    def _rescue_armed(self, user_text: str) -> bool:
+        """Uncertainty rescue only makes sense for a substantive QUESTION when
+        the web tool exists — never for smalltalk or statements."""
+        if not user_text or self._registry.get("web_search") is None:
+            return False
+        if len(user_text.split()) < 3:
+            return False
+        return (user_text.strip().endswith("?")
+                or bool(_Q_SHAPE.search(user_text)))
+
+    @staticmethod
+    def _close(stream) -> None:
+        close = getattr(stream, "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception:
+                pass
+
+    def _passthrough(self, prefix: str, stream, messages):
+        """Yield prose to the speaker, but watch for a tool call EMBEDDED
+        mid-reply ('Let me check. {"tool": ...}') — the model does this and the
+        raw JSON used to be spoken aloud. Everything before the marker is
+        spoken; the call is executed and its result phrased instead of read."""
+        pending = prefix
+
+        def feed(text: str):
+            nonlocal pending
+            pending += text
+            marker = pending.find(_JSON_MARKER)
+            if marker >= 0:
+                return pending[:marker], True
+            # Hold back a tail that could be the start of a split marker.
+            safe = len(pending) - (len(_JSON_MARKER) - 1)
+            out, keep = (pending[:safe], pending[safe:]) if safe > 0 else ("", pending)
+            pending = keep
+            return out, False
+
+        out, hit = feed("")
+        if not hit:
+            if out:
+                yield out
+            for chunk in stream:
+                out, hit = feed(chunk)
+                if hit:
+                    break
+                if out:
+                    yield out
+        if not hit:
+            if pending:
+                yield pending
+            return
+        # Tool call mid-prose: speak the lead-in, run the call, phrase result.
+        lead_in = out
+        if lead_in.strip():
+            yield lead_in
+        rest = pending[pending.find(_JSON_MARKER):] + "".join(stream)
+        call = self._parse_call(rest)
+        if call is None:
+            log.debug("embedded tool-ish text was malformed; dropped: %r",
+                      rest[:80])
+            return
+        log.info("embedded tool call rescued: %s", call.get("tool"))
+        yield from self._run_and_rephrase(messages, lead_in, call)
 
     # ── helpers ───────────────────────────────────────────────────────────────
     @staticmethod
@@ -226,8 +330,12 @@ class ToolAwareLLM:
             *messages,
             {"role": "assistant", "content": raw_reply},
             {"role": "user", "content":
-                f"(Tool result: {result}) Tell the user this outcome in one "
-                "natural sentence. Do not mention tools or JSON."},
+                f"(Tool result: {result}) State the answer to the user "
+                "directly, in one or two spoken sentences. Never narrate the "
+                "process — no 'querying', 'searching', 'I looked it up', "
+                "'results say', 'it looks like' — and never mention tools, "
+                "sources or JSON. If the result doesn't actually answer the "
+                "question, say plainly that you couldn't find it."},
         ]
         spoke = False
         for chunk in self._llm.stream(followup):
