@@ -211,7 +211,13 @@ class Zero:
         if (self.cfg.get("tools.websearch.enabled", False)
                 and self.tool_registry is not None
                 and self.tool_registry.get("web_search") is not None):
+            import datetime as _dt
+
+            today = _dt.date.today().strftime("%A, %B %d, %Y")
             web_block = (
+                f"Today's date is {today} — use it to resolve 'today', "
+                "'this year', 'yesterday' and the like; don't ask the person "
+                "which year they mean.\n"
                 "Staying current: when you're unsure of a fact — especially "
                 "anything current like news, sports scores, release dates or "
                 "prices — use the web_search tool to check before answering, "

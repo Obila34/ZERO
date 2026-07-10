@@ -42,9 +42,24 @@ _T1_TIME = re.compile(
 # command. Deliberately narrow: bare "look up" is left OUT (it's ambiguous with
 # recalling from memory); only web/internet/online/google count.
 _WEBSEARCH_RE = re.compile(
-    r"\b(?:search(?:\s+the)?\s+(?:web|internet|online)|google)\b"
+    r"\b(?:search(?:\s+(?:the|on|from|through))?\s+(?:the\s+)?(?:web|internet|online)"
+    r"|google|look\s+.+\s+up\s+online)\b"
     r"\s*(?:for|about)?\s*(?P<q>.*)$",
     re.IGNORECASE)
+# A QUESTION that plainly needs LIVE information — force a web search so ZERO
+# answers from the internet instead of stale training data or a deflection, WITHOUT
+# the user saying "search". Requires a factual signal (a score, a release, a price,
+# a recent year...) on top of question shape, so casual talk ("how are you today")
+# never triggers a search.
+_Q_SHAPE = re.compile(
+    r"^\s*(?:who|what|whats|when|where|which|whose|how|is|are|was|were|did|"
+    r"does|do|has|have|will)\b", re.IGNORECASE)
+_LIVE_SIGNAL = re.compile(
+    r"\b(won|win|winning|winner|scored?|finals?|semi[- ]?finals?|"
+    r"quarter[- ]?finals?|standings?|schedule|fixtures?|playing|"
+    r"release\s+date|comes?\s+out|premieres?|out\s+yet|"
+    r"latest|current(?:ly)?|price|costs?|news|headlines?|happened|results?|"
+    r"weather|forecast|stock|20(?:2[4-9]|3\d))\b", re.IGNORECASE)
 
 
 class ToolAwareLLM:
@@ -70,13 +85,13 @@ class ToolAwareLLM:
             yield t1
             return
 
-        # Explicit web-search request -> force the web tool, then let the LLM
-        # phrase the result. Without this the model tends to fall through to a
-        # memory tool and dead-end on "I don't have that info" for an obvious
-        # "search the web" ask.
-        wq = self._forced_websearch(user_text)
+        # Web search, forced two ways so the model's flaky tool-calling isn't in
+        # the loop: an EXPLICIT "search the web for X", or a live-info QUESTION
+        # ("who won...", "when does X release") that plainly needs the internet.
+        # Either way we run the tool and let the LLM phrase the result.
+        wq = self._forced_websearch(user_text) or self._auto_websearch(user_text)
         if wq is not None:
-            log.info("forced web_search: %r", wq[:80])
+            log.info("web_search (query=%r)", wq[:80])
             yield from self._run_and_rephrase(
                 messages, "", {"tool": "web_search", "args": {"query": wq}})
             return
@@ -153,6 +168,18 @@ class ToolAwareLLM:
         q = q.strip(" ?.!,\"'")
         return q if len(q) >= 3 else None
 
+    def _auto_websearch(self, text: str) -> str | None:
+        """The query to look up when the utterance is a QUESTION that clearly
+        needs live information (scores, releases, prices, current events) — so the
+        user never has to say 'search the web' for those. None otherwise, or when
+        the web tool isn't available."""
+        if not text or self._registry.get("web_search") is None:
+            return None
+        is_question = text.strip().endswith("?") or bool(_Q_SHAPE.search(text))
+        if is_question and _LIVE_SIGNAL.search(text):
+            return text.strip(" ?.!,")
+        return None
+
     @staticmethod
     def _parse_call(reply: str) -> dict | None:
         # Tolerate code fences and trailing prose after the JSON line.
@@ -183,7 +210,16 @@ class ToolAwareLLM:
         if tool is None:
             result = f"I don't have a tool called {name}."
         else:
-            result = tool.safe_run(call.get("args") or {}, self._ctx())
+            # The model sometimes emits "args" as a bare string (the query)
+            # instead of an object — coerce it so args.get() never explodes.
+            raw_args = call.get("args")
+            if isinstance(raw_args, dict):
+                args = raw_args
+            elif isinstance(raw_args, str):
+                args = {"query": raw_args}
+            else:
+                args = {}
+            result = tool.safe_run(args, self._ctx())
             log.info("tool %s -> %r", name, result[:100])
         # Second pass: let the model phrase the outcome in its own voice.
         followup = [

@@ -161,6 +161,56 @@ def test_router_websearch_falls_through_without_the_tool():
     assert out == "I can't reach the web right now."   # normal LLM path, no crash
 
 
+def test_router_auto_searches_live_question_without_keyword():
+    # "who won ..." needs live info -> search WITHOUT the user saying "search".
+    from zero.tools.websearch import WebSearchTool
+
+    reg, _, _ = _registry()
+    reg.register(WebSearchTool(
+        "http://x", fetch=lambda q: [{"title": "ESPN", "content": f"result for {q}"}]))
+    llm = FakeLLM("France beat Morocco two-nil.")
+    router = ToolAwareLLM(llm, reg)
+    out = _collect(router.stream(
+        [{"role": "user", "content": "who won the Morocco France game yesterday?"}]))
+    assert out == "France beat Morocco two-nil."
+    assert any("morocco france game" in str(m.get("content", "")).lower()
+               for m in llm.calls[-1])
+
+
+@pytest.mark.parametrize("text", [
+    "how are you today?",
+    "what's your name?",
+    "do you like music?",
+    "how was your day",
+])
+def test_router_casual_questions_dont_auto_search(text):
+    from zero.tools.websearch import WebSearchTool
+
+    reg, _, _ = _registry()
+    reg.register(WebSearchTool("http://x", fetch=lambda q: [{"title": "X"}]))
+    llm = FakeLLM("Just chatting along.")
+    router = ToolAwareLLM(llm, reg)
+    out = _collect(router.stream([{"role": "user", "content": text}]))
+    assert out == "Just chatting along."     # plain chat, no forced search
+
+
+def test_router_string_args_are_coerced_not_crashed():
+    # Regression: the model emitted {"tool":"web_search","args":"messi goals"} —
+    # args.get() on a bare string raised "'str' object has no attribute 'get'".
+    from zero.tools.websearch import WebSearchTool
+
+    reg, _, _ = _registry()
+    reg.register(WebSearchTool(
+        "http://x", fetch=lambda q: [{"title": "T", "content": f"re {q}"}]))
+    llm = FakeLLM('{"tool": "web_search", "args": "messi world cup goals"}',
+                  "Messi has plenty of them.")
+    router = ToolAwareLLM(llm, reg)
+    out = _collect(router.stream([{"role": "user", "content": "tell me about messi"}]))
+    assert out == "Messi has plenty of them."     # no crash, rephrased result
+    assert any("messi world cup goals" in str(m.get("content", "")).lower()
+               for m in llm.calls[-1])
+
+
 def test_router_bare_look_up_is_not_web_forced():
     # "look up" alone is ambiguous (memory recall) — must NOT force web search.
     from zero.tools.websearch import WebSearchTool

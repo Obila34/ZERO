@@ -74,6 +74,12 @@ class WebSearchTool(Tool):
         return lines[: self._max]
 
     def run(self, args: dict, ctx: ToolContext) -> str:
+        # Be forgiving about how args arrive: the model may pass the query as a
+        # bare string rather than {"query": ...}.
+        if isinstance(args, str):
+            args = {"query": args}
+        elif not isinstance(args, dict):
+            args = {}
         query = str(args.get("query", "") or "").strip()
         if not query:
             return "I didn't catch what to search for."
