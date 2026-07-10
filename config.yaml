@@ -211,7 +211,7 @@ tools:
   # ZERO's own voice, and if the endpoint is unreachable it says so rather than
   # inventing an answer. Off by default until you have an endpoint reachable.
   websearch:
-    enabled: false
+    enabled: true
     url: http://127.0.0.1:8888/search
     timeout_s: 8.0
     max_results: 3
