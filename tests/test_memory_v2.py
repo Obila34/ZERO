@@ -152,6 +152,54 @@ def test_forget_person(tmp_path):
     assert m.search("drink", person_id=2)
 
 
+# ── durable per-person last conversation (never forgotten) ───────────────────
+def test_last_conversation_upserts_one_per_person(tmp_path):
+    m = _mem(tmp_path)
+    m.set_last_conversation(1, "We planned the garden.")
+    m.set_last_conversation(1, "We planned the garden and picked tomatoes.")
+    got = m.last_conversation(1)
+    assert got is not None and "tomatoes" in got[0]
+    n = m._db.execute(
+        "SELECT COUNT(*) FROM memories WHERE key='__last_convo__' AND person_id=1"
+    ).fetchone()[0]
+    assert n == 1                                   # updated in place, not duplicated
+    assert m.last_conversation(2) is None
+    m.set_last_conversation(None, "anon")           # anonymous chats: no-op
+    assert m._db.execute(
+        "SELECT COUNT(*) FROM memories WHERE key='__last_convo__' "
+        "AND person_id IS NULL").fetchone()[0] == 0
+
+
+def test_last_conversation_survives_forgetting_and_cap(tmp_path):
+    m = _mem(tmp_path, forget_max_age_days=1.0, max_stored_episodes=3)
+    m.set_last_conversation(7, "The important thing we discussed.")
+    # Age it far past the forgetting cutoff...
+    old = time.time() - 100 * 86400
+    m._db.execute("UPDATE memories SET last_access=?, created_at=?", (old, old))
+    m._db.commit()
+    # ...and pile on episodes to trip the episodic storage cap.
+    for i in range(6):
+        m.add_episode(f"filler episode {i}", person_id=7)
+    m.consolidate()
+    assert m.last_conversation(7) is not None        # protected: never pruned/faded
+    assert "important" in m.last_conversation(7)[0]
+
+
+def test_recent_episodes_person_scoped_excludes_last_convo(tmp_path):
+    m = _mem(tmp_path)
+    m.add_episode("David and I talked gardening.", person_id=1)
+    m.add_episode("Jane and I talked cars.", person_id=2)
+    m.set_last_conversation(1, "David's durable last chat.")
+    davids = m.recent_episodes(person_id=1)
+    assert any("gardening" in e for e in davids)
+    assert not any("cars" in e for e in davids)             # Jane's stays hers
+    assert not any("durable last chat" in e for e in davids)  # reserved row excluded
+    # Global recall still works and also excludes the reserved row.
+    all_ep = m.recent_episodes(n=10)
+    assert any("gardening" in e for e in all_ep) and any("cars" in e for e in all_ep)
+    assert not any("durable" in e for e in all_ep)
+
+
 # ── embedders ────────────────────────────────────────────────────────────────
 def test_hash_embedder_properties():
     e = HashEmbedder(128)

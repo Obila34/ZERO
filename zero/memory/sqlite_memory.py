@@ -38,6 +38,11 @@ log = get_logger("memory")
 LAYERS = ("semantic", "episodic", "procedural")
 _DAY = 86400.0
 
+# Reserved episodic key for the durable, never-forgotten "last time we spoke"
+# record — one per person, updated in place, exempt from decay/age-out/caps so a
+# returning person is always greeted with what you last discussed.
+LAST_CONVO_KEY = "__last_convo__"
+
 
 class SqliteMemory:
     def __init__(self, path: str, max_facts: int = 30, recent_episodes: int = 3,
@@ -62,16 +67,26 @@ class SqliteMemory:
             "id INTEGER PRIMARY KEY AUTOINCREMENT, "
             "person_id INTEGER, layer TEXT, key TEXT, value TEXT, "
             "importance REAL DEFAULT 5.0, emb BLOB, emb_dim INTEGER, "
-            "created_at REAL, last_access REAL, access_count INTEGER DEFAULT 0)"
+            "created_at REAL, last_access REAL, access_count INTEGER DEFAULT 0, "
+            "protected INTEGER DEFAULT 0)"
         )
         self._db.execute(
             "CREATE INDEX IF NOT EXISTS idx_mem_layer ON memories(layer, person_id)"
         )
         self._db.commit()
+        self._ensure_column("protected", "INTEGER DEFAULT 0")  # older DBs
         self._migrate_legacy()
         log.info("memory store ready (%s, %d facts, %d episodes, embed=%s)",
                  path, self.count(), self.episode_count(),
                  getattr(embedder, "name", None) or "off")
+
+    def _ensure_column(self, name: str, decl: str) -> None:
+        """Add a column to an already-existing DB (no-op if it's already there)."""
+        cols = {r[1] for r in self._db.execute("PRAGMA table_info(memories)")}
+        if name not in cols:
+            self._db.execute(f"ALTER TABLE memories ADD COLUMN {name} {decl}")
+            self._db.commit()
+            log.info("migrated memory schema: added column %s", name)
 
     # ── legacy migration ─────────────────────────────────────────────────────
     def _migrate_legacy(self) -> None:
@@ -114,8 +129,10 @@ class SqliteMemory:
         return v.astype(np.float32).tobytes(), int(v.size)
 
     def _prune_layer(self, layer: str, cap: int) -> None:
+        # Protected rows (the durable per-person last-conversation) are never
+        # pruned by the storage cap.
         self._db.execute(
-            "DELETE FROM memories WHERE layer=? AND id NOT IN ("
+            "DELETE FROM memories WHERE layer=? AND protected=0 AND id NOT IN ("
             "SELECT id FROM memories WHERE layer=? "
             "ORDER BY last_access DESC LIMIT ?)",
             (layer, layer, cap))
@@ -172,6 +189,47 @@ class SqliteMemory:
         procedural layer, high importance, injected into the system prompt."""
         self.remember(f"pref: {text.strip().lower()[:50]}", text,
                       person_id=person_id, importance=8.0, layer="procedural")
+
+    def set_last_conversation(self, person_id: int | None, summary: str) -> None:
+        """Durable 'last time we spoke' record — ONE per person, updated in place.
+        Marked protected, so it survives decay, age-out and the episodic cap: a
+        person returning after years is still greeted with what you last
+        discussed. No-op without a person_id (anonymous chats aren't attributed)."""
+        if person_id is None:
+            return
+        summary = (summary or "").strip()[:300]
+        if not summary:
+            return
+        emb, dim = self._embed(summary)
+        now = time.time()
+        row = self._db.execute(
+            "SELECT id FROM memories WHERE layer='episodic' AND key=? AND "
+            "person_id IS ?", (LAST_CONVO_KEY, person_id)).fetchone()
+        if row:
+            self._db.execute(
+                "UPDATE memories SET value=?, emb=?, emb_dim=?, created_at=?, "
+                "last_access=?, importance=9.0, protected=1 WHERE id=?",
+                (summary, emb, dim, now, now, row[0]))
+        else:
+            self._db.execute(
+                "INSERT INTO memories(person_id, layer, key, value, importance, "
+                "emb, emb_dim, created_at, last_access, protected) VALUES(?,"
+                "'episodic',?,?,9.0,?,?,?,?,1)",
+                (person_id, LAST_CONVO_KEY, summary, emb, dim, now, now))
+        self._db.commit()
+        log.info("last-conversation saved for person %s: %s", person_id, summary)
+
+    def last_conversation(self, person_id: int | None) -> tuple[str, float] | None:
+        """(summary, when_epoch) of the last conversation with this person, or
+        None. Reconsolidates on access (recalling it refreshes recency)."""
+        if person_id is None:
+            return None
+        row = self._db.execute(
+            "SELECT id, value, created_at FROM memories WHERE layer='episodic' "
+            "AND key=? AND person_id IS ?", (LAST_CONVO_KEY, person_id)).fetchone()
+        if row is None:
+            return None
+        return row[1], row[2]
 
     # ── recall ───────────────────────────────────────────────────────────────
     def _activation(self, query_vec, query: str, row, now: float) -> float:
@@ -252,13 +310,24 @@ class SqliteMemory:
             (person_id, self.max_facts)).fetchall()
         return {k: v for k, v in rows}
 
-    def recent_episodes(self, n: int | None = None) -> list[str]:
+    def recent_episodes(self, n: int | None = None,
+                        person_id: int | None = None) -> list[str]:
+        """The last ``n`` conversation-arc summaries. Person-scoped when a
+        person_id is given (so a returning person gets THEIR history, not
+        whoever spoke last), global otherwise. The durable last-conversation
+        record is excluded — it's surfaced separately as a welcome-back."""
         n = self.recent_episodes_n if n is None else n
         if n <= 0:
             return []
+        where = "layer='episodic' AND key != ?"
+        args: list = [LAST_CONVO_KEY]
+        if person_id is not None:
+            where += " AND person_id IS ?"
+            args.append(person_id)
+        args.append(n)
         rows = self._db.execute(
-            "SELECT value FROM memories WHERE layer='episodic' "
-            "ORDER BY created_at DESC LIMIT ?", (n,)).fetchall()
+            f"SELECT value FROM memories WHERE {where} "
+            "ORDER BY created_at DESC LIMIT ?", args).fetchall()
         return [r[0] for r in reversed(rows)]
 
     def preferences(self, person_id: int | None = None) -> list[str]:
@@ -279,7 +348,7 @@ class SqliteMemory:
                 "What you remember about the user from past chats (use it "
                 "naturally, don't recite it back):\n"
                 + "\n".join(f"- {t}" for t in top))
-        episodes = self.recent_episodes()
+        episodes = self.recent_episodes(person_id=person_id)
         if episodes:
             parts.append(
                 "Recent conversations you've had with them (so you can pick up "
@@ -306,8 +375,9 @@ class SqliteMemory:
             cutoff = now - self.forget_max_age_s
             rows = self._db.execute(
                 "SELECT id FROM memories WHERE layer != 'procedural' AND "
-                "importance < 6 AND access_count <= 1 AND last_access < ? "
-                "ORDER BY last_access ASC LIMIT 10", (cutoff,)).fetchall()
+                "protected = 0 AND importance < 6 AND access_count <= 1 AND "
+                "last_access < ? ORDER BY last_access ASC LIMIT 10",
+                (cutoff,)).fetchall()
             if rows:
                 self._db.executemany("DELETE FROM memories WHERE id=?", rows)
                 self._db.commit()

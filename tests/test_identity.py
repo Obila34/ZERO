@@ -208,3 +208,51 @@ def test_service_stranger_when_nothing_sensed(registry):
 def test_service_requires_a_channel(registry):
     with pytest.raises(ValueError):
         IdentityService(registry, IdentityFuser())
+
+
+# ── voice-owned session tracking (identify_speaker) ──────────────────────────
+def test_identify_speaker_attributes_by_voice(registry):
+    dv, df = _unit(30), _unit(31)
+    svc = IdentityService(registry, IdentityFuser(),
+                          voice_embedder=_FakeVoice(dv),
+                          face_recognizer=_FakeFace(df))
+    audio = np.ones(1600, dtype=np.int16)
+    frame = np.zeros((4, 4, 3), dtype=np.uint8)
+    svc.enroll("David", audio=audio, frame_rgb=frame)
+    speaker, face_name = svc.identify_speaker(audio=audio, frame_rgb=frame)
+    assert speaker.is_known and speaker.name == "David" and speaker.via == "voice"
+    assert face_name == "David"
+
+
+def test_identify_speaker_voice_unknown_is_anonymous_face_still_seen(registry):
+    # David is enrolled on both channels. A DIFFERENT voice speaks while David's
+    # face is on camera: the session is anonymous (voice owns it), but the face
+    # is still recognised for the "I can see you" note.
+    dv, df = _unit(40), _unit(41)
+    voice = _FakeVoice(dv)
+    svc = IdentityService(registry, IdentityFuser(),
+                          voice_embedder=voice, face_recognizer=_FakeFace(df))
+    audio = np.ones(1600, dtype=np.int16)
+    frame = np.zeros((4, 4, 3), dtype=np.uint8)
+    svc.enroll("David", audio=audio, frame_rgb=frame)
+    voice.vec = _unit(999)  # an unrecognised voice takes the turn
+    speaker, face_name = svc.identify_speaker(audio=audio, frame_rgb=frame)
+    assert not speaker.is_known     # anonymous — the voice didn't match
+    assert face_name == "David"     # face still recognised (perception only)
+
+
+def test_identify_speaker_handover_switches_person(registry):
+    dv, jv = _unit(50), _unit(51)
+    d = registry.enroll("David")
+    registry.add_embedding(d, "voice", dv)
+    j = registry.enroll("Jane")
+    registry.add_embedding(j, "voice", jv)
+    voice = _FakeVoice(dv)
+    svc = IdentityService(registry, IdentityFuser(),
+                          voice_embedder=voice, face_recognizer=None)
+    audio = np.ones(1600, dtype=np.int16)
+    first, _ = svc.identify_speaker(audio=audio)
+    assert first.name == "David"
+    voice.vec = jv                  # a different enrolled voice takes over
+    second, _ = svc.identify_speaker(audio=audio)
+    assert second.name == "Jane" and second.person_id != first.person_id

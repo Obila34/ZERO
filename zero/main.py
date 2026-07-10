@@ -217,6 +217,10 @@ class Zero:
         self._mood = MoodTracker()     # cross-turn emotional state
         self._stt_lock = threading.Lock()  # serialize speculative vs final STT
         self._memory_thread: threading.Thread | None = None  # background fact save
+        self._summary_thread: threading.Thread | None = None  # rolling compaction
+        self._face_name = None         # who the camera recognises (log/perception only)
+        self._session_people: dict[int, int] = {}  # person_id -> turns, this session
+        self._welcomed: set[int] = set()  # people greeted "welcome back" this session
 
         # Voice-only extras (need the voice/mic): owner verification + spoken fillers.
         self._filler_prob = self.cfg.get("conversation.filler_probability", 0.5)
@@ -396,6 +400,7 @@ class Zero:
                     self.convo.add_assistant(reply)
                 else:
                     print("zero> (no reply — see log; check the tunnel/model)\n")
+                self._maybe_compact()  # rolling summary keeps context bounded
         except KeyboardInterrupt:
             print()
         self._end_conversation()
@@ -485,12 +490,16 @@ class Zero:
             self.speaker_tracker.reset()   # a new conversation, a clean slate
         self._mood.reset()
         self._was_interrupted = False  # a stale note must not leak across chats
+        self._face_name = None
+        self._session_people = {}      # who took part (by voice) this session
+        self._welcomed = set()         # welcome-back fires once per person
         sr = self.cfg.get("audio.sample_rate", 16000)
         idle_s = self.cfg.get("conversation.sleep_timeout_ms", 30000) / 1000.0
         log.info("conversation open — just talk (say 'goodbye' to stop)")
 
         while True:
             self._drain_events()  # timers/reminders land at turn boundaries
+            self._maybe_compact()  # fold trimmed turns into a rolling summary
             self._to(State.LISTENING)
             self.mic.resume()  # re-open the mic for the user's turn
             # On a speech barge-in the interrupting words were already captured —
@@ -600,8 +609,26 @@ class Zero:
                     "(You were interrupted mid-sentence a moment ago — don't "
                     "restart the old answer; just respond to what they say now.)")
             if self.identity is not None:
-                ident = self.identity.identify(audio=utterance, frame_rgb=frame)
+                # Sessions are owned by VOICE — the speaker's voice decides whose
+                # memories this turn belongs to; the face is perception only.
+                # (voice_only: false restores the legacy face+voice fusion.)
+                if self.cfg.get("identity.session.voice_only", True):
+                    ident, face_name = self.identity.identify_speaker(
+                        audio=utterance, frame_rgb=frame)
+                else:
+                    ident = self.identity.identify(audio=utterance, frame_rgb=frame)
+                    face_name = (ident.name if ident.is_known
+                                 and "face" in ident.via else None)
                 self._person = ident if ident.is_known else None
+                self._face_name = face_name
+                if ident.is_known:
+                    # Track participation (for the per-person "last conversation"
+                    # written at the end) and welcome a known voice back once.
+                    self._session_people[ident.person_id] = (
+                        self._session_people.get(ident.person_id, 0) + 1)
+                    welcome = self._welcome_back_note(ident)
+                    if welcome:
+                        self._turn_notes.append(welcome)
                 # Diarization: notice when a DIFFERENT person takes over.
                 if self.speaker_tracker is not None:
                     change_note = self.speaker_tracker.update(
@@ -821,15 +848,16 @@ class Zero:
                 person_present = None
 
         # Identity note — only claim to SEE someone when their FACE is in the
-        # current frame. Voice-only recognition (they're talking off-camera)
+        # current frame (perception, so it's face-driven and independent of who
+        # OWNS the session). Voice-only recognition (they're talking off-camera)
         # must NOT let ZERO claim it can see them.
         id_note = ""
-        if ident is not None and ident.is_known:
-            if "face" in ident.via:
-                id_note = f"(You can see {ident.name} — you recognise their face.)"
-            else:
-                id_note = (f"(You recognise {ident.name}'s voice, but you can't "
-                           "see their face in the camera right now.)")
+        face_name = getattr(self, "_face_name", None)
+        if face_name:
+            id_note = f"(You can see {face_name} — you recognise their face.)"
+        elif ident is not None and ident.is_known:
+            id_note = (f"(You recognise {ident.name}'s voice, but you can't "
+                       "see their face in the camera right now.)")
 
         # Decisive presence fact so "can you see me?" is answered from reality.
         presence_note = ""
@@ -897,6 +925,48 @@ class Zero:
             last["images"] = images  # THIS turn only — not stored in history
         return [*messages[:-1], last]
 
+    # -- returning-person recall --------------------------------------------
+    @staticmethod
+    def _humanize_gap(seconds: float) -> str:
+        """A natural 'how long since' phrase for the welcome-back note."""
+        d = max(0.0, seconds) / 86400.0
+        if d < 0.5:
+            return "earlier today"
+        if d < 1.5:
+            return "yesterday"
+        if d < 10:
+            return f"{round(d)} days ago"
+        if d < 45:
+            return f"about {max(1, round(d / 7))} weeks ago"
+        if d < 350:
+            return f"about {max(1, round(d / 30))} months ago"
+        years = d / 365.0
+        return "about a year ago" if years < 1.5 else f"about {round(years)} years ago"
+
+    def _welcome_back_note(self, ident) -> str:
+        """One-time 'welcome back' the first time a known voice is heard this
+        conversation: surfaces the durable last-conversation record so ZERO picks
+        up where it left off — even after years. '' when there's nothing to say."""
+        if (self.memory is None
+                or not self.cfg.get("memory.last_conversation.enabled", True)):
+            return ""
+        pid = ident.person_id
+        if pid in self._welcomed:
+            return ""
+        self._welcomed.add(pid)  # fire once per person, even if there's no record
+        try:
+            last = self.memory.last_conversation(pid)
+        except Exception as e:  # recall must never break a turn
+            log.debug("last-conversation lookup failed: %s", e)
+            return ""
+        if not last:
+            return ""
+        summary, when = last
+        gap = self._humanize_gap(time.time() - (when or time.time()))
+        return (f"(You've spoken with {ident.name} before. Last time ({gap}) you "
+                f"talked about: {summary} Greet them like you remember them, and "
+                "pick that thread back up if it fits — naturally, don't recite it.)")
+
     # -- long-term memory ---------------------------------------------------
     def _maybe_remember(self, text: str) -> None:
         """Explicit 'remember that ...' — store immediately so it survives even if
@@ -913,6 +983,51 @@ class Zero:
                                          person_id=pid, importance=7.0)
                 return
 
+    # -- in-session compaction ----------------------------------------------
+    def _maybe_compact(self) -> None:
+        """Fold trimmed-away turns into a rolling summary on a background thread,
+        so a long session's context stays small (bounded KV cache) instead of the
+        shared GPU filling up. Single-flight; the summariser easily keeps pace
+        with the occasional trim."""
+        if not self.cfg.get("conversation.compaction.enabled", True):
+            return
+        if self._summary_thread is not None and self._summary_thread.is_alive():
+            return
+        snap = self.convo.pending_snapshot()
+        if snap is None:
+            return
+        prev_summary, pending = snap
+        self._summary_thread = threading.Thread(
+            target=self._compact, args=(prev_summary, pending),
+            name="compaction", daemon=True)
+        self._summary_thread.start()
+
+    def _compact(self, prev_summary: str, pending: list) -> None:
+        """Merge the summary-so-far with the freshly trimmed turns into one short
+        rolling summary, then install it (dropping the turns it now covers)."""
+        try:
+            cap = self.cfg.get("conversation.compaction.max_summary_chars", 600)
+            turns = "\n".join(f"{m['role']}: {m['content']}" for m in pending)
+            body = (f"Summary so far:\n{prev_summary}\n\nNewer turns:\n{turns}"
+                    if prev_summary else turns)
+            prompt = [
+                {"role": "system", "content": (
+                    "Maintain a running summary of this conversation so the "
+                    "assistant can keep the thread without the full transcript. "
+                    "Merge the summary-so-far with the newer turns into ONE concise "
+                    f"summary under {cap} characters — key facts, decisions, open "
+                    "threads and the current topic, from the assistant's point of "
+                    "view. Output only the summary.")},
+                {"role": "user", "content": body},
+            ]
+            summary = "".join(self.llm.stream(prompt)).strip()[:cap]
+            if summary:
+                self.convo.apply_summary(summary, pending)
+                log.debug("compacted %d turns into rolling summary (%d chars)",
+                          len(pending), len(summary))
+        except Exception as e:  # compaction must never break the loop
+            log.warning("compaction failed: %s", e)
+
     def _end_conversation(self) -> None:
         """On sleep/stop: extract durable facts from the chat into long-term memory
         (two extra LLM passes) on a BACKGROUND thread, so ZERO goes back to
@@ -922,24 +1037,40 @@ class Zero:
         if (self.memory is not None and self.convo._history
                 and getattr(self, "_memory_allowed", True)):
             transcript = self.convo.transcript()
-            pid = self._person.person_id if self._person is not None else None
+            # Sessions are voice-owned: snapshot everyone who took part (by voice)
+            # so each gets their durable 'last conversation' record.
+            participants = dict(self._session_people)
             self._memory_thread = threading.Thread(
-                target=self._save_memories, args=(transcript, pid),
+                target=self._save_memories, args=(transcript, participants),
                 name="memory-save", daemon=True,
             )
             self._memory_thread.start()
         self._person = None  # identity does not persist across conversations
         self._to(State.IDLE)
 
-    def _save_memories(self, transcript: str, person_id: int | None = None) -> None:
+    def _save_memories(self, transcript: str,
+                       participants: dict | None = None) -> None:
+        participants = participants or {}
+        # Facts + the global episode are attributed to the PRIMARY speaker (the
+        # one with the most turns); anonymous when nobody was recognised.
+        primary = max(participants, key=participants.get) if participants else None
         try:
-            self._extract_facts(transcript, person_id)
+            self._extract_facts(transcript, primary)
         except Exception as e:  # never let memory break the loop
             log.warning("memory extraction failed: %s", e)
+        summary = None
         try:
-            self._summarize_session(transcript, person_id)  # episodic memory
+            summary = self._summarize_session(transcript, primary)  # episodic memory
         except Exception as e:
             log.warning("session summary failed: %s", e)
+        # Durable per-person 'last conversation': EVERY known participant gets it,
+        # so each is greeted with what you discussed when they next return.
+        if summary and self.cfg.get("memory.last_conversation.enabled", True):
+            for pid in participants:
+                try:
+                    self.memory.set_last_conversation(pid, summary)
+                except Exception as e:
+                    log.warning("last-conversation save failed for %s: %s", pid, e)
         try:
             # Sleep-phase pass: gentle forgetting + reflection over recent
             # episodes into higher-level insights. Same background thread, so
@@ -1000,9 +1131,11 @@ class Zero:
                                  person_id=person_id, importance=importance)
 
     def _summarize_session(self, transcript: str,
-                           person_id: int | None = None) -> None:
+                           person_id: int | None = None) -> str | None:
         """Write a one-line summary of the conversation into episodic memory, so
-        next time ZERO can recall the ARC of past chats, not just isolated facts."""
+        next time ZERO can recall the ARC of past chats, not just isolated facts.
+        Returns the summary (also reused as each participant's durable
+        last-conversation record), or None if nothing of substance was said."""
         prompt = [
             {"role": "system", "content": (
                 "Summarize this conversation in ONE short sentence — what you and "
@@ -1014,6 +1147,8 @@ class Zero:
         summary = "".join(self.llm.stream(prompt)).strip()
         if summary and not summary.upper().startswith("NONE"):
             self.memory.add_episode(summary, person_id=person_id)
+            return summary
+        return None
 
     def _stream_in_background(self, messages) -> tuple:
         """Start the LLM streaming on a worker thread feeding a queue. Returns

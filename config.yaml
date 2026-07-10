@@ -74,6 +74,15 @@ conversation:
     default: ["Mm.", "Right.", "Okay."]
     ack: ["Mm-hmm.", "Sure."]
 
+  # In-session compaction: on a long session, trimmed-away turns are folded into a
+  # short rolling summary (off the hot path) instead of being dropped. Context
+  # stays bounded — persona + memory + this summary + `llm.history_turns` live
+  # turns — so the shared GPU's KV cache stays small however long you talk, and the
+  # thread is preserved rather than forgotten.
+  compaction:
+    enabled: true
+    max_summary_chars: 600 # cap on the rolling summary injected into the prompt
+
 memory:
   enabled: true # remember durable facts across sessions (SQLite)
   path: zero_memory.sqlite # single file on disk; survives reboots
@@ -99,6 +108,14 @@ memory:
   forgetting:
     enabled: true # gentle decay: old + unimportant + never-recalled
     max_age_days: 90 # ...memories fade after this long untouched
+
+  # Durable "last time we spoke" record, one per person, updated in place and
+  # marked protected — exempt from decay, age-out and the episodic cap. When a
+  # recognised voice returns (even years later) ZERO greets them with what you
+  # last discussed and picks the thread back up. Attribution is by VOICE (see
+  # identity.session), so the record belongs to whoever actually spoke.
+  last_conversation:
+    enabled: true
 
 learning:
   # Few-shot object learning: "this is a french press" binds the current
@@ -188,6 +205,13 @@ identity:
   db_path: zero_identity.sqlite
   max_samples_per_kind: 5 # stored embedding samples per person per channel
   reinforce_threshold: 0.70 # confident joint matches refresh stored samples
+  # Sessions are owned by VOICE: the speaker's voice decides whose memories a turn
+  # belongs to (anonymous when the voice is unsure — see fusion.voice_threshold).
+  # The face is perception only — logged and used for the "I can see you" note, but
+  # it never decides whose session this is. A different enrolled voice taking over
+  # mid-conversation becomes the new owner (live handover, per turn).
+  session:
+    voice_only: true
   voice:
     model_path: models/voiceid/voxceleb_ECAPA512_LM.onnx # reuses the voiceid model
   face:

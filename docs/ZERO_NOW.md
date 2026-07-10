@@ -21,9 +21,16 @@ talks back in a natural voice with emotion — duplex, interruptible, proactive.
 - **Emotion** — reads voice prosody + text + (optional) face into a cross-turn
   mood that shapes both Gemma's tone and the voice's delivery.
 - **Remembers** — SQLite long-term memory (facts + episodes), activation-ranked
-  recall, sleep-phase consolidation and reflection.
-- **Knows people** — face + voice identity fusion, conversational enrolment
-  ("I'm David"), diarization (notices a new speaker), privacy modes.
+  recall, sleep-phase consolidation and reflection. Each person also gets a
+  durable "last time we spoke" record that never fades, so a returning voice is
+  greeted with what you last discussed — even years later. Long sessions are
+  compacted on the fly (trimmed turns fold into a rolling summary) so context
+  stays small and the shared GPU doesn't fill up.
+- **Knows people** — sessions are owned by **voice**: whoever's talking owns the
+  turn and its memories (anonymous when the voice is unsure); a different enrolled
+  voice taking over hands the session off live. Face recognition still runs — for
+  "I can see you" and the log — but never decides whose session it is.
+  Conversational enrolment ("I'm David"), diarization, privacy modes.
 - **Proactive** — greets people it sees, asks queued curiosity questions, makes
   ambient + scene-change remarks; hard-gated by cooldowns and quiet hours.
 - **Learns objects** — "this is a french press" binds a crop to a name.

@@ -139,7 +139,12 @@ class IdentityService:
 
     # ── the two public operations ─────────────────────────────────────────────
     def identify(self, audio=None, frame_rgb=None) -> IdentityResult:
-        """Who is speaking right now? Never raises; STRANGER when unsure."""
+        """Who is speaking right now? Never raises; STRANGER when unsure.
+
+        Fuses face+voice — used for enrolment re-resolution. For deciding whose
+        SESSION (and memories) this turn belongs to, use ``identify_speaker``,
+        which is voice-owned by design.
+        """
         v_emb = self._voice_emb(audio)
         f_emb = self._face_emb(frame_rgb)
         v_match = self.registry.match("voice", v_emb) if v_emb is not None else None
@@ -154,6 +159,55 @@ class IdentityService:
                 if f_emb is not None:
                     self.registry.add_embedding(result.person_id, "face", f_emb)
         return result
+
+    def identify_speaker(self, audio=None, frame_rgb=None
+                         ) -> tuple[IdentityResult, str | None]:
+        """Who is *speaking* right now — decided by VOICE only.
+
+        The session (and every memory keyed to it) belongs to whoever the voice
+        names; the face channel is kept purely for logging, the "I can see you"
+        note, and continual reinforcement — it NEVER decides whose session this
+        is. Because this runs every turn, a different enrolled voice taking over
+        mid-conversation simply becomes the new session owner (live handover).
+
+        Returns ``(speaker, face_name)``: ``speaker`` (STRANGER when the voice is
+        unsure) keys per-person memory; ``face_name`` is who the camera
+        recognises this instant (may differ, or be None) — for perception notes
+        only. Never raises.
+        """
+        v_emb = self._voice_emb(audio)
+        f_emb = self._face_emb(frame_rgb)
+        v_match = self.registry.match("voice", v_emb) if v_emb is not None else None
+        f_match = self.registry.match("face", f_emb) if f_emb is not None else None
+
+        # Session owner: voice, gated by the voice threshold. Face never decides it.
+        if v_match is not None and v_match[2] >= self.fuser.voice_threshold:
+            speaker = IdentityResult(v_match[0], v_match[1], v_match[2], via="voice")
+        else:
+            speaker = STRANGER
+
+        # Face is a perception signal only — surfaced in the log and returned for
+        # the "I can see you" note, but kept out of memory attribution.
+        face_name = None
+        if f_match is not None:
+            f_pid, f_name, f_score = f_match
+            if f_score >= self.fuser.face_threshold:
+                face_name = f_name
+                log.info("face sees %s (%.2f)", f_name, f_score)
+            else:
+                log.debug("face inconclusive (best %s %.2f)", f_name, f_score)
+
+        if speaker.is_known:
+            log.info("speaker is %s (voice %.2f)", speaker.name, speaker.score)
+            # Continual adaptation: when the face AGREES with the voice, refresh
+            # both channels' samples (same behaviour as identify()).
+            if (f_match is not None and f_match[0] == speaker.person_id
+                    and f_match[2] >= self.reinforce_threshold):
+                if v_emb is not None:
+                    self.registry.add_embedding(speaker.person_id, "voice", v_emb)
+                if f_emb is not None:
+                    self.registry.add_embedding(speaker.person_id, "face", f_emb)
+        return speaker, face_name
 
     def enroll(self, name: str, audio=None, frame_rgb=None) -> tuple[IdentityResult, list[str]]:
         """Enrol (or refresh) ``name`` from this moment's audio + frame.
