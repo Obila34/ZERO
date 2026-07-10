@@ -21,9 +21,9 @@ from zero.config import load_config
 from zero.conversation import Conversation
 from zero.events import EventBus
 from zero.factory import (
-    build_endpointer, build_identity, build_llm, build_memory, build_perception,
-    build_privacy, build_proactive, build_stt, build_tools, build_vision,
-    build_voice, build_voiceid, build_wake,
+    build_corpus, build_endpointer, build_guests, build_identity, build_llm,
+    build_memory, build_perception, build_privacy, build_proactive, build_stt,
+    build_tools, build_vision, build_voice, build_voiceid, build_wake,
 )
 from zero.privacy.guard import parse_forget_command
 from zero.identity.service import parse_enroll_command, parse_enrollment
@@ -153,6 +153,7 @@ class Zero:
         log.info("loading engines...")
         self.events = EventBus()
         self.memory = build_memory(self.cfg)  # long-term SQLite store (or None)
+        self.corpus = build_corpus(self.cfg)  # day-to-day interactions -> training data
         base_llm = build_llm(self.cfg)
         self.llm, self.tool_registry, self.timers = build_tools(
             self.cfg, base_llm, self.memory, self.events,
@@ -221,7 +222,9 @@ class Zero:
         self._face_name = None         # who the camera recognises (log/perception only)
         self._last_id_key = None       # last identity note attached (dedup across turns)
         self._turn_durable_pid = None  # speaker to CREDIT durable memory this turn (or None)
+        self._turn_speaker = None      # who spoke, for the corpus (real pid / guest / None)
         self._session_log: list[tuple] = []  # (durable_pid, role, text) for per-person save
+        self._corpus_log: list[tuple] = []    # (speaker, role, text) for training data
         self._welcomed: set[int] = set()  # people greeted "welcome back" this session
 
         # Voice-only extras (need the voice/mic): owner verification + spoken fillers.
@@ -234,6 +237,10 @@ class Zero:
             if self.voiceid is not None:
                 log.info("voice ID active — only the enrolled voice will be answered")
             self.identity = build_identity(self.cfg)
+            # Cluster unfamiliar voices into provisional guests so different
+            # strangers (and their training data) stay separate.
+            self.guests = (build_guests(self.cfg)
+                           if self.identity is not None else None)
             self.privacy, self.indicator = build_privacy(self.cfg)
             self.affect, self.speaker_tracker = build_perception(
                 self.cfg, self.identity)
@@ -246,6 +253,7 @@ class Zero:
         else:
             self.voiceid, self._voiceprint = None, None
             self.identity = None
+            self.guests = None
             self.privacy, self.indicator = None, None
             self.affect, self.speaker_tracker = None, None
             self.proactive, self.curiosity, self.policy = None, None, None
@@ -494,7 +502,8 @@ class Zero:
         self._was_interrupted = False  # a stale note must not leak across chats
         self._face_name = None
         self._last_id_key = None       # fresh conversation: re-introduce who's here
-        self._session_log = []         # per-turn (speaker, role, text) for per-person memory
+        self._session_log = []         # per-turn (durable_pid, role, text) for memory
+        self._corpus_log = []          # per-turn (speaker, role, text) for training data
         self._welcomed = set()         # welcome-back fires once per person
         sr = self.cfg.get("audio.sample_rate", 16000)
         idle_s = self.cfg.get("conversation.sleep_timeout_ms", 30000) / 1000.0
@@ -612,6 +621,7 @@ class Zero:
                     "(You were interrupted mid-sentence a moment ago — don't "
                     "restart the old answer; just respond to what they say now.)")
             self._turn_durable_pid = None  # only a CONFIDENT voice credits memory
+            self._turn_speaker = None      # who to tag this turn's training data
             if self.identity is not None:
                 # Sessions are owned by VOICE — the speaker's voice decides whose
                 # memories this turn belongs to; the face is perception only.
@@ -625,7 +635,11 @@ class Zero:
                                  and "face" in ident.via else None)
                 self._person = ident if ident.is_known else None
                 self._face_name = face_name
+                # One voiceprint for this utterance, reused by diarization AND
+                # guest clustering (embedding is not free).
+                voice_emb = self.identity.voice_embedding(utterance)
                 if ident.is_known:
+                    self._turn_speaker = ident.person_id
                     # Persist this turn under the speaker ONLY when the voice is
                     # confident enough: a borderline match still talks (live), but
                     # must not write into someone else's permanent memory. This is
@@ -636,12 +650,17 @@ class Zero:
                     welcome = self._welcome_back_note(ident)
                     if welcome:
                         self._turn_notes.append(welcome)
+                elif self.guests is not None:
+                    # An unfamiliar voice: cluster it into a provisional guest so
+                    # different strangers — and their training data — stay apart,
+                    # instead of collapsing into one anonymous blob.
+                    self._turn_speaker = self.guests.assign(voice_emb)
                 # Diarization: notice when a DIFFERENT person takes over.
                 if self.speaker_tracker is not None:
                     change_note = self.speaker_tracker.update(
                         person_id=ident.person_id if ident.is_known else None,
                         name=ident.name if ident.is_known else None,
-                        voice_emb=self.identity.voice_embedding(utterance),
+                        voice_emb=voice_emb,
                     )
                     if change_note:
                         self._turn_notes.append(change_note)
@@ -778,8 +797,10 @@ class Zero:
             # Store the RAW utterance so history stays clean and cache-friendly.
             self.convo.add_user(text)
             # Tag the turn with its (confident) speaker so end-of-session memory can
-            # be split per person instead of lumped onto one owner.
+            # be split per person instead of lumped onto one owner; the corpus log
+            # keeps the fuller speaker (incl. provisional guests) for training data.
             self._session_log.append((self._turn_durable_pid, "user", text))
+            self._corpus_log.append((self._turn_speaker, "user", text))
             self._t_reply_start = time.monotonic()  # end-of-STT marker for timing
             # Fold in what ZERO currently sees as an EPHEMERAL note on THIS turn
             # only — the note + keyframes are attached to the outgoing copy of the
@@ -812,6 +833,7 @@ class Zero:
                 self.convo.add_assistant(reply)
                 self._session_log.append(
                     (self._turn_durable_pid, "assistant", reply))
+                self._corpus_log.append((self._turn_speaker, "assistant", reply))
                 log.info("reply: %r", reply)
 
     # -- vision -------------------------------------------------------------
@@ -1063,18 +1085,41 @@ class Zero:
         word immediately instead of being deaf for seconds. The speaker log is
         snapshotted first — the next conversation may reset it while the save is
         still running."""
-        if (self.memory is not None and self._session_log
+        # Privacy gate covers BOTH durable memory and the training corpus: a
+        # session ZERO isn't allowed to remember is one it doesn't record.
+        if ((self.memory is not None or self.corpus is not None)
+                and (self._session_log or self._corpus_log)
                 and getattr(self, "_memory_allowed", True)):
-            # Sessions are voice-owned: hand over the per-turn (speaker, role, text)
-            # log so memory is written PER PERSON, never lumped onto one owner.
             session_log = list(self._session_log)
+            corpus_log = list(self._corpus_log)
             self._memory_thread = threading.Thread(
-                target=self._save_memories, args=(session_log,),
+                target=self._persist_session, args=(session_log, corpus_log),
                 name="memory-save", daemon=True,
             )
             self._memory_thread.start()
         self._person = None  # identity does not persist across conversations
         self._to(State.IDLE)
+
+    def _persist_session(self, session_log: list, corpus_log: list) -> None:
+        """Background: save this session's training corpus AND per-person memory.
+        The corpus write is cheap (file append) and runs first so a slow memory
+        pass can't lose the raw data."""
+        try:
+            self._save_corpus(corpus_log)
+        except Exception as e:  # corpus must never break the loop
+            log.warning("corpus save failed: %s", e)
+        if self.memory is not None and session_log:
+            self._save_memories(session_log)
+
+    def _save_corpus(self, corpus_log: list) -> None:
+        """Split this session by speaker (real person, provisional guest, or
+        anonymous) and append it to the interaction corpus for offline training."""
+        if self.corpus is None or not corpus_log:
+            return
+        by_speaker: dict = {}
+        for speaker, role, text in corpus_log:
+            by_speaker.setdefault(speaker, []).append({"role": role, "text": text})
+        self.corpus.add_session(by_speaker, meta={"source": "voice"})
 
     def _save_memories(self, session_log: list | None = None) -> None:
         """Per-speaker durable memory. The session is voice-owned, so we split it

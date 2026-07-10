@@ -166,6 +166,14 @@ def build_tools(cfg: Config, llm: LLM, memory, events, context_provider=None):
     for tool in (TimeTool(), TimerTool(timers), ReminderTool(timers),
                  RememberTool(), RecallTool()):
         registry.register(tool)
+    if cfg.get("tools.websearch.enabled", False):
+        from zero.tools.websearch import WebSearchTool
+
+        registry.register(WebSearchTool(
+            url=cfg.get("tools.websearch.url", "http://127.0.0.1:8888/search"),
+            timeout=cfg.get("tools.websearch.timeout_s", 8.0),
+            max_results=cfg.get("tools.websearch.max_results", 3),
+        ))
     wrapped = ToolAwareLLM(llm, registry, context_provider=context_provider)
     return wrapped, registry, timers
 
@@ -435,6 +443,31 @@ def build_identity(cfg: Config):
         registry, fuser, voice_embedder=voice, face_recognizer=face,
         reinforce_threshold=cfg.get("identity.reinforce_threshold", 0.70),
     )
+
+
+def build_guests(cfg: Config):
+    """GuestBook for clustering unfamiliar voices into provisional guests, or
+    None when disabled. Only useful alongside identity (which supplies the
+    per-utterance voice embeddings it clusters)."""
+    if not cfg.get("identity.guests.enabled", True):
+        return None
+    from zero.identity.guests import GuestBook
+
+    return GuestBook(
+        str(cfg.resolve_path("identity.guests.db_path", "zero_guests.sqlite")),
+        match_threshold=cfg.get("identity.guests.match_threshold", 0.55),
+        max_guests=cfg.get("identity.guests.max_guests", 50),
+    )
+
+
+def build_corpus(cfg: Config):
+    """Interaction corpus (day-to-day conversations saved as training data), or
+    None when disabled."""
+    if not cfg.get("learning.corpus.enabled", True):
+        return None
+    from zero.learning.corpus import Corpus
+
+    return Corpus(str(cfg.resolve_path("learning.corpus.dir", "data/corpus")))
 
 
 def build_privacy(cfg: Config):

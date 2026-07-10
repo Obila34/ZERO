@@ -29,8 +29,18 @@ talks back in a natural voice with emotion — duplex, interruptible, proactive.
 - **Knows people** — sessions are owned by **voice**: whoever's talking owns the
   turn and its memories (anonymous when the voice is unsure); a different enrolled
   voice taking over hands the session off live. Face recognition still runs — for
-  "I can see you" and the log — but never decides whose session it is.
-  Conversational enrolment ("I'm David"), diarization, privacy modes.
+  "I can see you" and the log — but never decides whose session it is. Strangers
+  aren't lumped together: each unfamiliar voice is clustered into a provisional
+  guest (`guest-N`) until they give a name. Conversational enrolment ("I'm
+  David"), diarization, privacy modes.
+- **Learns over time** — every conversation is saved (per speaker, privacy-gated)
+  to an interaction corpus for periodic *offline* LoRA fine-tunes: how people
+  phrase things, code-switch, accents. Memory changes behaviour today; training
+  changes its instincts over weeks. See `docs/TRAINING.md`. (No autonomous
+  self-improvement — it's a deliberate, batched loop.)
+- **Reaches the web** — an optional `web_search` tool gives it live internet for
+  facts/news/weather, phrased in its own voice; honest ("I can't reach the
+  internet right now") rather than inventing when the endpoint is down.
 - **Proactive** — greets people it sees, asks queued curiosity questions, makes
   ambient + scene-change remarks; hard-gated by cooldowns and quiet hours.
 - **Learns objects** — "this is a french press" binds a crop to a name.

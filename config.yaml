@@ -138,6 +138,15 @@ learning:
     enabled: true
     db_path: zero_curiosity.sqlite
     max_pending: 20
+  # Interaction corpus: every day-to-day conversation is appended (per speaker,
+  # as JSONL) as raw material for periodic OFFLINE fine-tunes — how people phrase
+  # things, code-switch, accents. Split per speaker (voice-owned), so one
+  # person's speech never contaminates another's training data. Gated by privacy:
+  # a session ZERO may not remember is one it won't record. Turn into a training
+  # set with scripts/export_corpus.py — see docs/TRAINING.md.
+  corpus:
+    enabled: true
+    dir: data/corpus
 
 perception:
   # ── GPU offload (Phase 8): the Pi is a FRONTEND ────────────────────────────
@@ -193,7 +202,19 @@ tools:
   # LLM JSON tool calls (flexible), plain chat (everything else). The allow
   # list is the safety boundary: a tool not named here cannot run.
   enabled: true
-  allow: [time, timer, reminder, remember, recall]
+  allow: [time, timer, reminder, remember, recall, web_search]
+
+  # Live internet access. Points at a search endpoint returning JSON
+  # {results:[{title,url,content}]} — a self-hosted SearXNG is the easy private
+  # option (docker run searxng/searxng, then use its /search?format=json). The
+  # LLM decides when to call it; results are handed back for it to phrase in
+  # ZERO's own voice, and if the endpoint is unreachable it says so rather than
+  # inventing an answer. Off by default until you have an endpoint reachable.
+  websearch:
+    enabled: false
+    url: http://127.0.0.1:8888/search
+    timeout_s: 8.0
+    max_results: 3
 
 identity:
   # "Who is this?" — multi-person recognition fusing FACE and VOICE embeddings
@@ -210,6 +231,16 @@ identity:
   # The face is perception only — logged and used for the "I can see you" note, but
   # it never decides whose session this is. A different enrolled voice taking over
   # mid-conversation becomes the new owner (live handover, per turn).
+  # Provisional identities for people ZERO hasn't been introduced to. Instead of
+  # collapsing every stranger into one anonymous bucket, each unfamiliar VOICE is
+  # clustered by its embedding into a stable guest (a negative id: guest-1,
+  # guest-2, ...). Different strangers — and their training data — stay separate;
+  # a guest who later gives a name is enrolled as a real person from then on.
+  guests:
+    enabled: true
+    db_path: zero_guests.sqlite
+    match_threshold: 0.55 # voice cosine to treat two utterances as the same guest
+    max_guests: 50
   session:
     voice_only: true
     # Durable memory (facts + the per-person last-conversation) is written for a

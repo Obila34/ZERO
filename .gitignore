@@ -24,6 +24,10 @@ debug_*.wav
 *.sqlite
 *.sqlite-journal
 
+# Interaction corpus — day-to-day conversations captured for offline training.
+# Per-device, may contain personal speech; never source.
+data/corpus/
+
 # Voiceprint profile (per-device)
 voiceprint.npy
 *.npy
