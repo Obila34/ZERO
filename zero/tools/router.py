@@ -78,7 +78,13 @@ _UNSURE_RE = re.compile(
     r"(?:know|have|recall|remember)|i'?m\s+not\s+(?:really\s+)?sure|"
     r"tip\s+of\s+my\s+tongue|i\s+have\s+no\s+idea|i\s+wish\s+i\s+(?:knew|could))",
     re.IGNORECASE)
-_RESCUE_SNIFF_CHARS = 120   # how much of the reply to inspect before giving up
+_RESCUE_SNIFF_CHARS = 120   # absolute cap on how much of the reply to inspect
+_RESCUE_MIN_RELEASE = 20    # a sentence this long ending cleanly = not a shrug
+# A completed sentence (not counting a tiny interjection like "Hmm.") with no
+# unsure marker means the reply is a real answer — release it to TTS
+# IMMEDIATELY instead of holding for the full sniff window. Holding short
+# replies to stream-end was adding seconds of silence on question turns.
+_SENT_END_RE = re.compile(r"[.!?…]")
 _JSON_MARKER = '{"tool'     # an embedded tool call inside spoken prose
 
 
@@ -139,7 +145,13 @@ class ToolAwareLLM:
                          "args": {"query": user_text.strip(" ?.!,")}})
                     return
                 if rescue_armed and len(probe) < _RESCUE_SNIFF_CHARS:
-                    continue  # keep holding until we're sure it's not a shrug
+                    # Early release: a real sentence completed with no unsure
+                    # marker = a genuine answer. Ship it to TTS NOW — holding
+                    # short replies to stream-end cost seconds of silence.
+                    # (Tiny interjections like "Hmm." keep holding: the shrug
+                    # often follows them.)
+                    if not _SENT_END_RE.search(probe, _RESCUE_MIN_RELEASE - 1):
+                        continue  # not proven an answer yet — keep holding
                 # Plain chat: flush what we held, then pass through (guarding
                 # against a tool call embedded mid-prose).
                 yield from self._passthrough(buffered, stream, messages)

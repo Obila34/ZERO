@@ -275,6 +275,41 @@ def test_router_uncertainty_rescue_searches_instead_of_shrugging():
                for m in llm.calls[-1])
 
 
+def test_router_rescue_hold_releases_early_on_real_answer():
+    # A question whose reply is a genuine answer must stream to TTS as soon as
+    # its first real sentence completes — not be held until the stream ends.
+    from zero.tools.websearch import WebSearchTool
+
+    reg, _, _ = _registry()
+    reg.register(WebSearchTool("http://x", fetch=lambda q: [{"title": "X"}]))
+    llm = FakeLLM("The sky looks blue because air scatters short wavelengths. "
+                  "Longer answer continues here with more detail for a while.")
+    router = ToolAwareLLM(llm, reg)
+    chunks = list(router.stream(
+        [{"role": "user", "content": "why is the sky blue anyway?"}]))
+    assert "".join(chunks).startswith("The sky looks blue")
+    # Early release = streaming passthrough (many small chunks), not one
+    # end-of-stream flush.
+    assert len(chunks) > 3
+
+
+def test_router_interjection_then_shrug_still_rescues():
+    # "Hmm." alone must NOT count as a real answer — the shrug right after it
+    # still triggers the web rescue.
+    from zero.tools.websearch import WebSearchTool
+
+    reg, _, _ = _registry()
+    reg.register(WebSearchTool(
+        "http://x", fetch=lambda q: [{"title": "R", "content": f"re {q}"}]))
+    llm = FakeLLM("Hmm. I don't have that on the tip of my tongue.",
+                  "It's Ouagadougou.")
+    router = ToolAwareLLM(llm, reg)
+    out = _collect(router.stream(
+        [{"role": "user", "content": "what's the capital of Burkina Faso?"}]))
+    assert out == "It's Ouagadougou."
+    assert "tip of my tongue" not in out
+
+
 def test_router_no_rescue_for_statements_or_smalltalk():
     from zero.tools.websearch import WebSearchTool
 
