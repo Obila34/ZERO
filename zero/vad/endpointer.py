@@ -24,12 +24,19 @@ class _BaseEndpointer:
     def __init__(self, sample_rate: int, silence_ms: int, max_utterance_ms: int,
                  speech_pad_ms: int, block_ms: int, energy_threshold: float = 0.0,
                  min_utterance_rms: float = 0.0,
-                 min_speech_for_fast_end_ms: int = 0):
+                 min_speech_for_fast_end_ms: int = 0,
+                 semantic_hold_wait_ms: int = 600):
         self.sample_rate = sample_rate
         self.block_ms = block_ms
         self.silence_blocks = max(1, silence_ms // block_ms)
         self.max_blocks = max(1, max_utterance_ms // block_ms)
         self.pad_blocks = max(0, speech_pad_ms // block_ms)
+        # How long past the normal endpoint we're willing to wait for the
+        # speculative transcript to arrive, when should_hold() says "don't know
+        # yet" (None). Without this the mid-thought check raced the STT round
+        # trip and lost — the answer arrived just after the endpoint committed,
+        # so half-sentences were shipped to the LLM.
+        self.hold_wait_blocks = max(0, semantic_hold_wait_ms // block_ms)
         # Adaptive endpoint: an utterance with less speech than this waits DOUBLE
         # the trailing silence before ending — slow starters ("um...") aren't cut
         # off, while a finished sentence still commits fast. 0 = off.
@@ -135,15 +142,23 @@ class _BaseEndpointer:
                             need = max(need, hold_until)
                         if trailing_silence >= need:
                             # Semantic hold (once per pause): the early partial
-                            # transcript says the user is mid-thought ("...and")
-                            # — wait one more silence window before committing.
-                            hold = False
+                            # transcript says whether the user is mid-thought
+                            # ("...and"). Tri-state: True = hold one more silence
+                            # window; False = commit now; None = the transcript
+                            # is STILL IN FLIGHT — wait (bounded) instead of
+                            # racing it, so half-sentences aren't shipped just
+                            # because STT was a beat slower than the endpoint.
+                            decision = False
                             if hold_until == 0 and should_hold is not None:
                                 try:
-                                    hold = bool(should_hold())
+                                    decision = should_hold()
                                 except Exception as e:
                                     log.debug("hold hook failed: %s", e)
-                            if hold:
+                            if decision is None:
+                                if trailing_silence < need + self.hold_wait_blocks:
+                                    continue  # transcript pending — wait a beat
+                                decision = False  # waited long enough; commit
+                            if decision:
                                 hold_until = trailing_silence + self.silence_blocks
                                 log.debug("semantic hold: mid-thought pause")
                             else:

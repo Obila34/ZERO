@@ -259,7 +259,11 @@ class TestSemanticHold:
         assert ends_mid_thought("I went to the store and")
         assert ends_mid_thought("so what I mean is,")
         assert ends_mid_thought("could you get me the")
+        # Whisper writes a literal trailing "..." when speech trails off.
+        assert ends_mid_thought("Alright, so give me a bit of the...")
+        assert ends_mid_thought("Okay, so briefly explain the concept of…")
         assert not ends_mid_thought("what time is it")
+        assert not ends_mid_thought("that's all I needed, thanks.")
         assert not ends_mid_thought("")
 
     def test_hold_extends_endpoint_once(self):

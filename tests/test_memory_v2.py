@@ -201,6 +201,49 @@ def test_recent_episodes_person_scoped_excludes_last_convo(tmp_path):
 
 
 # ── embedders ────────────────────────────────────────────────────────────────
+def test_slow_embedder_degrades_to_fallback():
+    # An embedder that "works" but is consistently slow starves the shared GPU
+    # (each call can evict the chat model). Three slow strikes -> hash fallback.
+    import numpy as np
+    import time as _time
+
+    from zero.memory.embeddings import HashEmbedder, ResilientEmbedder
+
+    class SlowPrimary:
+        name = "ollama"
+        model = "nomic-embed-text"
+
+        def embed(self, text):
+            _time.sleep(0.05)                     # 50ms > the 10ms slow bar
+            return np.ones(8, dtype=np.float32) / np.sqrt(8)
+
+    r = ResilientEmbedder(SlowPrimary(), HashEmbedder(16), slow_ms=10)
+    for _ in range(3):
+        assert r.embed("hello") is not None       # still answers while counting
+    assert r.name == "hash"                       # ...then stays on the fallback
+    v = r.embed("hello")
+    assert v is not None and v.size == 16         # served by hash now
+
+
+def test_failing_embedder_still_degrades():
+    import numpy as np
+
+    from zero.memory.embeddings import HashEmbedder, ResilientEmbedder
+
+    class Broken:
+        name = "ollama"
+        model = "gemma"
+
+        def embed(self, text):
+            return None
+
+    r = ResilientEmbedder(Broken(), HashEmbedder(16), slow_ms=10_000)
+    for _ in range(3):
+        r.embed("x")
+    assert r.name == "hash"
+
+
+
 def test_hash_embedder_properties():
     e = HashEmbedder(128)
     a, b = e.embed("wifi password"), e.embed("wifi password")

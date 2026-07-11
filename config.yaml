@@ -118,6 +118,9 @@ memory:
     # the Ollama service env — or set backend: hash to take embeds off the GPU.
     ollama_model: nomic-embed-text
     timeout_s: 3.0 # embeds sit near the reply path: fail FAST into hash, never stall
+    slow_ms: 800 # embeds consistently slower than this = the GPU has no headroom;
+      # auto-degrade to hash for the session (a slow embed also forces
+      # the CHAT model to reload — that was the ~6s first-token lag)
     hash_dim: 256 # fallback hashing-embedder dimension
   retrieval:
     top_k: 6 # memories surfaced per recall
@@ -318,8 +321,15 @@ vad:
   silence_ms: 450 # trailing silence that ends an utterance (adaptive: see below)
   semantic_hold:
     true # endpoint intelligence: the early (speculative) transcript of a
-    # pause is checked — if it ends mid-thought ("...and", "...the"),
-    # ZERO waits one extra silence window instead of cutting you off.
+    # pause is checked — if it ends mid-thought ("...and", "...the",
+    # a trailing "..."), ZERO waits one extra silence window instead
+    # of cutting you off mid-sentence.
+  semantic_hold_wait_ms:
+    600 # if the speculative transcript hasn't arrived when the endpoint is
+    # due, wait up to this long for it instead of racing the STT round
+    # trip. The race was why half-sentences got shipped: the "is this
+    # finished?" answer landed ~200ms after the endpoint had committed.
+    # Finished sentences still commit the moment the transcript says so.
   min_speech_for_fast_end_ms:
     600 # utterances with less speech than this wait DOUBLE the
     # silence before ending — slow starters ("um...") aren't cut

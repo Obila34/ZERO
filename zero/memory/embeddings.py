@@ -89,14 +89,21 @@ class OllamaEmbedder:
 
 class ResilientEmbedder:
     """Primary with a permanent-fallback switch: after ``max_failures``
-    consecutive primary errors it stops paying the timeout every call and
-    stays on the fallback (the store handles mixed dims gracefully)."""
+    consecutive primary errors — OR consistently SLOW replies — it stops
+    paying the cost every call and stays on the fallback (the store handles
+    mixed dims gracefully).
 
-    def __init__(self, primary, fallback, max_failures: int = 3):
+    The slow path matters as much as the failing one: on a saturated shared
+    GPU, each embed can force the chat model to reload, adding seconds to the
+    NEXT reply even when the embed itself "succeeds". Slow = strike."""
+
+    def __init__(self, primary, fallback, max_failures: int = 3,
+                 slow_ms: float = 800.0):
         self._primary = primary
         self._fallback = fallback
         self._failures = 0
         self._max = int(max_failures)
+        self._slow_s = float(slow_ms) / 1000.0
 
     @property
     def name(self) -> str:
@@ -104,40 +111,51 @@ class ResilientEmbedder:
             return self._primary.name
         return self._fallback.name
 
+    def _strike(self, reason: str) -> None:
+        self._failures += 1
+        if self._failures >= self._max:
+            model = getattr(self._primary, "model", "?")
+            log.warning(
+                "primary embedder (%s, model=%s) %s — semantic recall degraded "
+                "to %s for this session. If it's erroring, pull a real embedding "
+                "model (`ollama pull nomic-embed-text`) and set "
+                "memory.embeddings.ollama_model; if it's slow, the GPU has no "
+                "headroom — consider backend: hash.",
+                self._primary.name, model, reason, self._fallback.name)
+
     def embed(self, text: str) -> np.ndarray | None:
         if self._primary is not None and self._failures < self._max:
+            import time as _time
+
+            t0 = _time.monotonic()
             v = self._primary.embed(text)
-            if v is not None:
+            took = _time.monotonic() - t0
+            if v is not None and took <= self._slow_s:
                 self._failures = 0
                 return v
-            self._failures += 1
-            if self._failures == self._max:
-                model = getattr(self._primary, "model", "?")
-                log.warning(
-                    "primary embedder (%s, model=%s) failing — semantic recall "
-                    "degraded to %s for this session. A chat model can't serve "
-                    "/api/embeddings: pull a real embedding model (e.g. `ollama "
-                    "pull nomic-embed-text`) and set "
-                    "memory.embeddings.ollama_model to it.",
-                    self._primary.name, model, self._fallback.name)
+            if v is None:
+                self._strike("failing")
+            else:  # worked, but too slow to sit anywhere near the reply path
+                log.debug("embed slow (%.0fms > %.0fms) — strike %d/%d",
+                          took * 1000, self._slow_s * 1000,
+                          self._failures + 1, self._max)
+                self._strike("too slow")
+                return v  # still usable this time; strikes decide the future
         return self._fallback.embed(text)
 
 
 def build_embedder(backend: str, *, host: str = "", model: str = "",
-                   hash_dim: int = 256, timeout: float = 3.0):
+                   hash_dim: int = 256, timeout: float = 3.0,
+                   slow_ms: float = 800.0):
     """backend: auto | ollama | hash | off -> embedder or None."""
     backend = (backend or "auto").lower()
     if backend == "off":
         return None
     if backend == "hash":
         return HashEmbedder(hash_dim)
-    if backend == "ollama":
+    if backend in ("ollama",) or (backend == "auto" and host):
         return ResilientEmbedder(OllamaEmbedder(host, model, timeout=timeout),
-                                 HashEmbedder(hash_dim))
-    # auto: ollama when a host is configured, hash otherwise
-    if host:
-        return ResilientEmbedder(OllamaEmbedder(host, model, timeout=timeout),
-                                 HashEmbedder(hash_dim))
+                                 HashEmbedder(hash_dim), slow_ms=slow_ms)
     return HashEmbedder(hash_dim)
 
 

@@ -39,6 +39,7 @@ def build_endpointer(cfg: Config):
         energy_threshold=cfg.get("vad.energy_threshold", 350),
         min_utterance_rms=cfg.get("vad.min_utterance_rms", 0),
         min_speech_for_fast_end_ms=cfg.get("vad.min_speech_for_fast_end_ms", 600),
+        semantic_hold_wait_ms=cfg.get("vad.semantic_hold_wait_ms", 600),
         silero_model=str(cfg.resolve_path("vad.silero_model",
                                           "models/vad/silero_vad.onnx")),
         silero_threshold=cfg.get("vad.silero_threshold", 0.5),
@@ -192,6 +193,7 @@ def build_memory(cfg: Config):
                       cfg.get("llm.model", "")),
         hash_dim=cfg.get("memory.embeddings.hash_dim", 256),
         timeout=cfg.get("memory.embeddings.timeout_s", 3.0),
+        slow_ms=cfg.get("memory.embeddings.slow_ms", 800),
     )
     path = cfg.resolve_path("memory.path", "zero_memory.sqlite")
     return SqliteMemory(

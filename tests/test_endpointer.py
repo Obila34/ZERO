@@ -46,6 +46,42 @@ def test_speech_then_silence_returns_utterance():
     assert len(out) >= 5 * BLOCK
 
 
+def test_semantic_hold_waits_for_pending_transcript():
+    # should_hold() returning None means "the transcript is still in flight" —
+    # the endpointer must WAIT (bounded) instead of committing a half-sentence.
+    flags = [True] * 5 + [False] * 40
+    calls = {"n": 0}
+
+    def should_hold():
+        calls["n"] += 1
+        return None if calls["n"] < 4 else False   # arrives on the 4th check
+
+    ep = ScriptedEndpointer(flags, semantic_hold_wait_ms=300)  # 10 blocks
+    out = ep.capture(iter(_frames(2000, 45)), should_hold=should_hold)
+    assert out is not None
+    assert calls["n"] >= 4               # it actually waited for the answer
+
+
+def test_semantic_hold_wait_is_bounded():
+    # A transcript that NEVER arrives must not hold the endpoint forever.
+    flags = [True] * 5 + [False] * 40
+    ep = ScriptedEndpointer(flags, semantic_hold_wait_ms=90)   # 3 blocks max
+    out = ep.capture(iter(_frames(2000, 45)), should_hold=lambda: None)
+    assert out is not None               # committed after the bounded wait
+    # utterance length stays close to speech + silence + small wait, not 40 blocks
+    assert len(out) <= 15 * BLOCK
+
+
+def test_semantic_hold_true_extends_once():
+    flags = [True] * 5 + [False] * 40
+    decisions = iter([True, False])      # mid-thought once, then finished
+
+    ep = ScriptedEndpointer(flags)
+    out = ep.capture(iter(_frames(2000, 45)),
+                     should_hold=lambda: next(decisions, False))
+    assert out is not None
+
+
 def test_quiet_utterance_is_dropped_not_a_timeout():
     # A whole utterance below min_utterance_rms is background — dropped, and the
     # capture keeps listening rather than reporting idle sleep.

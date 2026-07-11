@@ -126,7 +126,9 @@ def ends_mid_thought(text: str) -> bool:
     t = (text or "").strip().lower()
     if not t:
         return False
-    if t.endswith((",", "-", "—", ":")):
+    # Whisper writes a literal trailing "..." when speech trails off — the
+    # clearest "I wasn't finished" signal there is.
+    if t.endswith((",", "-", "—", ":", "...", "…")):
         return True
     words = re.findall(r"[a-z']+", t)
     return bool(words) and words[-1] in _MID_THOUGHT_WORDS
@@ -592,11 +594,20 @@ class Zero:
                     target=run, name="stt-spec", daemon=True)
                 t.start()
 
-            def _hold() -> bool:
-                # Semantic endpointing: if the speculative transcript for THIS
-                # pause is back and reads mid-thought, hold the endpoint open.
+            def _hold() -> bool | None:
+                # Semantic endpointing, tri-state: the speculative transcript for
+                # THIS pause says finished (False), mid-thought (True) — or it's
+                # STILL IN FLIGHT (None), in which case the endpointer waits a
+                # bounded beat instead of racing the STT round trip. That race is
+                # why half-sentences ("...give me a bit of the") used to ship.
                 res = spec.get("res") or {}
-                return ends_mid_thought(res.get("text", ""))
+                text = res.get("text")
+                if text is None:
+                    t = spec.get("thread")
+                    if t is not None and t.is_alive():
+                        return None      # transcript pending — worth a short wait
+                    return False         # no speculation ran; commit normally
+                return ends_mid_thought(text)
 
             utterance = self.endpointer.capture(
                 frames_src, idle_timeout_s=idle_s,
