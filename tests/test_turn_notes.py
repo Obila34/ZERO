@@ -11,10 +11,19 @@ import types
 from zero.main import Zero
 
 
-def _stub(person=None, face_name=None):
+class _FakeCfg:
+    def __init__(self, d=None):
+        self.d = d or {}
+
+    def get(self, k, default=None):
+        return self.d.get(k, default)
+
+
+def _stub(person=None, face_name=None, memory=None, cfg=None):
     obj = types.SimpleNamespace()
     obj.eyes = None
-    obj.memory = None
+    obj.memory = memory
+    obj.cfg = cfg or _FakeCfg()
     obj._person = person
     obj._face_name = face_name
     obj._last_id_key = None
@@ -61,6 +70,34 @@ def test_id_note_reattaches_on_visual_question():
     z._turn_notes = []
     out = z._attach_vision(_msgs(), "what do you see right now")
     assert "You can see Greg" in _last_content(out)            # asked: answer it
+
+
+def test_recall_over_budget_is_skipped_not_waited_for():
+    # A slow memory/embedder must NEVER sit in the reply path — over budget,
+    # the turn simply goes without the recall note.
+    import time as _time
+
+    class SlowMemory:
+        def relevant_block(self, text, person_id=None):
+            _time.sleep(2.0)                       # way over the 300ms budget
+            return "something ancient"
+
+    z = _stub(memory=SlowMemory())
+    t0 = _time.monotonic()
+    out = z._attach_vision(_msgs(), "tell me more about planets")
+    elapsed = _time.monotonic() - t0
+    assert elapsed < 1.0                           # did not wait the 2s
+    assert "reminds you" not in _last_content(out)
+
+
+def test_recall_within_budget_attaches_note():
+    class FastMemory:
+        def relevant_block(self, text, person_id=None):
+            return "they love planets"
+
+    z = _stub(memory=FastMemory())
+    out = z._attach_vision(_msgs(), "tell me more about planets")
+    assert "they love planets" in _last_content(out)
 
 
 def test_id_note_reattaches_after_absence():

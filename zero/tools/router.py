@@ -42,9 +42,10 @@ _T1_TIME = re.compile(
 # command. Deliberately narrow: bare "look up" is left OUT (it's ambiguous with
 # recalling from memory); only web/internet/online/google count.
 _WEBSEARCH_RE = re.compile(
-    r"\b(?:search(?:\s+(?:the|on|from|through))?\s+(?:the\s+)?(?:web|internet|online)"
+    r"\b(?:(?:search|check|browse|look)(?:\s+(?:it|this|that))?"
+    r"(?:\s+(?:the|on|from|through|up))?\s+(?:the\s+)?(?:web|internet|online)"
     r"|google|look\s+.+\s+up\s+online)\b"
-    r"\s*(?:for|about)?\s*(?P<q>.*)$",
+    r"\s*(?:for|about|and\s+(?:tell|find)\s+(?:me|out))?\s*(?P<q>.*)$",
     re.IGNORECASE)
 # A QUESTION that plainly needs LIVE information — force a web search so ZERO
 # answers from the internet instead of stale training data or a deflection, WITHOUT
@@ -59,7 +60,14 @@ _LIVE_SIGNAL = re.compile(
     r"quarter[- ]?finals?|standings?|schedule|fixtures?|playing|"
     r"release\s+date|comes?\s+out|premieres?|out\s+yet|"
     r"latest|current(?:ly)?|price|costs?|news|headlines?|happened|results?|"
-    r"weather|forecast|stock|20(?:2[4-9]|3\d))\b", re.IGNORECASE)
+    r"weather|forecast|stock|champions?|elections?|"
+    r"today|tonight|yesterday|tomorrow|this\s+(?:week|month|year|season)|"
+    r"20(?:2[4-9]|3\d))\b", re.IGNORECASE)
+# ...but a question about OUR OWN shared past ("what did we talk about
+# yesterday?") is a MEMORY question — asking the internet would be absurd.
+_MEMORY_SHAPE = re.compile(
+    r"\b(?:we|us|our|remember|talked|told|said|conversation|discussed)\b",
+    re.IGNORECASE)
 # The reply-side safety net ("uncertainty rescue"): the persona instructs the
 # model to admit not knowing in recognisable phrasings. If a reply to a QUESTION
 # opens with one of these, we suppress it, web-search the question instead, and
@@ -279,6 +287,8 @@ class ToolAwareLLM:
         the web tool isn't available."""
         if not text or self._registry.get("web_search") is None:
             return None
+        if _MEMORY_SHAPE.search(text):
+            return None  # "what did we talk about yesterday" = memory, not web
         is_question = text.strip().endswith("?") or bool(_Q_SHAPE.search(text))
         if is_question and _LIVE_SIGNAL.search(text):
             return text.strip(" ?.!,")

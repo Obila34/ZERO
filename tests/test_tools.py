@@ -211,6 +211,48 @@ def test_router_string_args_are_coerced_not_crashed():
                for m in llm.calls[-1])
 
 
+def test_router_check_online_phrasing_is_forced():
+    from zero.tools.websearch import WebSearchTool
+
+    reg, _, _ = _registry()
+    reg.register(WebSearchTool(
+        "http://x", fetch=lambda q: [{"title": "R", "content": f"re {q}"}]))
+    llm = FakeLLM("Here's what's out there.")
+    router = ToolAwareLLM(llm, reg)
+    out = _collect(router.stream(
+        [{"role": "user", "content": "check online for the world cup schedule"}]))
+    assert out == "Here's what's out there."
+    assert any("world cup schedule" in str(m.get("content", "")).lower()
+               for m in llm.calls[-1])
+
+
+def test_router_tonight_question_auto_searches():
+    from zero.tools.websearch import WebSearchTool
+
+    reg, _, _ = _registry()
+    reg.register(WebSearchTool(
+        "http://x", fetch=lambda q: [{"title": "R", "content": f"re {q}"}]))
+    llm = FakeLLM("Two matches tonight.")
+    router = ToolAwareLLM(llm, reg)
+    out = _collect(router.stream(
+        [{"role": "user", "content": "which teams are playing tonight?"}]))
+    assert out == "Two matches tonight."
+
+
+def test_router_shared_memory_question_is_not_web_searched():
+    # "what did we talk about yesterday" is OUR memory — asking the internet
+    # would be absurd. Must fall through to the normal LLM+memory path.
+    from zero.tools.websearch import WebSearchTool
+
+    reg, _, _ = _registry()
+    reg.register(WebSearchTool("http://x", fetch=lambda q: [{"title": "X"}]))
+    llm = FakeLLM("We talked about planets, remember?")
+    router = ToolAwareLLM(llm, reg)
+    out = _collect(router.stream(
+        [{"role": "user", "content": "what did we talk about yesterday?"}]))
+    assert out == "We talked about planets, remember?"
+
+
 def test_router_uncertainty_rescue_searches_instead_of_shrugging():
     # "Not in my knowledge base" -> the model admits it -> we search the web and
     # answer from live results instead of speaking the shrug.

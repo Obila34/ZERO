@@ -37,6 +37,16 @@ privacy:
   indicator_gpio_pin: # LED pin for the visible "I'm listening" signal
     # (e.g. 17). Blank = log-only indicator.
 
+control:
+  # The AF1 fusion surface (zero/control.py) — an HTTP control plane inside the
+  # ZERO process so the AF1 cockpit can push a talk turn / a spoken line / a
+  # status probe at the SAME brain the mic loop runs. LAN-only by design: it
+  # rides the zero.service unit, no extra daemon, no terminal.
+  enabled: true
+  host: 0.0.0.0 # listen on the LAN (AF1 reaches the Pi at 192.168.150.202)
+  port: 8090
+  person_id: 1 # memory owner for AF1 turns (AF1 is the logged-in operator)
+
 conversation:
   # After waking once, ZERO stays in a flowing conversation (no wake word between
   # turns). It sleeps after this much continuous silence, or on a stop phrase.
@@ -102,12 +112,20 @@ memory:
     # A DEDICATED embedding model — a chat model (gemma) can't serve
     # /api/embeddings, which silently degraded recall to hash-matching.
     # One-time setup on the GPU node:  ollama pull nomic-embed-text
+    # The model is tiny (~275MB) and pinned resident (keep_alive -1) so embeds
+    # never load-churn against the chat model. If the GPU is so tight that both
+    # can't stay loaded (watch `ollama ps`), set OLLAMA_MAX_LOADED_MODELS=2 in
+    # the Ollama service env — or set backend: hash to take embeds off the GPU.
     ollama_model: nomic-embed-text
+    timeout_s: 3.0 # embeds sit near the reply path: fail FAST into hash, never stall
     hash_dim: 256 # fallback hashing-embedder dimension
   retrieval:
     top_k: 6 # memories surfaced per recall
     half_life_days: 14 # recency decay half-life
     min_activation: 0.05 # below this a memory doesn't surface at all
+    budget_ms: 300 # hard per-turn budget for recall; over-budget = skip the
+      # note this turn. Keeps memory OFF the reply's critical path
+      # (a slow GPU embed was costing ~6s of first-token latency).
   forgetting:
     enabled: true # gentle decay: old + unimportant + never-recalled
     max_age_days: 90 # ...memories fade after this long untouched

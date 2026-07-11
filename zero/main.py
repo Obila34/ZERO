@@ -10,6 +10,7 @@ generated — the main trick for keeping a fully-local pipeline feeling responsi
 from __future__ import annotations
 
 import argparse
+import contextlib
 import itertools
 import queue
 import random
@@ -247,6 +248,13 @@ class Zero:
         self._corpus_log: list[tuple] = []    # (speaker, role, text) for training data
         self._welcomed: set[int] = set()  # people greeted "welcome back" this session
 
+        # External control (the AF1 fusion surface — zero/control.py). One lock
+        # serializes external turns against each other; the busy-wait in
+        # external_turn_text keeps them off the native loop's think/speak phase.
+        self._ext_lock = threading.Lock()
+        self._last_ext: dict = {}   # last external turn, for /zero/status
+        self._control = None        # ControlServer when control.enabled
+
         # Voice-only extras (need the voice/mic): owner verification + spoken fillers.
         self._filler_prob = self.cfg.get("conversation.filler_probability", 0.5)
         self._filler_grace_s = self.cfg.get("conversation.filler_grace_ms", 600) / 1000.0
@@ -397,9 +405,12 @@ class Zero:
     def run_text(self) -> None:
         """Type-to-chat: tests the brain (LLM + memory + conversation) with no mic,
         Piper or Whisper needed. Useful for validating the GPU LLM offload."""
+        self._start_control()  # text-mode turns still serve /zero/turn_text
         warmup = getattr(self.llm, "warmup", None)
         if callable(warmup):
             warmup(self._warmup_messages())
+        if self._control is not None:
+            self._control.ready = True
         print("\nZERO text mode — type to chat. Say 'goodbye' to reset, Ctrl-C to quit.\n")
         self._start_conversation()
         try:
@@ -444,11 +455,16 @@ class Zero:
 
     # -- main loop ----------------------------------------------------------
     def run(self) -> None:
+        # AF1 fusion surface — up before warmup so /health answers immediately;
+        # `ready` flips true once the model is pinned.
+        self._start_control()
         # Pin the LLM in RAM now — with the real prefix, so the first reply
         # pays neither the cold load nor the persona+memory prefill.
         warmup = getattr(self.llm, "warmup", None)
         if callable(warmup):
             warmup(self._warmup_messages())
+        if self._control is not None:
+            self._control.ready = True
         self.mic.start()
         # Open the eyes BEFORE the wake loop so perception is already running when
         # the user speaks — the scene is pre-computed, never on the critical path.
@@ -968,15 +984,31 @@ class Zero:
 
         # Relevance recall: what a human would "think of" hearing this turn —
         # ephemeral, attached to the outgoing copy only, never history.
+        # HARD TIME BUDGET: recall may hit the GPU embedder, and a slow embed
+        # sitting in the reply path showed up as multi-second first-token lag.
+        # If it doesn't come back inside the budget, this turn just goes
+        # without the note — never slower.
         recall_note = ""
         if self.memory is not None:
-            try:
-                pid = ident.person_id if ident is not None else None
-                recalled = self.memory.relevant_block(text, person_id=pid)
-                if recalled:
-                    recall_note = f"(This reminds you of things you know: {recalled}.)"
-            except Exception as e:  # recall must never break a turn
-                log.debug("recall failed: %s", e)
+            budget_s = self.cfg.get("memory.retrieval.budget_ms", 300) / 1000.0
+            pid = ident.person_id if ident is not None else None
+            res: dict = {}
+
+            def _recall():
+                try:
+                    res["block"] = self.memory.relevant_block(text, person_id=pid)
+                except Exception as e:  # recall must never break a turn
+                    log.debug("recall failed: %s", e)
+
+            t = threading.Thread(target=_recall, name="recall", daemon=True)
+            t.start()
+            t.join(timeout=budget_s)
+            recalled = res.get("block", "")
+            if t.is_alive():
+                log.debug("recall skipped this turn (over %dms budget)",
+                          int(budget_s * 1000))
+            if recalled:
+                recall_note = f"(This reminds you of things you know: {recalled}.)"
         turn_notes = list(getattr(self, "_turn_notes", []) or [])
 
         # Spontaneous visual awareness: debounced scene changes ("a guitar just
@@ -1639,6 +1671,165 @@ class Zero:
             got.append("your voice")
         return (f"Got it, {name}. I've saved {' and '.join(got)} — "
                 "I'll recognise you next time.")
+
+    # -- external control (the AF1 fusion surface — zero/control.py) ---------
+    # These run an AF1 push-to-talk turn through the SAME pipeline the native
+    # mic loop uses: same Conversation, same memory, same tool registry
+    # (web_search, timers, remember/recall), same voice + Pi speaker. AF1 gets
+    # everything ZERO has because it IS ZERO answering.
+
+    def _start_control(self) -> None:
+        if not self.cfg.get("control.enabled", False):
+            return
+        try:
+            from zero.control import ControlServer
+
+            self._control = ControlServer(
+                self,
+                host=self.cfg.get("control.host", "0.0.0.0"),
+                port=self.cfg.get("control.port", 8090))
+            self._control.start()
+        except Exception as e:  # the robot must run even if the surface can't
+            log.warning("control server failed to start: %s", e)
+            self._control = None
+
+    def external_status(self) -> dict:
+        return {
+            "ok": True,
+            "state": str(self.state.value),
+            "ready": bool(self._control is not None and self._control.ready),
+            "last": dict(self._last_ext),
+            "voice_degraded": (bool(getattr(self.voice, "degraded", False))
+                               if not self.text_mode else None),
+            "stt_degraded": (bool(getattr(self.stt, "degraded", False))
+                             if not self.text_mode else None),
+        }
+
+    def _remote_tts_engine(self):
+        """Walk the voice wrapper chain (orchestrator → fallback → engine) to
+        the RemoteTTS whose `.voice` is the per-request Orpheus speaker name."""
+        obj = getattr(self, "voice", None)
+        for _ in range(5):
+            if obj is None:
+                return None
+            if type(obj).__name__ == "RemoteTTS":
+                return obj
+            obj = getattr(obj, "tts", None) or getattr(obj, "primary", None)
+        return None
+
+    @contextlib.contextmanager
+    def _voice_override(self, voice: str | None):
+        """Speak THIS request in a different Orpheus voice, then restore ZERO's
+        own. AF1's picker keeps its whole roster without touching the default."""
+        eng = self._remote_tts_engine() if voice else None
+        if eng is None or not voice or getattr(eng, "voice", None) == voice:
+            yield
+            return
+        old = eng.voice
+        eng.voice = str(voice)
+        try:
+            yield
+        finally:
+            eng.voice = old
+
+    def _wait_not_busy(self, timeout_s: float = 20.0) -> bool:
+        """Hold external requests off the native loop's think/speak phase so
+        two replies never talk over each other on the one speaker."""
+        deadline = time.monotonic() + timeout_s
+        while self.state in (State.THINKING, State.SPEAKING):
+            if time.monotonic() > deadline:
+                return False
+            time.sleep(0.1)
+        return True
+
+    def external_say(self, text: str, voice: str | None = None) -> None:
+        """Speak one line on the Pi speaker (AF1 announcements/callouts)."""
+        if self.text_mode:
+            log.info("external say (text mode, not spoken): %r", text)
+            return
+        with self._ext_lock:
+            self._wait_not_busy()
+            self.mic.pause()  # don't transcribe our own voice off the speaker
+            try:
+                with self._voice_override(voice):
+                    self._speak_one(text)
+            finally:
+                self.mic.resume()
+                self.mic.drain()
+
+    def external_turn_audio(self, audio, sr: int, voice: str | None = None,
+                            person_id: int | None = None) -> dict:
+        """Full turn from an AF1-recorded utterance: STT → brain → Pi speaker."""
+        try:
+            with self._stt_lock:
+                text = self.stt.transcribe(audio, sr).strip()
+        except Exception as e:
+            log.warning("external stt failed: %s", e)
+            return {"ok": False, "error": f"stt: {str(e)[:120]}"}
+        if not text:
+            return {"ok": False, "error": "empty-transcript"}
+        out = self.external_turn_text(text, voice=voice, person_id=person_id)
+        out["heard"] = text
+        return out
+
+    def external_turn_text(self, text: str, voice: str | None = None,
+                           speak: bool = True,
+                           person_id: int | None = None) -> dict:
+        """One brain turn — identical semantics to a native mic turn: shared
+        history, vision note, memory recall, tools/web_search via llm.stream,
+        streamed TTS on the Pi speaker. Returns {ok, heard, reply}."""
+        with self._ext_lock:
+            if not self._wait_not_busy():
+                return {"ok": False, "error": "busy-speaking"}
+            # First external turn of a session: load durable memory the same
+            # way _converse does, so recall works even before any native chat.
+            if self.memory is not None and not getattr(self.convo,
+                                                       "_memory_block", ""):
+                self.convo.set_memory(self.memory.as_block())
+            self.convo.add_user(text)
+            self._t_reply_start = time.monotonic()
+            messages = self._attach_vision(self.convo.messages(), text)
+            do_speak = speak and not self.text_mode
+            if do_speak:
+                self.mic.pause()
+            try:
+                chunks, llm_stop = self._stream_in_background(messages)
+                if do_speak:
+                    self._interrupt = False
+                    with self._voice_override(voice):
+                        reply = self._speak_streaming(chunks, llm_stop)
+                else:
+                    reply = "".join(chunks).strip()
+            except Exception as e:
+                log.exception("external turn failed")
+                return {"ok": False, "error": str(e)[:200], "heard": text}
+            finally:
+                if do_speak:
+                    self.mic.resume()
+                    self.mic.drain()
+            reply = (reply or "").strip()
+            if not reply:
+                return {"ok": False, "error": "empty-reply", "heard": text}
+            self.convo.add_assistant(reply)
+            pid = (person_id if person_id is not None
+                   else self.cfg.get("control.person_id", 1))
+            if self.memory is not None:
+                try:  # remembered like an AF1 episode — one mind, both surfaces
+                    self.memory.add_episode(
+                        f"(via AF1) they said: {text} — I replied: {reply}",
+                        person_id=pid)
+                except Exception as e:
+                    log.debug("external episode save failed: %s", e)
+            self._last_ext = {"heard": text, "reply": reply, "t": time.time()}
+            return {"ok": True, "heard": text, "reply": reply}
+
+    def external_sleep(self) -> None:
+        """Reset the external conversation thread (AF1's 'sleep' control). The
+        native loop owns its own conversation lifecycle — never touch it mid-chat."""
+        with self._ext_lock:
+            if self.state == State.IDLE:
+                self.convo.reset()
+                self._last_ext = {}
 
 
 def main() -> int:

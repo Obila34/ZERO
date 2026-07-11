@@ -45,14 +45,23 @@ class HashEmbedder:
 
 
 class OllamaEmbedder:
-    """Embeddings from the GPU Ollama over the existing tunnel."""
+    """Embeddings from the GPU Ollama over the existing tunnel.
+
+    keep_alive=-1 pins the (tiny) embedding model in memory so per-turn embeds
+    never pay a model load — and never force the big chat model to reload
+    (that churn showed up as ~6s first-token latency). The timeout is SHORT on
+    purpose: an embed sits near the reply path, so a slow one must fail fast
+    into the hash fallback rather than stall the conversation.
+    """
 
     name = "ollama"
 
-    def __init__(self, host: str, model: str, timeout: float = 10.0):
+    def __init__(self, host: str, model: str, timeout: float = 3.0,
+                 keep_alive: str | int = -1):
         self.url = host.rstrip("/") + "/api/embeddings"
         self.model = model
         self.timeout = float(timeout)
+        self.keep_alive = keep_alive
         self.dim: int | None = None  # learned from the first reply
 
     def embed(self, text: str) -> np.ndarray | None:
@@ -63,7 +72,8 @@ class OllamaEmbedder:
 
         try:
             r = requests.post(self.url,
-                              json={"model": self.model, "prompt": text},
+                              json={"model": self.model, "prompt": text,
+                                    "keep_alive": self.keep_alive},
                               timeout=self.timeout)
             r.raise_for_status()
             emb = np.asarray(r.json().get("embedding", []), dtype=np.float32)
@@ -114,7 +124,7 @@ class ResilientEmbedder:
 
 
 def build_embedder(backend: str, *, host: str = "", model: str = "",
-                   hash_dim: int = 256):
+                   hash_dim: int = 256, timeout: float = 3.0):
     """backend: auto | ollama | hash | off -> embedder or None."""
     backend = (backend or "auto").lower()
     if backend == "off":
@@ -122,10 +132,12 @@ def build_embedder(backend: str, *, host: str = "", model: str = "",
     if backend == "hash":
         return HashEmbedder(hash_dim)
     if backend == "ollama":
-        return ResilientEmbedder(OllamaEmbedder(host, model), HashEmbedder(hash_dim))
+        return ResilientEmbedder(OllamaEmbedder(host, model, timeout=timeout),
+                                 HashEmbedder(hash_dim))
     # auto: ollama when a host is configured, hash otherwise
     if host:
-        return ResilientEmbedder(OllamaEmbedder(host, model), HashEmbedder(hash_dim))
+        return ResilientEmbedder(OllamaEmbedder(host, model, timeout=timeout),
+                                 HashEmbedder(hash_dim))
     return HashEmbedder(hash_dim)
 
 

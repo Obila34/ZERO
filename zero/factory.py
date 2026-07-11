@@ -191,6 +191,7 @@ def build_memory(cfg: Config):
         model=cfg.get("memory.embeddings.ollama_model",
                       cfg.get("llm.model", "")),
         hash_dim=cfg.get("memory.embeddings.hash_dim", 256),
+        timeout=cfg.get("memory.embeddings.timeout_s", 3.0),
     )
     path = cfg.resolve_path("memory.path", "zero_memory.sqlite")
     return SqliteMemory(
