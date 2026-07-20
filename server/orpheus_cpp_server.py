@@ -19,6 +19,7 @@ import io
 import os
 import site
 import sys
+import threading
 import time
 import wave
 
@@ -58,6 +59,12 @@ from orpheus_cpp import OrpheusCpp  # noqa: E402
 app = FastAPI()
 _model: OrpheusCpp | None = None
 
+# The llama.cpp context is NOT thread-safe: FastAPI runs these sync endpoints on a
+# threadpool, and two overlapping /tts_stream calls decoding on the same context
+# abort the CUDA backend (SIGABRT/SIGSEGV, server core-dumps mid-reply). Serialize
+# all synthesis; the Pi plays audio sequentially, so queueing costs nothing.
+_synth_lock = threading.Lock()
+
 
 class TTSReq(BaseModel):
     text: str
@@ -75,11 +82,12 @@ def tts(req: TTSReq):
     # orpheus-cpp streams (sample_rate, int16 chunk) tuples; collect into one WAV.
     sr = 24000
     chunks: list[np.ndarray] = []
-    for chunk_sr, samples in _model.stream_tts_sync(
-        req.text, options={"voice_id": req.voice}
-    ):
-        sr = int(chunk_sr)
-        chunks.append(np.asarray(samples, dtype=np.int16).reshape(-1))
+    with _synth_lock:
+        for chunk_sr, samples in _model.stream_tts_sync(
+            req.text, options={"voice_id": req.voice}
+        ):
+            sr = int(chunk_sr)
+            chunks.append(np.asarray(samples, dtype=np.int16).reshape(-1))
     audio = np.concatenate(chunks) if chunks else np.zeros(0, dtype=np.int16)
     buf = io.BytesIO()
     with wave.open(buf, "wb") as w:
@@ -96,10 +104,13 @@ def tts_stream(req: TTSReq):
     """Stream raw int16 PCM (24 kHz mono) as Orpheus generates it — first audio in
     ~200ms instead of waiting for the whole sentence."""
     def gen():
-        for _sr, samples in _model.stream_tts_sync(
-            req.text, options={"voice_id": req.voice}
-        ):
-            yield np.asarray(samples, dtype=np.int16).reshape(-1).tobytes()
+        # Lock inside the generator so it's held for the whole stream and released
+        # on client disconnect (GeneratorExit) via the with-block.
+        with _synth_lock:
+            for _sr, samples in _model.stream_tts_sync(
+                req.text, options={"voice_id": req.voice}
+            ):
+                yield np.asarray(samples, dtype=np.int16).reshape(-1).tobytes()
     return StreamingResponse(gen(), media_type="application/octet-stream")
 
 
