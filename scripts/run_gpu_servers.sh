@@ -51,7 +51,9 @@ if ! port_up 11434; then
   fi
 fi
 
-start whisper 9000 python server/whisper_server.py --model large-v3-turbo --port 9000
+# int8_float16: fp16 weights need ~2.5 GB free and OOM when the card is shared
+# with ollama + orpheus + vision; int8 weights fit in ~1.2 GB at near-identical WER.
+start whisper 9000 python server/whisper_server.py --model large-v3-turbo --port 9000 --compute-type int8_float16
 
 # Orpheus TTS. ORPHEUS_FP16=1 runs the full fp16 vLLM model (best quality +
 # fastest streaming, wants most of a GPU); default is the quantized cpp build

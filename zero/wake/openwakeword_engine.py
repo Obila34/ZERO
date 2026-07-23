@@ -34,6 +34,12 @@ class OpenWakeWordEngine(WakeWord):
             Model(wakeword_models=[model], **kwargs) if model else Model(**kwargs)
         )
         self._buf: np.ndarray = np.empty(0, dtype=np.int16)
+        # Diagnostics window: without this the idle loop is a black box — a
+        # near-miss (score 0.4) and dead silence (score 0.0, wrong mic) look
+        # identical in the logs but need opposite fixes.
+        self._win_chunks = 0
+        self._win_score = 0.0
+        self._win_rms = 0.0
         log.info("openWakeWord loaded (model=%s, threshold=%.2f)", model, threshold)
 
     def process(self, frame: np.ndarray) -> bool:
@@ -48,6 +54,25 @@ class OpenWakeWordEngine(WakeWord):
             chunk, self._buf = self._buf[:_CHUNK_SAMPLES], self._buf[_CHUNK_SAMPLES:]
             scores = self._model.predict(chunk)
             score = max(scores.values()) if scores else 0.0
+            rms = float(np.sqrt(np.mean(chunk.astype(np.float64) ** 2)))
+            self._win_score = max(self._win_score, score)
+            self._win_rms = max(self._win_rms, rms)
+            self._win_chunks += 1
+            if self._win_chunks >= 50:  # 50 x 80ms = every ~4s of audio
+                # Near-misses surface at INFO so a mistuned threshold/gain is
+                # visible on a normal run; the quiet heartbeat stays at DEBUG
+                # (run with ZERO_LOG=DEBUG to watch levels continuously).
+                msg = ("wake window: top score %.2f (threshold %.2f), "
+                       "peak rms %.0f")
+                if self._win_score >= 0.5 * self.threshold:
+                    log.info(msg + " — NEAR MISS", self._win_score,
+                             self.threshold, self._win_rms)
+                else:
+                    log.debug(msg, self._win_score, self.threshold,
+                              self._win_rms)
+                self._win_chunks = 0
+                self._win_score = 0.0
+                self._win_rms = 0.0
             if score >= self.threshold:
                 fired = True
                 break

@@ -148,6 +148,7 @@ class Zero:
     def __init__(self, config_path: str | None = None, text_mode: bool = False):
         self.cfg = load_config(config_path)
         self.text_mode = text_mode
+        self._abort_if_already_running()
         sr = self.cfg.get("audio.sample_rate", 16000)
 
         # The LLM is all text mode needs. Audio capture, wake word, STT and the
@@ -1688,6 +1689,36 @@ class Zero:
     # mic loop uses: same Conversation, same memory, same tool registry
     # (web_search, timers, remember/recall), same voice + Pi speaker. AF1 gets
     # everything ZERO has because it IS ZERO answering.
+
+    def _abort_if_already_running(self) -> None:
+        """Refuse to start when a live ZERO already answers on the control port.
+
+        Two instances share one mic and one speaker: both answer every wake
+        word (you hear the reply twice, interleaved) and their concurrent
+        Orpheus streams crash the CUDA backend — the in-process synthesis
+        lock can't serialize across processes. So a confirmed duplicate is
+        fatal, not a warning. A busy port that ISN'T ZERO still falls through
+        to _start_control's existing warn-and-continue path.
+        """
+        if not self.cfg.get("control.enabled", False):
+            return
+        import json
+        import urllib.request
+
+        port = self.cfg.get("control.port", 8090)
+        try:
+            with urllib.request.urlopen(
+                    f"http://127.0.0.1:{port}/health", timeout=2) as r:
+                j = json.loads(r.read().decode("utf-8", "replace"))
+        except Exception:
+            return  # nothing (or something non-ZERO) on the port
+        if isinstance(j, dict) and j.get("service") == "zero-control":
+            raise SystemExit(
+                f"Another ZERO instance is already running (control port "
+                f"{port} answered /health). Two instances double-speak every "
+                "reply and crash the GPU TTS. Stop it first:\n"
+                "  sudo systemctl stop zero    # if it's the service unit\n"
+                "  pkill -f zero.main          # if it's a stray terminal run")
 
     def _start_control(self) -> None:
         if not self.cfg.get("control.enabled", False):
