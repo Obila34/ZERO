@@ -285,12 +285,22 @@ class SqliteMemory:
             out.append(value if key == "episode" else f"{key}: {value}")
         return out
 
-    def relevant_block(self, query: str, *, person_id: int | None = None) -> str:
+    def relevant_block(self, query: str, *, person_id: int | None = None,
+                       exclude: str = "") -> str:
         """Per-turn ephemeral recall — what a human would 'think of' hearing
-        this. '' when nothing relevant surfaces."""
+        this. '' when nothing relevant surfaces.
+
+        ``exclude`` is the durable memory block already injected into the system
+        prompt; any hit whose text is already present there is dropped, so the
+        same fact never gets spent twice in one prompt (saves context tokens and
+        stops the model echoing a fact it was just handed)."""
         hits = self.search(query, person_id=person_id, top_k=4)
         if not hits:
             return ""
+        if exclude:
+            hits = [h for h in hits if h not in exclude]
+            if not hits:
+                return ""
         return "; ".join(hits)
 
     # ── legacy-compatible reads ───────────────────────────────────────────────

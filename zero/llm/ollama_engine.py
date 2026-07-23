@@ -35,6 +35,9 @@ class OllamaLLM(LLM):
         # Explicit context size: Ollama's default can silently truncate the
         # system prompt + memory + history, which also shifts the cached prefix.
         self.num_ctx = int(num_ctx)
+        # Last turn's prompt token count, read from Ollama's `done` message so the
+        # caller can see how full the window actually is (0 until the first reply).
+        self.last_prompt_tokens = 0
         self._session = requests.Session()  # keep-alive across turns
 
     def warmup(self, messages: list[Message] | None = None) -> None:
@@ -109,6 +112,7 @@ class OllamaLLM(LLM):
                     emitted = True
                     yield chunk
                 if obj.get("done"):
+                    self._log_usage(obj)
                     if not emitted:
                         # No content came back — log why so empty replies are visible.
                         log.warning("empty reply (done_reason=%s)", obj.get("done_reason"))
@@ -117,3 +121,24 @@ class OllamaLLM(LLM):
             # Runs on normal exit AND when the consumer abandons the generator
             # (barge-in) — closes the HTTP stream so Ollama stops generating.
             resp.close()
+
+    def _log_usage(self, done: dict) -> None:
+        """Record and log the prompt/output token counts from Ollama's final
+        `done` message. This runs AFTER the last token is streamed, so it never
+        sits on the first-token critical path. A prompt that fills most of the
+        window means older turns or the memory block are about to be truncated —
+        warn so compaction (or a larger num_ctx) can be applied deliberately."""
+        pt = done.get("prompt_eval_count")
+        et = done.get("eval_count")
+        if pt is None:
+            return
+        pt = int(pt)
+        self.last_prompt_tokens = pt
+        pct = (100.0 * pt / self.num_ctx) if self.num_ctx else 0.0
+        log.info("context: prompt=%d tok (%.0f%% of %d), output=%s tok",
+                 pt, pct, self.num_ctx, et)
+        if self.num_ctx and pt >= 0.9 * self.num_ctx:
+            log.warning("context near limit: prompt %d tok is >=90%% of num_ctx "
+                        "%d — Ollama truncates from the FRONT, so persona/memory "
+                        "can be silently dropped. Compact sooner or raise num_ctx.",
+                        pt, self.num_ctx)

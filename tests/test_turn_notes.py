@@ -78,7 +78,7 @@ def test_recall_over_budget_is_skipped_not_waited_for():
     import time as _time
 
     class SlowMemory:
-        def relevant_block(self, text, person_id=None):
+        def relevant_block(self, text, person_id=None, exclude=""):
             _time.sleep(2.0)                       # way over the 300ms budget
             return "something ancient"
 
@@ -92,7 +92,7 @@ def test_recall_over_budget_is_skipped_not_waited_for():
 
 def test_recall_within_budget_attaches_note():
     class FastMemory:
-        def relevant_block(self, text, person_id=None):
+        def relevant_block(self, text, person_id=None, exclude=""):
             return "they love planets"
 
     z = _stub(memory=FastMemory())

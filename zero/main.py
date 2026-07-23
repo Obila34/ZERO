@@ -12,9 +12,11 @@ from __future__ import annotations
 import argparse
 import contextlib
 import itertools
+import os
 import queue
 import random
 import re
+import sys
 import threading
 import time
 
@@ -1006,9 +1008,13 @@ class Zero:
             pid = ident.person_id if ident is not None else None
             res: dict = {}
 
+            convo = getattr(self, "convo", None)
+            already = convo.memory_block if convo is not None else ""
+
             def _recall():
                 try:
-                    res["block"] = self.memory.relevant_block(text, person_id=pid)
+                    res["block"] = self.memory.relevant_block(
+                        text, person_id=pid, exclude=already)
                 except Exception as e:  # recall must never break a turn
                     log.debug("recall failed: %s", e)
 
@@ -1874,6 +1880,25 @@ class Zero:
                 self._last_ext = {}
 
 
+def _acquire_instance_lock():
+    """Refuse to start a second voice instance. Two ZEROs on one box both
+    answer the mic (double voice) and their concurrent TTS requests crash the
+    Orpheus CUDA backend. flock releases automatically however the process
+    dies, so a stale lock file can never block a fresh start."""
+    import fcntl
+
+    lock = open("/tmp/zero-main.lock", "w")  # noqa: SIM115 — held for process lifetime
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print("another ZERO instance is already running (voice would double up).\n"
+              "find it with:  pgrep -af zero.main", file=sys.stderr)
+        raise SystemExit(1)
+    lock.write(str(os.getpid()))
+    lock.flush()
+    return lock  # keep the handle alive; closing it would drop the lock
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         prog="zero",
@@ -1885,6 +1910,8 @@ def main() -> int:
                         help="type-to-chat mode: LLM + memory only, no mic/speaker")
     args = parser.parse_args()
     setup_logging()
+    if not args.text:
+        globals()["_instance_lock"] = _acquire_instance_lock()
     zero = Zero(args.config, text_mode=args.text)
     if args.text:
         zero.run_text()

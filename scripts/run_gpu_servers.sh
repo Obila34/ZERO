@@ -42,9 +42,23 @@ start() { # $1=name $2=port $3...=command
 
 cd "$REPO_ROOT"
 
+# KV-cache VRAM: q8_0 roughly halves the LLM's KV-cache footprint at negligible
+# quality loss, which frees room on the shared card (Gemma + Whisper + Orpheus +
+# vision) so the chat model is far less likely to be evicted mid-session — that
+# eviction is the ~6s first-token stall. Flash attention is required for a
+# quantized KV cache and speeds attention besides. These env vars only take
+# effect for an ollama process THIS script starts; if ollama runs as a system
+# service, set the same two vars in its unit (systemctl edit ollama):
+#   [Service]
+#   Environment=OLLAMA_FLASH_ATTENTION=1
+#   Environment=OLLAMA_KV_CACHE_TYPE=q8_0
+export OLLAMA_FLASH_ATTENTION="${OLLAMA_FLASH_ATTENTION:-1}"
+export OLLAMA_KV_CACHE_TYPE="${OLLAMA_KV_CACHE_TYPE:-q8_0}"
+
 # Ollama: usually a systemd service already. Start it detached only if it's down.
 if ! port_up 11434; then
   if command -v ollama >/dev/null 2>&1; then
+    echo "[gpu] ollama KV cache: $OLLAMA_KV_CACHE_TYPE (flash_attn=$OLLAMA_FLASH_ATTENTION)"
     start ollama 11434 ollama serve
   else
     echo "[gpu] WARNING: ollama not on :11434 and 'ollama' not found — install it" >&2

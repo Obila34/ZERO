@@ -46,6 +46,13 @@ class Conversation:
         """
         self._memory_block = block or ""
 
+    @property
+    def memory_block(self) -> str:
+        """The durable memory text currently injected into the system prompt.
+        Read by per-turn recall so it can skip facts already present here (no
+        point spending tokens saying the same fact twice)."""
+        return self._memory_block
+
     def add_user(self, text: str) -> None:
         self._history.append({"role": "user", "content": text})
         self._maybe_trim()
