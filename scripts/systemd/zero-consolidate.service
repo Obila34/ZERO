@@ -1,0 +1,12 @@
+[Unit]
+Description=ZERO nightly consolidation (sleep: distill episodes, decay memory, rebuild training set)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=obilasam3
+WorkingDirectory=/home/obilasam3/ZERO
+ExecStart=/home/obilasam3/ZERO/.venv/bin/python scripts/consolidate.py
+# Consolidation is IO/CPU housekeeping — never contend with live inference.
+Nice=15
+IOSchedulingClass=idle

@@ -33,6 +33,7 @@ class Track:
     bbox: tuple
     first_ts: float
     last_ts: float
+    conf: float = 0.0          # latest matched detection's confidence
     confirmed: bool = False
     ref_center: tuple = field(default=None)  # anchor for movement detection
     last_move_ts: float = 0.0
@@ -76,6 +77,7 @@ class IouTracker:
             matched_t.add(id(t))
             matched_d.add(id(d))
             t.bbox, t.last_ts = tuple(d.bbox), now
+            t.conf = float(getattr(d, "confidence", 0.0) or 0.0)
             if not t.confirmed and now - t.first_ts >= self.confirm_s:
                 t.confirmed = True
                 t.ref_center = t.center()
@@ -92,8 +94,9 @@ class IouTracker:
         # Unmatched detections start tentative tracks.
         for d in detections:
             if id(d) not in matched_d and getattr(d, "bbox", None) is not None:
-                self._tracks.append(Track(next(self._ids), d.label,
-                                          tuple(d.bbox), now, now))
+                self._tracks.append(Track(
+                    next(self._ids), d.label, tuple(d.bbox), now, now,
+                    conf=float(getattr(d, "confidence", 0.0) or 0.0)))
 
         # Expire tracks not seen for lost_s.
         alive = []
@@ -105,3 +108,9 @@ class IouTracker:
                 alive.append(t)
         self._tracks = alive
         return events
+
+    def tracks(self, confirmed_only: bool = True) -> list[Track]:
+        """The live tracks (persistent per-instance identities) for the world
+        state. Returns the internal Track objects — callers must treat them as
+        read-only and copy what they keep (the update loop mutates them)."""
+        return [t for t in self._tracks if t.confirmed or not confirmed_only]

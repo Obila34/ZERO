@@ -45,6 +45,11 @@ class InteractionPolicy:
         self._last_by_kind: dict[str, float] = {}
         self._greeted: dict[int, float] = {}     # person_id -> last greeted ts
         self._recent: list[float] = []           # timestamps of the last hour
+        # Bandit-lite (Phase 3): per-kind EMA of how proactive utterances land
+        # (reward in [-1,1] from zero/learning/reward.py). Kinds that keep
+        # falling flat get LONGER cooldowns; kinds that land get shorter ones.
+        self._outcome_ema: dict[str, float] = {}
+        self._outcome_alpha = 0.3
 
     @staticmethod
     def _key(person_id: int | None) -> int:
@@ -74,7 +79,7 @@ class InteractionPolicy:
         if now - last_kind < 60.0:               # never two greetings in a minute
             return False
         last = self._greeted.get(self._key(person_id), 0.0)
-        if now - last < self.greet_cooldown_s:
+        if now - last < self.greet_cooldown_s * self.cooldown_scale("greet"):
             return False
         return True
 
@@ -86,7 +91,8 @@ class InteractionPolicy:
         if person_id is None and not self.engage_unknown:
             return False                         # ask strangers only if enabled
         last = self._last_by_kind.get("curiosity", 0.0)
-        return now - last >= self.curiosity_cooldown_s
+        return (now - last >= self.curiosity_cooldown_s
+                * self.cooldown_scale("curiosity"))
 
     def may_remark(self, now: float | None = None) -> bool:
         """A generic ambient remark to whoever's around (keeps a lingering
@@ -94,11 +100,31 @@ class InteractionPolicy:
         now = now or time.time()
         if not self.enabled or self._in_quiet_hours(now) or not self._rate_ok(now):
             return False
-        return now - self._last_by_kind.get("remark", 0.0) >= self.remark_cooldown_s
+        return (now - self._last_by_kind.get("remark", 0.0)
+                >= self.remark_cooldown_s * self.cooldown_scale("remark"))
 
     def defer_announcement(self, now: float | None = None) -> bool:
         """Timers/reminders: speak unless it's quiet hours (defer, don't drop)."""
         return self._in_quiet_hours(now or time.time())
+
+    # ── adaptive cooldowns (Phase 3 bandit-lite) ──────────────────────────────
+    def record_outcome(self, kind: str, reward: float) -> None:
+        """Fold one proactive outcome (reward in [-1,1]) into the kind's EMA."""
+        reward = max(-1.0, min(1.0, float(reward)))
+        prev = self._outcome_ema.get(kind)
+        a = self._outcome_alpha
+        self._outcome_ema[kind] = (reward if prev is None
+                                   else (1 - a) * prev + a * reward)
+        log.debug("proactive outcome %s: %.2f (ema %.2f)", kind, reward,
+                  self._outcome_ema[kind])
+
+    def cooldown_scale(self, kind: str) -> float:
+        """Multiplier on the kind's base cooldown from its outcome history:
+        EMA -1 -> 3.0x (back way off), 0/unknown -> 1.0x, +1 -> 0.5x."""
+        ema = self._outcome_ema.get(kind, 0.0)
+        if ema >= 0.0:
+            return 1.0 - 0.5 * ema           # 1.0 .. 0.5
+        return 1.0 - 2.0 * ema               # 1.0 .. 3.0
 
     # ── record what actually happened ─────────────────────────────────────────
     def spoke(self, kind: str, person_id: int | None = None,

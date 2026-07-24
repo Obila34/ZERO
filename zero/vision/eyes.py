@@ -58,7 +58,9 @@ class Eyes:
                  preview_mode: str = "auto", preview_host: str = "127.0.0.1",
                  preview_port: int = 8008, learned=None,
                  unknown_conf: float = 0.45,
-                 change_note_cooldown_s: float = 120.0):
+                 change_note_cooldown_s: float = 120.0,
+                 world=None, motion=None, gate=None, narrator=None,
+                 narration_max_age_s: float = 20.0, tier1_budget=None):
         self._camera = camera
         self._detector = detector
         self._color = color_namer
@@ -100,11 +102,24 @@ class Eyes:
         self._last_seen: dict[str, float] = {}
         self._stable: set[str] = set()
         # Per-instance IoU tracks — "the SAME cup moved", not just labels
-        # coming and going. Only its "moved" events are consumed here (the
-        # label-level diffing above already covers appear/disappear).
+        # coming and going. Fed EVERY detection (people included) so the world
+        # state gets persistent instance identities; the remark path filters
+        # person-moved events out (people move constantly).
         from zero.vision.tracker import IouTracker
 
         self._tracker = IouTracker()
+        # World state (Phase 2): Tier 0 motion every frame, Tier 1 tracks after
+        # every detection pass, Tier 2 narration via the optional narrator.
+        # All optional — Eyes runs exactly as before when world is None.
+        self._world = world
+        self._motion = motion
+        self._gate = gate
+        self._narrator = narrator
+        self._narration_max_age_s = float(narration_max_age_s)
+        self._last_dets: list = []
+        # Tier 1 hard ceiling (Phase 3): even under constant motion, detection
+        # may not eat more than its duty-cycle budget of wall time.
+        self._tier1_budget = tier1_budget
 
     _STABLE_S = 2.0      # presence/absence must persist this long to count
     _SETTLE_S = 8.0      # startup grace: the initial scene isn't "new"
@@ -134,9 +149,13 @@ class Eyes:
         self._started_at = time.time()
         self._thread = threading.Thread(target=self._loop, name="Eyes", daemon=True)
         self._thread.start()
+        if self._narrator is not None:
+            self._narrator.start()
         log.info("eyes open — perceiving continuously")
 
     def stop(self) -> None:
+        if self._narrator is not None:
+            self._narrator.stop()
         self._stop.set()
         if self._thread is not None:
             self._thread.join(timeout=2.0)
@@ -146,6 +165,12 @@ class Eyes:
             self._preview_sink.close()
             self._preview_sink = None
 
+    @property
+    def world(self):
+        """The live WorldState (or None) — the read surface for main/proactive/
+        memory: ``eyes.world.snapshot()`` / ``wait_for_change()``."""
+        return self._world
+
     # ── perception loop ──────────────────────────────────────────────────────
     def _loop(self) -> None:
         self._detect_errors = 0
@@ -153,19 +178,50 @@ class Eyes:
             frame = self._camera.read_new(timeout=1.0)
             if frame is None:
                 continue
-            detections: list = []
-            try:
-                detections = self._detector.detect(frame)
-                self._fill_colors(frame, detections)
-            except Exception as e:  # detection failed, but we still SAW the frame
-                self._detect_errors += 1
-                if self._detect_errors <= 3 or self._detect_errors % 30 == 0:
-                    log.warning("detection failed (x%d): %s", self._detect_errors, e)
-            # Always publish the frame + whatever detections we got, so a broken
-            # detector never makes it look like the camera is blind.
-            self._scene.update(detections, frame_rgb=frame)
-            self._track_changes(detections)
-            self._track_motion(detections)
+            now = time.time()
+            # Tier 0: motion on EVERY frame (cheap), published to the world and
+            # used to gate Tier 1 — a still room doesn't get re-detected at
+            # full cadence.
+            motion_active = True
+            if self._motion is not None:
+                try:
+                    level, motion_active = self._motion.update(frame)
+                    if self._world is not None:
+                        self._world.update_motion(level, motion_active, ts=now)
+                except Exception as e:   # Tier 0 must never blind the camera
+                    log.debug("motion detect failed: %s", e)
+            run_detect = (self._gate.should_detect(motion_active, now)
+                          if self._gate is not None else True)
+            if (run_detect and self._tier1_budget is not None
+                    and not self._tier1_budget.allowed(now)):
+                run_detect = False           # hard ceiling beats motion
+
+            if run_detect:
+                detections: list = []
+                t_detect = time.perf_counter()
+                try:
+                    detections = self._detector.detect(frame)
+                    self._fill_colors(frame, detections)
+                except Exception as e:  # detection failed, but we SAW the frame
+                    self._detect_errors += 1
+                    if self._detect_errors <= 3 or self._detect_errors % 30 == 0:
+                        log.warning("detection failed (x%d): %s",
+                                    self._detect_errors, e)
+                if self._tier1_budget is not None:
+                    self._tier1_budget.record(time.perf_counter() - t_detect,
+                                              now)
+                self._last_dets = detections
+                # Always publish the frame + whatever detections we got, so a
+                # broken detector never makes it look like the camera is blind.
+                self._scene.update(detections, frame_rgb=frame)
+                self._track_changes(detections)
+                self._track_instances(detections, now)
+            else:
+                # Gated frame: keep the LAST detections current (the scene has
+                # not changed — that is why the gate closed) but still publish
+                # the fresh frame for identity/keyframes/preview.
+                detections = self._last_dets
+                self._scene.update(detections, frame_rgb=frame)
             if self._preview_sink is not None and self._preview_sink.ok:
                 self._preview_sink.show(frame, detections)
             if self._detect_interval > 0:
@@ -203,21 +259,39 @@ class Eyes:
             with self._change_lock:
                 self._changes = (self._changes + events)[-4:]
 
-    def _track_motion(self, detections) -> None:
-        """Per-instance motion: 'the cup just moved' remark candidates. People
-        move constantly — identity/proactive own them, so they're excluded."""
+    def _track_instances(self, detections, now: float) -> None:
+        """Per-instance tracking (Tier 1): update tracks from ALL detections,
+        publish the scene graph to the world state, and queue 'the cup just
+        moved' remark candidates (people excluded — they move constantly;
+        identity/proactive own them)."""
         try:
             dets = [d for d in detections
-                    if getattr(d, "bbox", None) is not None
-                    and d.label.lower() != "person"]
-            events = self._tracker.update(dets, time.time())
-        except Exception as e:  # motion tracking must never break perception
-            log.debug("motion tracking failed: %s", e)
+                    if getattr(d, "bbox", None) is not None]
+            events = self._tracker.update(dets, now)
+        except Exception as e:  # tracking must never break perception
+            log.debug("instance tracking failed: %s", e)
             return
-        if time.time() - self._started_at < self._SETTLE_S:
+        if self._world is not None:
+            try:
+                from zero.world.state import WorldEvent, WorldObject
+
+                objects = [WorldObject(track_id=t.tid, label=t.label,
+                                       bbox=tuple(t.bbox), confidence=t.conf,
+                                       first_seen=t.first_ts, last_seen=t.last_ts)
+                           for t in self._tracker.tracks()]
+                kinds = {"new": "appeared", "gone": "left", "moved": "moved"}
+                wevents = [WorldEvent(kind=kinds[k], label=lbl, ts=now)
+                           for k, lbl in events if k in kinds]
+                # Startup settle: the initial scene is baseline, not events.
+                if now - self._started_at < self._SETTLE_S:
+                    wevents = []
+                self._world.update_objects(objects, wevents, ts=now)
+            except Exception as e:  # world publish must never break perception
+                log.debug("world publish failed: %s", e)
+        if now - self._started_at < self._SETTLE_S:
             return  # tracker state warms up silently
-        moved = [f"the {label} just moved"
-                 for kind, label in events if kind == "moved"]
+        moved = [f"the {label} just moved" for kind, label in events
+                 if kind == "moved" and label.lower() != "person"]
         if moved:
             with self._change_lock:
                 self._changes = (self._changes + moved)[-4:]
@@ -315,10 +389,28 @@ class Eyes:
             log.warning("teach_object failed: %s", e)
             return False
 
+    def _world_note(self) -> str:
+        """Fresh Tier 2 narration, or ''. Instant (lock-free snapshot read) —
+        this is how the conversational brain reads the world state without
+        triggering any analysis."""
+        if self._world is None:
+            return ""
+        snap = self._world.snapshot()
+        if snap.narration and (snap.narration_age_s()
+                               <= self._narration_max_age_s):
+            return snap.narration
+        return ""
+
     def local_context(self) -> str:
-        """Instant, GPU-free detector hint ('3 people, a cup'), or '' if empty."""
+        """Instant, GPU-free detector hint ('3 people, a cup'), or '' if empty.
+        A fresh world narration (Tier 2) is appended when available — still
+        instant, it was computed in the background."""
         snap = self._scene.snapshot()
-        return phrasing.detector_hint(self._with_learned(snap), self._max_items)
+        hint = phrasing.detector_hint(self._with_learned(snap), self._max_items)
+        note = self._world_note()
+        if note:
+            return f"{hint}; {note}" if hint else note
+        return hint
 
     def visual_context(self, question: str = "") -> VisualContext:
         """Context for a visual turn: the detector hint + a few recent keyframes.
@@ -341,6 +433,13 @@ class Eyes:
             if crop:
                 images.append(crop)
         text = phrasing.detector_hint(self._with_learned(snap), self._max_items)
+        # World narration (Tier 2): already-computed scene understanding, free
+        # to attach. On the multimodal path the LLM sees the frames anyway, but
+        # the narration adds the temporal "what has been happening" the frozen
+        # frames can't carry.
+        note = self._world_note()
+        if note:
+            text = f"{text}; {note}" if text else note
         # Long-tail naming: when the main LLM can't see (multimodal off) but the
         # GPU VLM is reachable, ask it to describe the frame so ZERO can still name
         # objects outside the detector's vocabulary. Never on the multimodal path

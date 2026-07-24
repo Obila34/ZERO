@@ -24,9 +24,10 @@ from zero.config import load_config
 from zero.conversation import Conversation
 from zero.events import EventBus
 from zero.factory import (
-    build_corpus, build_endpointer, build_guests, build_identity, build_llm,
-    build_memory, build_perception, build_privacy, build_proactive, build_stt,
-    build_tools, build_vision, build_voice, build_voiceid, build_wake,
+    build_corpus, build_endpointer, build_guests, build_identity,
+    build_learning_loop, build_llm, build_memory, build_perception,
+    build_privacy, build_proactive, build_stt, build_tools, build_vision,
+    build_voice, build_voiceid, build_wake,
 )
 from zero.privacy.guard import parse_forget_command
 from zero.identity.service import parse_enroll_command, parse_enrollment
@@ -290,6 +291,11 @@ class Zero:
             self.privacy, self.indicator = None, None
             self.affect, self.speaker_tracker = None, None
             self.proactive, self.curiosity, self.policy = None, None, None
+        # Experience spine + reward tagging (Phase 3): every turn becomes a
+        # reward-tagged episode; proactive outcomes feed the policy's adaptive
+        # cooldowns. Works in text mode too (policy is None there — fine).
+        self.episodes, self.reward = build_learning_loop(self.cfg,
+                                                         policy=self.policy)
 
     def _self_state_notes(self) -> list[str]:
         """One-time notes when a pipeline stage degrades to (or recovers from)
@@ -337,6 +343,12 @@ class Zero:
             self._to(State.SPEAKING)
             try:
                 self._speak_one(event.text)
+                if (self.reward is not None
+                        and event.kind in ("greet", "curiosity", "remark")):
+                    # Await the human's reaction: their next words (or their
+                    # silence) score this proactive kind's bandit outcome.
+                    self.reward.on_proactive(event.kind, event.text,
+                                             person_id=event.person_id)
                 if event.meta.get("open_conversation"):
                     open_conversation = True
                     # The opener is real dialogue — _converse() folds it into
@@ -479,6 +491,20 @@ class Zero:
             except Exception as e:  # a missing camera must not stop voice working
                 log.warning("could not start eyes — running voice-only: %s", e)
                 self.eyes = None
+        # Surprise gate (Phase 3): scores world events by prediction error —
+        # the unexpected becomes episodes and wakes the narrator. Built here
+        # (not __init__) because it needs the eyes to have survived startup.
+        self._surprise = None
+        if self.eyes is not None and self.episodes is not None:
+            try:
+                from zero.factory import build_surprise_gate
+
+                self._surprise = build_surprise_gate(
+                    self.cfg, eyes=self.eyes, episodes=self.episodes)
+                if self._surprise is not None:
+                    self._surprise.start()
+            except Exception as e:  # learning must never block startup
+                log.warning("surprise gate unavailable: %s", e)
         if self.proactive is not None:
             self.proactive.start()  # presence greetings + curiosity + idle learning
         log.info("ZERO ready. Say the wake word to start talking. (Ctrl-C to quit)")
@@ -493,6 +519,8 @@ class Zero:
             if self.proactive is not None:
                 self.proactive.stop()
             self.mic.stop()
+            if getattr(self, "_surprise", None) is not None:
+                self._surprise.stop()
             if self.eyes is not None:
                 self.eyes.stop()
             if self.indicator is not None:
@@ -776,8 +804,10 @@ class Zero:
 
             # Affect: per-turn read folded into a cross-turn mood (EMA). The
             # mood steers the LLM's tone note AND the voice's delivery.
+            turn_affect = None
             if self.affect is not None:
                 read = self.affect.estimate(utterance, sr, text, frame_rgb=frame)
+                turn_affect = read     # reward tagging reads the same signal
                 label, mood_note = self._mood.update(read)
                 if mood_note:
                     self._turn_notes.append(mood_note)
@@ -871,6 +901,11 @@ class Zero:
             if self._memory_allowed:
                 self._session_log.append((self._turn_durable_pid, "user", text))
                 self._corpus_log.append((self._turn_speaker, "user", text))
+                if self.reward is not None:
+                    # Retro-tag: these words may be a verdict on the last reply
+                    # (and resolve a pending proactive outcome). Same privacy
+                    # gate as the logs — an unstorable turn tags nothing.
+                    self.reward.on_user(text)
             self._t_reply_start = time.monotonic()  # end-of-STT marker for timing
             # Fold in what ZERO currently sees as an EPHEMERAL note on THIS turn
             # only — the note + keyframes are attached to the outgoing copy of the
@@ -906,6 +941,14 @@ class Zero:
                         (self._turn_durable_pid, "assistant", reply))
                     self._corpus_log.append(
                         (self._turn_speaker, "assistant", reply))
+                    if self.reward is not None:
+                        # One reward-tagged episode per exchange: tone while
+                        # speaking + barge-in + engagement now; an explicit
+                        # verdict may retro-tag it next utterance.
+                        self.reward.on_turn(
+                            text, reply, affect=turn_affect,
+                            barged_in=self._interrupt,
+                            person_id=self._turn_durable_pid)
                 log.info("reply: %r", reply)
 
     # -- vision -------------------------------------------------------------
@@ -1193,6 +1236,10 @@ class Zero:
         word immediately instead of being deaf for seconds. The speaker log is
         snapshotted first — the next conversation may reset it while the save is
         still running."""
+        if self.reward is not None:
+            # A proactive nudge nobody answered scores against its kind, and
+            # per-session tagging state resets.
+            self.reward.end_session()
         # Privacy is enforced PER TURN at log time (a guarded stranger's words
         # never entered these logs), so anything present here may be persisted.
         if ((self.memory is not None or self.corpus is not None)

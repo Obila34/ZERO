@@ -171,6 +171,20 @@ learning:
     enabled: true
     dir: data/corpus
 
+  # The experience spine (Phase 3): every turn / surprising scene event /
+  # proactive attempt becomes ONE reward+surprise-tagged episode row. Nightly
+  # consolidation (scripts/consolidate.py + zero-consolidate.timer) distills
+  # them into memory and reward-weighted training data, then marks them done.
+  episodes:
+    enabled: true
+    db_path: zero_episodes.sqlite
+
+  # Offline LoRA fine-tune command run by the nightly consolidation on the
+  # reward-weighted export (data/train/chat.jsonl). Left null: training needs
+  # GPU headroom the shared card doesn't have — see docs/TRAINING.md.
+  training:
+    cmd: null
+
 perception:
   # ── GPU offload (Phase 8): the Pi is a FRONTEND ────────────────────────────
   # Heavy senses run on the GPU via /perceive/* on the vision server (:8000,
@@ -495,15 +509,19 @@ vision:
       # MJPG fixes it. Set false only if your camera lacks MJPG.
 
   detect:
-    # yolo11s is markedly more accurate than yolo11n on small/cluttered objects —
-    # same COCO-80 vocabulary, but detects more of them, more reliably. Swap back
-    # to yolo11n.onnx if the Pi CPU can't keep up.
-    model_path: yolo11s.onnx # ONNX (NMS baked in) — runs on onnxruntime, NO torch
-    confidence: 0.35
+    # OPEN-VOCABULARY reflex eye (Phase 1): a YOLO-World export whose 187
+    # classes come from scripts/vocab_indoor.txt — edit the vocab + re-export to
+    # change them. Exported at imgsz=480: on-CPU it runs ~2x faster than the 640
+    # export and detects MORE in normal scenes; it only loses very small objects,
+    # which the GPU eye covers. Fall back to yolo11s.onnx (COCO-80, imgsz 640)
+    # if the world model misbehaves on the Pi.
+    model_path: yolov8s-worldv2-480.onnx # ONNX (NMS baked in) — onnxruntime, NO torch
+    confidence: 0.30 # YOLO-World scores run lower than closed-set YOLO11 —
+      # 0.35 dropped real objects (measured); 0.30 recovers them
     iou: 0.45 # informational: NMS is already inside the ONNX graph
     device: cpu # 'cpu' (Pi) | 'cuda' (onnxruntime CUDA EP, if present)
-    imgsz: 640 # must match what export_yolo_onnx.py used
-    classes: [] # COCO classes to keep. [] = keep ALL 80 (recommended:
+    imgsz: 480 # must match what export_yolo_onnx.py used
+    classes: [] # class names to keep. [] = keep ALL (recommended:
       # "identify many objects"). List specific names to
       # filter, e.g. [person, cup, laptop].
 
@@ -550,6 +568,45 @@ vision:
     # VLM so ZERO can still name arbitrary objects from the frame. Ignored when the
     # main LLM is multimodal (it already sees the keyframes directly).
     vlm_fallback: false
+
+# ── World state (Phase 2): three perception tiers, one live scene graph ─────
+# Tier 0 (motion, every frame) and Tier 1 (open-vocab detection + tracking,
+# motion-gated) feed a versioned WorldState; the LLM context, memory and the
+# proactive engine READ from it instead of triggering their own analyses.
+world:
+  enabled: true
+  motion: # Tier 0 — frame differencing, runs on every frame (~ms)
+    downscale_w: 160 # analysis width; smaller = cheaper + less sensitive
+    pixel_delta: 25 # gray-level change for a pixel to count as "moved"
+    threshold: 0.02 # fraction of moved pixels => motion is active
+    quiet_frames: 15 # consecutive still frames before motion switches off
+  gate: # Tier 1 cadence, driven by Tier 0 (sparse firing)
+    active_interval_s: 0.0 # detection interval while scene is moving (0 = every frame)
+    idle_interval_s: 2.0 # keepalive detection interval while still
+    linger_s: 3.0 # keep full cadence this long after motion stops
+  surprise: # Phase 3 — prediction error routes attention & memory
+    enabled: true
+    stats_path: data/world_surprise.json # ZERO's accumulated sense of "normal"
+    remember_bits: 4.0 # events at least this surprising become episodes
+    narrate_bits: 6.0 # ...and this surprising wake the Tier 2 narrator
+  vocab_export:
+    checkpoint: yolov8s-worldv2.pt # used by nightly vocab re-export (consolidate.py)
+  budgets: # hard per-tier compute ceilings (sparse firing, enforced)
+    tier1_max_duty: 0.6 # detector may use at most this fraction of loop time
+    tier2_max_per_min: 20 # narrator inferences per minute, pokes included
+  narrator: # Tier 2 — streaming scene understanding into the world state
+    # OFF by default: every tick costs a VLM inference on the shared GPU.
+    # backend "analyze" reuses the vision server's /analyze (Qwen2-VL) — needs
+    # vision.gpu.enabled: true. backend "openai" points at any OpenAI-compatible
+    # vision server: the Cosmos 3 Nano Reasoner slot (server/cosmos/) — moving
+    # Tier 2 to a second GPU/edge box is just this url, no code change.
+    enabled: false
+    backend: analyze # 'analyze' | 'openai'
+    interval_s: 3.0 # narration cadence; it self-skips while nothing changes
+    narration_max_age_s: 20.0 # older narration is stale — dropped from context
+    url: http://127.0.0.1:9200 # openai backend only
+    model: nvidia/Cosmos3-Nano # openai backend only
+    timeout_s: 20.0
 
 # Persona: the system prompt lives in zero/llm/persona.py (SYSTEM_TEMPLATE) —
 # edit it there. (It used to be templated from here, but the values were no

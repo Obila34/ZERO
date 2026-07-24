@@ -36,6 +36,17 @@ voiceprint.npy
 # scripts/export_yolo_onnx.py --vocab). Its .names.json is tracked too (not
 # matched by any ignore rule) so class ids map back to words on the Pi.
 !yolov8s-worldv2.onnx
+# The deployed Pi reflex eye (Phase 1): 480px open-vocab export.
+!yolov8s-worldv2-480.onnx
+# INT8 experiment artifacts (scripts/prune_models.py) — rebuildable, not shipped.
+*-int8.names.json
+
+# Runtime state (per-device, grows live — never source)
+data/consolidation/
+data/train/
+data/world_surprise.json
+server/vision/vocab.runtime.txt
+server/vision/.cache/
 
 # YOLO source weights (build artifacts; we ship the exported .onnx only)
 *.pt

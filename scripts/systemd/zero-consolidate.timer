@@ -1,0 +1,10 @@
+[Unit]
+Description=Run ZERO consolidation nightly at 03:30 (quiet hours)
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+Persistent=true
+RandomizedDelaySec=600
+
+[Install]
+WantedBy=timers.target

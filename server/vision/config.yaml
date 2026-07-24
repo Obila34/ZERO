@@ -31,6 +31,19 @@ camera:
   intrinsics_path: ../calibration/intrinsics.json
   fallback_hfov_deg: 70     # horizontal FOV used only when intrinsics are absent
 
+# ── /perceive: open-vocabulary object detection (Phase 1) ──────────────────
+perceive:
+  detector:
+    # A YOLO-World checkpoint gives OPEN vocabulary: classes come from the
+    # runtime vocab file and can be edited live via POST /perceive/vocab.
+    # Any plain YOLO .pt (e.g. yolo11x.pt) also works but is closed-set.
+    model: yolov8x-worldv2.pt # auto-downloaded by ultralytics on first use
+    conf: 0.35
+    # Runtime vocabulary, relative to server/vision/. Seeded from
+    # ../../scripts/vocab_indoor.txt on first run, then owned by POST /vocab
+    # (persisted atomically). Delete the file to re-seed from scratch.
+    vocab_path: vocab.runtime.txt
+
 # ── CP5: local VLM brain (writes the spoken reply, grounded in the facts) ──
 vlm:
   model: Qwen/Qwen2-VL-2B-Instruct   # default chat VLM; or vikhyatk/moondream2

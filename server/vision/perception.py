@@ -3,7 +3,13 @@
 Mounted into the existing vision app (:8000, same SSH tunnel), so the Pi needs
 no new ports. Every model loads lazily on first use and stays cached:
 
-  POST /perceive/detect        JPEG -> object detections (YOLO11x, CUDA)
+  POST /perceive/detect        JPEG -> object detections (YOLO-World open-vocab
+                               by default; any plain YOLO .pt still works)
+  GET  /perceive/vocab         current detector vocabulary + open-vocab status
+  POST /perceive/vocab         {"add": [...], "remove": [...]} -> updates the
+                               live vocabulary via set_classes() — new words
+                               detect within seconds, no restart — and persists
+                               it so restarts keep the learned vocabulary
   POST /perceive/face          JPEG -> face embeddings + boxes
                                (InsightFace SCRFD+ArcFace if installed,
                                 else Haar + ArcFace ONNX)
@@ -40,10 +46,29 @@ from pydantic import BaseModel
 router = APIRouter(prefix="/perceive")
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+SERVER_DIR = Path(__file__).resolve().parent
 
-# ── config knobs (overridable via the vision server's config.yaml) ───────────
-YOLO_MODEL = "yolo11x.pt"          # auto-downloaded by ultralytics on first use
-YOLO_CONF = 0.35
+# ── config knobs (server/vision/config.yaml `perceive:` section) ─────────────
+def _perceive_cfg() -> dict:
+    """The `perceive.detector` block of the server config; {} when absent so
+    every knob below keeps its historical default."""
+    try:
+        try:
+            from config import load_config
+        except ImportError:
+            from server.vision.config import load_config
+        return (load_config().get("perceive") or {}).get("detector") or {}
+    except Exception:
+        return {}
+
+
+_PCFG = _perceive_cfg()
+YOLO_MODEL = _PCFG.get("model", "yolov8x-worldv2.pt")  # open-vocab by default
+YOLO_CONF = float(_PCFG.get("conf", 0.35))
+# Runtime vocabulary file: seeded from scripts/vocab_indoor.txt on first load,
+# then owned by POST /vocab. Server-local so the git-tracked seed stays pristine.
+VOCAB_PATH = SERVER_DIR / str(_PCFG.get("vocab_path", "vocab.runtime.txt"))
+VOCAB_SEED = REPO_ROOT / "scripts" / "vocab_indoor.txt"
 CLIP_MODEL = "openai/clip-vit-base-patch32"
 SPEAKER_ONNX = REPO_ROOT / "models" / "voiceid" / "voxceleb_ECAPA512_LM.onnx"
 ARCFACE_ONNX = REPO_ROOT / "models" / "identity" / "arcface.onnx"
@@ -68,18 +93,67 @@ class FrameReq(BaseModel):
     max_faces: int = 3
 
 
-# ── YOLO11x detection ─────────────────────────────────────────────────────────
+# ── open-vocab detection (YOLO-World; plain YOLO degrades to closed-set) ─────
 _YOLO = None
+_IS_WORLD = False            # True once set_classes() succeeded on the model
+# Serializes predict vs set_classes: a vocab swap mid-inference would mismatch
+# class ids and names. Predict is ~tens of ms, so serializing costs nothing at
+# ZERO's request rates.
+_DET_LOCK = threading.RLock()
+
+
+def _parse_vocab(text: str) -> list[str]:
+    """One word/phrase per line, '#' comments — same format as the export
+    script's --vocab files (scripts/export_yolo_onnx.py)."""
+    words: list[str] = []
+    for line in text.splitlines():
+        w = line.split("#", 1)[0].strip()
+        if w and w not in words:
+            words.append(w)
+    return words
+
+
+def _load_vocab() -> list[str]:
+    """Runtime vocab file; seeded from scripts/vocab_indoor.txt on first use."""
+    if not VOCAB_PATH.exists() and VOCAB_SEED.exists():
+        VOCAB_PATH.write_text(VOCAB_SEED.read_text(encoding="utf-8"),
+                              encoding="utf-8")
+        print(f"[perceive] vocab seeded from {VOCAB_SEED}", flush=True)
+    if VOCAB_PATH.exists():
+        return _parse_vocab(VOCAB_PATH.read_text(encoding="utf-8"))
+    return []
+
+
+def _save_vocab(words: list[str]) -> None:
+    """Atomic persist (tmp + rename) so a crash never truncates the vocab."""
+    tmp = VOCAB_PATH.with_suffix(VOCAB_PATH.suffix + ".tmp")
+    tmp.write_text("\n".join(words) + "\n", encoding="utf-8")
+    tmp.replace(VOCAB_PATH)
 
 
 def _yolo():
-    global _YOLO
+    global _YOLO, _IS_WORLD
     if _YOLO is None:
         with _LOAD_LOCK:
             if _YOLO is None:  # re-check inside the lock (download happens once)
                 from ultralytics import YOLO  # pip install ultralytics
 
-                _YOLO = YOLO(YOLO_MODEL)
+                model = YOLO(YOLO_MODEL)
+                vocab = _load_vocab()
+                is_world = False
+                if vocab:
+                    try:
+                        model.set_classes(vocab)
+                        is_world = True
+                        print(f"[perceive] open-vocab: {len(vocab)} classes "
+                              f"from {VOCAB_PATH.name}", flush=True)
+                    except Exception as exc:
+                        # Plain YOLO checkpoint (or missing CLIP text encoder):
+                        # keep the model's built-in classes, report via /vocab.
+                        print(f"[perceive] set_classes unavailable ({exc}); "
+                              f"closed-set labels from {YOLO_MODEL}", flush=True)
+                _IS_WORLD = is_world
+                _YOLO = model
                 print(f"[perceive] YOLO loaded: {YOLO_MODEL}", flush=True)
     return _YOLO
 
@@ -91,7 +165,8 @@ def detect(req: FrameReq) -> dict:
     except Exception as exc:
         raise HTTPException(503, f"YOLO unavailable (pip install ultralytics): {exc}")
     frame = _decode_jpeg_b64(req.image_jpeg_b64)
-    results = model.predict(frame, conf=YOLO_CONF, verbose=False)
+    with _DET_LOCK:
+        results = model.predict(frame, conf=YOLO_CONF, verbose=False)
     dets = []
     for r in results:
         names = r.names
@@ -103,6 +178,58 @@ def detect(req: FrameReq) -> dict:
                 "confidence": float(box.conf[0]),
             })
     return {"detections": dets}
+
+
+# ── live vocabulary management ────────────────────────────────────────────────
+class VocabReq(BaseModel):
+    add: list[str] = []
+    remove: list[str] = []
+
+
+@router.get("/vocab")
+def vocab_get() -> dict:
+    _yolo()  # ensure the model (and therefore open-vocab status) is resolved
+    return {"classes": _load_vocab(), "open_vocab": _IS_WORLD,
+            "model": YOLO_MODEL}
+
+
+@router.post("/vocab")
+def vocab_post(req: VocabReq) -> dict:
+    """Add/remove vocabulary words on the LIVE detector — active in seconds,
+    no restart. Persists to the runtime vocab file so restarts keep it."""
+    import time as _time
+
+    try:
+        model = _yolo()
+    except Exception as exc:
+        raise HTTPException(503, f"YOLO unavailable: {exc}")
+    if not _IS_WORLD:
+        raise HTTPException(
+            409, f"{YOLO_MODEL} is a closed-set model; vocabulary is fixed. "
+                 "Configure a YOLO-World checkpoint (perceive.detector.model).")
+
+    add = [" ".join(w.split()) for w in req.add if w and w.strip()]
+    remove = {" ".join(w.split()).lower() for w in req.remove if w and w.strip()}
+    with _DET_LOCK:
+        words = _load_vocab()
+        for w in add:
+            if w.lower() not in {x.lower() for x in words}:
+                words.append(w)
+        words = [w for w in words if w.lower() not in remove]
+        if not words:
+            raise HTTPException(400, "refusing to set an empty vocabulary")
+        t0 = _time.perf_counter()
+        try:
+            model.set_classes(words)
+        except Exception as exc:
+            raise HTTPException(503, f"set_classes failed: {exc}")
+        elapsed_ms = (_time.perf_counter() - t0) * 1000.0
+        _save_vocab(words)
+    print(f"[perceive] vocab now {len(words)} classes "
+          f"(+{len(add)}/-{len(remove)}, set_classes {elapsed_ms:.0f}ms)",
+          flush=True)
+    return {"classes": words, "count": len(words),
+            "set_classes_ms": round(elapsed_ms, 1)}
 
 
 # ── face embeddings (SCRFD+ArcFace preferred, Haar+ONNX fallback) ────────────

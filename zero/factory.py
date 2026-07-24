@@ -333,7 +333,61 @@ def build_vision(cfg: Config):
             analyze_timeout_s=cfg.get("vision.gpu.analyze_timeout_s", 30.0),
             jpeg_quality=cfg.get("vision.gpu.jpeg_quality", 80),
         )
-    return Eyes(
+
+    # World state (Phase 2): Tier 0 motion + gate, Tier 1 scene graph, Tier 2
+    # narrator — all under one live WorldState the brains read from.
+    world = motion = gate = narrator = tier1_budget = None
+    if cfg.get("world.enabled", True):
+        from zero.vision.motion import DetectionGate, MotionDetector
+        from zero.world.budget import DutyBudget, RateBudget
+        from zero.world.state import WorldState
+
+        world = WorldState()
+        tier1_budget = DutyBudget(
+            max_duty=cfg.get("world.budgets.tier1_max_duty", 0.6))
+        motion = MotionDetector(
+            downscale_w=cfg.get("world.motion.downscale_w", 160),
+            pixel_delta=cfg.get("world.motion.pixel_delta", 25),
+            threshold=cfg.get("world.motion.threshold", 0.02),
+            quiet_frames=cfg.get("world.motion.quiet_frames", 15),
+        )
+        gate = DetectionGate(
+            active_interval_s=cfg.get("world.gate.active_interval_s", 0.0),
+            idle_interval_s=cfg.get("world.gate.idle_interval_s", 2.0),
+            linger_s=cfg.get("world.gate.linger_s", 3.0),
+        )
+        if cfg.get("world.narrator.enabled", False):
+            from zero.world.narrator import (
+                AnalyzeBackend, Narrator, OpenAIVisionBackend,
+            )
+
+            backend_name = cfg.get("world.narrator.backend", "analyze")
+            backend = None
+            if backend_name == "openai":
+                backend = OpenAIVisionBackend(
+                    url=cfg.get("world.narrator.url", "http://127.0.0.1:9200"),
+                    model=cfg.get("world.narrator.model", "nvidia/Cosmos3-Nano"),
+                    timeout_s=cfg.get("world.narrator.timeout_s", 20.0),
+                    jpeg_quality=cfg.get("vision.gpu.jpeg_quality", 80),
+                )
+            elif backend_name == "analyze" and client is not None:
+                backend = AnalyzeBackend(client)
+            else:
+                log.warning("narrator backend %r unavailable — Tier 2 off",
+                            backend_name)
+            if backend is not None:
+                narrator = Narrator(
+                    world,
+                    frame_supplier=lambda: (eyes.current_frame()
+                                            if eyes is not None else None),
+                    backend=backend,
+                    interval_s=cfg.get("world.narrator.interval_s", 3.0),
+                    rate_budget=RateBudget(
+                        max_per_min=cfg.get("world.budgets.tier2_max_per_min",
+                                            20)),
+                )
+
+    eyes = Eyes(
         cam, detector, namer, client,
         color_top_n=cfg.get("vision.color.top_n", 5),
         max_items=cfg.get("vision.max_items", 15),
@@ -354,7 +408,11 @@ def build_vision(cfg: Config):
         learned=learned,
         unknown_conf=cfg.get("learning.objects.unknown_conf", 0.45),
         change_note_cooldown_s=cfg.get("vision.change_note_cooldown_s", 120.0),
+        world=world, motion=motion, gate=gate, narrator=narrator,
+        narration_max_age_s=cfg.get("world.narrator.narration_max_age_s", 20.0),
+        tier1_budget=tier1_budget,
     )
+    return eyes
 
 
 def build_perception_client(cfg: Config):
@@ -461,6 +519,40 @@ def build_guests(cfg: Config):
         match_threshold=cfg.get("identity.guests.match_threshold", 0.55),
         max_guests=cfg.get("identity.guests.max_guests", 50),
     )
+
+
+def build_surprise_gate(cfg: Config, *, eyes, episodes):
+    """SurpriseGate thread scoring world events (Phase 3), or None when there
+    is no world state / episodes to feed, or it's disabled."""
+    world = getattr(eyes, "world", None) if eyes is not None else None
+    if world is None or not cfg.get("world.surprise.enabled", True):
+        return None
+    from zero.world.surprise import SurpriseGate, SurprisePredictor
+
+    predictor = SurprisePredictor(
+        str(cfg.resolve_path("world.surprise.stats_path",
+                             "data/world_surprise.json")))
+    return SurpriseGate(
+        world, predictor,
+        episodes=episodes,
+        narrator=getattr(eyes, "_narrator", None),
+        remember_bits=cfg.get("world.surprise.remember_bits", 4.0),
+        narrate_bits=cfg.get("world.surprise.narrate_bits", 6.0),
+    )
+
+
+def build_learning_loop(cfg: Config, policy=None):
+    """(EpisodeStore, RewardTagger) — the experience spine + dopamine signal
+    (Phase 3), or (None, None) when disabled."""
+    if not cfg.get("learning.episodes.enabled", True):
+        return None, None
+    from zero.learning.episodes import EpisodeStore
+    from zero.learning.reward import RewardTagger
+
+    episodes = EpisodeStore(
+        str(cfg.resolve_path("learning.episodes.db_path",
+                             "zero_episodes.sqlite")))
+    return episodes, RewardTagger(episodes, policy=policy)
 
 
 def build_corpus(cfg: Config):
