@@ -27,8 +27,10 @@ from zero.utils.logging import get_logger
 log = get_logger("vision.preview")
 
 
-def annotate(frame_rgb, detections, scale: float = 1.0):
-    """Return a BGR image with detection boxes, labels and an object count drawn."""
+def annotate(frame_rgb, detections, scale: float = 1.0, attention=None):
+    """Return a BGR image with detection boxes, labels and an object count
+    drawn. ``attention`` is the digital-gaze window (x, y, w, h): drawn as an
+    orange box plus a picture-in-picture inset (top-right) of what it sees."""
     import cv2
 
     bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
@@ -42,10 +44,40 @@ def annotate(frame_rgb, detections, scale: float = 1.0):
                     (0, 220, 0), 1, cv2.LINE_AA)
     cv2.putText(bgr, f"{len(detections)} objects", (8, 20),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2, cv2.LINE_AA)
+    if attention is not None:
+        _draw_attention(cv2, bgr, attention)
     if scale != 1.0:
         bgr = cv2.resize(bgr, None, fx=scale, fy=scale,
                          interpolation=cv2.INTER_NEAREST)
     return bgr
+
+
+_ORANGE = (0, 150, 255)  # BGR
+
+
+def _draw_attention(cv2, bgr, window) -> None:
+    """Orange gaze box + a picture-in-picture inset (top-right) of the crop."""
+    H, W = bgr.shape[:2]
+    x, y, w, h = (int(v) for v in window)
+    x, y = max(0, min(W - 1, x)), max(0, min(H - 1, y))
+    w, h = max(1, min(W - x, w)), max(1, min(H - y, h))
+    # Copy the crop BEFORE drawing the box, so the inset shows clean pixels
+    # (and survives the window overlapping its own inset region).
+    crop = bgr[y:y + h, x:x + w].copy()
+    cv2.rectangle(bgr, (x, y), (x + w, y + h), _ORANGE, 2)
+    cv2.putText(bgr, "attention", (x + 4, min(H - 6, y + h - 8)),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, _ORANGE, 1, cv2.LINE_AA)
+    if crop.size == 0:
+        return
+    iw = max(1, int(W * 0.28))
+    ih = max(1, int(iw * h / w))
+    if ih > int(H * 0.45):  # keep tall windows from dominating the view
+        ih = int(H * 0.45)
+        iw = max(1, int(ih * w / h))
+    inset = cv2.resize(crop, (iw, ih), interpolation=cv2.INTER_LINEAR)
+    x0, y0 = W - iw - 8, 8
+    bgr[y0:y0 + ih, x0:x0 + iw] = inset
+    cv2.rectangle(bgr, (x0 - 1, y0 - 1), (x0 + iw, y0 + ih), _ORANGE, 1)
 
 
 class WindowPreview:
@@ -56,11 +88,12 @@ class WindowPreview:
         self._scale = scale
         self.ok = True
 
-    def show(self, frame_rgb, detections) -> None:
+    def show(self, frame_rgb, detections, attention=None) -> None:
         try:
             import cv2
 
-            cv2.imshow(self._title, annotate(frame_rgb, detections, self._scale))
+            cv2.imshow(self._title,
+                       annotate(frame_rgb, detections, self._scale, attention))
             # Pump the GUI event loop; 'q' closes the preview (not ZERO itself).
             if (cv2.waitKey(1) & 0xFF) == ord("q"):
                 self.ok = False
@@ -168,13 +201,13 @@ class WebPreview:
                 self._cond.wait(timeout)
             return self._id, self._latest
 
-    def show(self, frame_rgb, detections) -> None:
+    def show(self, frame_rgb, detections, attention=None) -> None:
         if not self.ok:
             return
         try:
             import cv2
 
-            bgr = annotate(frame_rgb, detections, self._scale)
+            bgr = annotate(frame_rgb, detections, self._scale, attention)
             ok, buf = cv2.imencode(".jpg", bgr,
                                    [cv2.IMWRITE_JPEG_QUALITY, self._quality])
             if not ok:

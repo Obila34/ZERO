@@ -56,7 +56,7 @@ class Eyes:
                  vlm_fallback: bool = False,
                  preview: bool = False, preview_scale: float = 1.0,
                  preview_mode: str = "auto", preview_host: str = "127.0.0.1",
-                 preview_port: int = 8008, learned=None,
+                 preview_port: int = 8008, learned=None, framer=None,
                  unknown_conf: float = 0.45,
                  change_note_cooldown_s: float = 120.0,
                  world=None, motion=None, gate=None, narrator=None,
@@ -88,6 +88,7 @@ class Eyes:
         # Learned objects (Phase 4): user-taught names override COCO labels on
         # per-turn context; low-confidence, unmatched sightings feed curiosity.
         self._learned = learned
+        self._framer = framer  # digital gaze (FaceFramer) — optional
         self._unknown_conf = float(unknown_conf)
         self._unknowns: dict[str, float] = {}   # label -> last seen ts
         self._unknowns_lock = threading.Lock()
@@ -216,6 +217,11 @@ class Eyes:
                 self._scene.update(detections, frame_rgb=frame)
                 self._track_changes(detections)
                 self._track_instances(detections, now)
+                if self._framer is not None:
+                    # Digital gaze rides the same motion-gated cadence: a
+                    # still room means the face isn't moving either, so the
+                    # frozen window stays correct. update() never raises.
+                    self._framer.update(frame, now)
             else:
                 # Gated frame: keep the LAST detections current (the scene has
                 # not changed — that is why the gate closed) but still publish
@@ -223,7 +229,10 @@ class Eyes:
                 detections = self._last_dets
                 self._scene.update(detections, frame_rgb=frame)
             if self._preview_sink is not None and self._preview_sink.ok:
-                self._preview_sink.show(frame, detections)
+                self._preview_sink.show(
+                    frame, detections,
+                    attention=(self._framer.window
+                               if self._framer is not None else None))
             if self._detect_interval > 0:
                 time.sleep(self._detect_interval)
 
@@ -331,6 +340,12 @@ class Eyes:
         snap = self._scene.snapshot()
         return {d.label.lower() for d in snap.detections}
 
+    def attention(self) -> tuple | None:
+        """The digital-gaze window (x, y, w, h) in frame pixels, or None when
+        the framer is off / hasn't seen a frame yet. Later phases feed this
+        crop to identity and the VLM keyframes."""
+        return self._framer.window if self._framer is not None else None
+
     def current_frame(self):
         """Latest camera frame (RGB copy), or None if nothing has been seen yet.
         Used by identity (face matching) and learning (object crops)."""
@@ -343,7 +358,12 @@ class Eyes:
         if self._learned is None or snap.frame_rgb is None or not dets:
             return dets
         try:
+            t0 = time.monotonic()
             annotated = self._learned.annotate(snap.frame_rgb, dets)
+            dt = time.monotonic() - t0
+            if dt > 0.3:
+                log.info("learned annotate slow: %.2fs for %d detections",
+                         dt, len(dets))
         except Exception as e:  # learned names must never break perception
             log.debug("learned annotate failed: %s", e)
             return dets

@@ -47,7 +47,21 @@ mkdir -p models/voiceid models/identity
 # ArcFace face embedder (InsightFace buffalo_l recognition model, 512-d).
 [ -f models/identity/arcface.onnx ] || wget -O models/identity/arcface.onnx \
   https://huggingface.co/public-data/insightface/resolve/main/models/buffalo_l/w600k_r50.onnx || true
-pip install opencv-python-headless || true   # Haar face detection (identity)
+# <5: the 5.x wheels dropped the bundled Haar cascades (identity's last-resort
+# face detector when mediapipe is unavailable).
+pip install "opencv-python-headless<5" || true
+# Local face detection/alignment tiers: YuNet (room-scale detector + 5-point
+# ArcFace alignment, runs on cv2) and MediaPipe FaceLandmarker (iris-accurate
+# landmark refinement per face crop). All best-effort — anything missing
+# demotes tier by tier down to the Haar detector.
+mkdir -p models/face
+[ -f models/face/yunet_2023mar.onnx ] || wget -O models/face/yunet_2023mar.onnx \
+  https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx || true
+[ -f models/face/face_landmarker.task ] || wget -O models/face/face_landmarker.task \
+  https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task || true
+# aarch64 wheels top out at mediapipe 0.10.9 (needs python <= 3.11); pip
+# resolves that automatically. No matching wheel = YuNet-only, still aligned.
+pip install mediapipe || true
 
 echo "== Silero VAD (ONNX, torch-free) =="
 mkdir -p models/vad

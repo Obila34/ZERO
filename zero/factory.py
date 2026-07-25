@@ -387,6 +387,26 @@ def build_vision(cfg: Config):
                                             20)),
                 )
 
+    framer = None
+    if cfg.get("vision.attention.enabled", True):
+        det_path = cfg.resolve_path("identity.face.detector_path",
+                                    "models/face/yunet_2023mar.onnx")
+        try:
+            if det_path is None or not det_path.exists():
+                raise FileNotFoundError(f"yunet model missing: {det_path}")
+            from zero.identity.face import YuNetDetector
+            from zero.vision.framer import FaceFramer
+
+            framer = FaceFramer(
+                YuNetDetector(str(det_path),
+                              min_size=cfg.get("identity.face.min_size", 60)),
+                window_frac=cfg.get("vision.attention.window_frac", 0.45),
+                confirm_s=cfg.get("vision.attention.confirm_s", 0.4),
+                lost_s=cfg.get("vision.attention.lost_s", 2.0),
+            )
+        except Exception as e:
+            log.warning("digital gaze unavailable: %s — eyes run without it", e)
+
     eyes = Eyes(
         cam, detector, namer, client,
         color_top_n=cfg.get("vision.color.top_n", 5),
@@ -405,7 +425,7 @@ def build_vision(cfg: Config):
         # LAN unless config.yaml explicitly asks for 0.0.0.0.
         preview_host=cfg.get("vision.preview_host", "127.0.0.1"),
         preview_port=cfg.get("vision.preview_port", 8008),
-        learned=learned,
+        learned=learned, framer=framer,
         unknown_conf=cfg.get("learning.objects.unknown_conf", 0.45),
         change_note_cooldown_s=cfg.get("vision.change_note_cooldown_s", 120.0),
         world=world, motion=motion, gate=gate, narrator=narrator,
@@ -460,8 +480,14 @@ def build_identity(cfg: Config):
             raise FileNotFoundError(f"face model missing: {f_path}")
         from zero.identity.face import FaceRecognizer
 
+        det_path = cfg.resolve_path("identity.face.detector_path",
+                                    "models/face/yunet_2023mar.onnx")
+        lm_path = cfg.resolve_path("identity.face.landmarker_path",
+                                   "models/face/face_landmarker.task")
         return FaceRecognizer(str(f_path),
-                              min_size=cfg.get("identity.face.min_size", 60))
+                              min_size=cfg.get("identity.face.min_size", 60),
+                              detector_path=str(det_path) if det_path else None,
+                              landmarker_path=str(lm_path) if lm_path else None)
 
     voice = face = None
     if client is not None:

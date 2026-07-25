@@ -11,7 +11,8 @@
 # The GPU vision server has its own deps (torch + transformers) in
 # server/vision/requirements.txt — install those on the GPU node, not the Pi.
 
-opencv-python>=4.8        # camera capture, color (HSV), JPEG encode
+opencv-python>=4.8,<5     # camera capture, color (HSV), JPEG encode; 5.x wheels
+                          # dropped the bundled Haar cascades (identity fallback)
 onnxruntime>=1.16         # YOLO11n inference (usually already present for the wake word)
 pydantic>=2.0             # the vision wire schema (Detection / SceneFact / ...)
 # numpy + requests already come from the base requirements.txt

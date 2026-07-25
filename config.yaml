@@ -300,6 +300,13 @@ identity:
     # InsightFace buffalo_l. Blank/missing = voice-only identity.
     model_path: models/identity/arcface.onnx
     min_size: 60 # smallest face (px) worth matching
+    # Local face detection/alignment tiers (the fallback path when the GPU
+    # tunnel is down). YuNet = room-scale detector + 5-point ArcFace alignment
+    # (runs on cv2, no extra wheel); MediaPipe FaceLandmarker refines those 5
+    # points per face crop (iris-accurate). Missing files or wheels demote
+    # tier by tier down to Haar — never an error.
+    detector_path: models/face/yunet_2023mar.onnx
+    landmarker_path: models/face/face_landmarker.task
   fusion:
     w_face: 0.55 # weights are normalized; face is the steadier signal
     w_voice: 0.45
@@ -463,6 +470,16 @@ vision:
   # disappearing for 2s+) surface as a note the LLM MAY mention mid-conversation
   # ("oh, is that new?"). Rate-limited so it never gets chatty.
   change_note_cooldown_s: 120
+
+  # Digital gaze: a moveable attention window that recenters on the tracked
+  # face — software pan/tilt, no motors, the room stays in view. Drawn on the
+  # preview (orange box + top-right inset). Needs the YuNet face model
+  # (identity.face.detector_path); silently off without it.
+  attention:
+    enabled: true
+    window_frac: 0.45 # window size as a fraction of each frame dimension
+    confirm_s: 0.4 # face must persist this long before the gaze locks on
+    lost_s: 2.0 # gaze holds a briefly-lost face this long (head turns, blinks)
 
   # Live preview: SEE what ZERO sees (camera feed + detection boxes) while it runs.
   preview: true
