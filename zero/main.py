@@ -970,10 +970,19 @@ class Zero:
         if self.eyes is None:
             return "", []
         try:
-            if self._is_visual(text):
+            t0 = time.monotonic()
+            visual = self._is_visual(text)
+            t1 = time.monotonic()
+            if visual:
                 ctx = self.eyes.visual_context(question=text)
-                return ctx.text, ctx.images
-            return self.eyes.local_context(), []
+                out = (ctx.text, ctx.images)
+            else:
+                out = (self.eyes.local_context(), [])
+            t2 = time.monotonic()
+            if t2 - t0 > 0.3:
+                log.info("look breakdown: is_visual=%.2fs context=%.2fs "
+                         "(visual=%s)", t1 - t0, t2 - t1, visual)
+            return out
         except Exception as e:  # vision must never break a conversation turn
             log.debug("vision look failed: %s", e)
             return "", []
@@ -983,7 +992,9 @@ class Zero:
         throwaway copy of ``messages``. The persona prompt ("Your eyes") tells the
         model to treat the parenthetical as its own perception, not user text.
         """
+        _t0 = time.monotonic()
         note, images = self._look(text)
+        _t_look = time.monotonic() - _t0
         ident = self._person
 
         # Ground PRESENCE in the detector (truth), not the LLM's imagination —
@@ -1070,6 +1081,7 @@ class Zero:
                           int(budget_s * 1000))
             if recalled:
                 recall_note = f"(This reminds you of things you know: {recalled}.)"
+        _t_recall = time.monotonic() - _t0
         turn_notes = list(getattr(self, "_turn_notes", []) or [])
 
         # Spontaneous visual awareness: debounced scene changes ("a guitar just
@@ -1089,6 +1101,10 @@ class Zero:
                         "let it go.)")
             except Exception:  # a scene read must never break a turn
                 pass
+        _t_total = time.monotonic() - _t0
+        log.info("turn context: look=%.2fs id+recall=%.2fs changes=%.2fs "
+                 "total=%.2fs", _t_look, _t_recall - _t_look,
+                 _t_total - _t_recall, _t_total)
 
         if not (note or images or id_note or presence_note or recall_note
                 or turn_notes):
