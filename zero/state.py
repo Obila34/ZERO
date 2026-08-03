@@ -21,7 +21,7 @@ class State(str, Enum):
 
 # Legal transitions; main.py asserts against this to catch wiring bugs early.
 TRANSITIONS: dict[State, set[State]] = {
-    State.IDLE: {State.LISTENING},
+    State.IDLE: {State.LISTENING, State.SPEAKING},  # SPEAKING = proactive announcement (greet/reminder) from idle
     State.LISTENING: {State.THINKING, State.IDLE},     # IDLE = nothing said
     State.THINKING: {State.SPEAKING, State.IDLE, State.LISTENING},  # LISTENING = empty reply, stay in convo
     State.SPEAKING: {State.IDLE, State.LISTENING},     # LISTENING = barge-in

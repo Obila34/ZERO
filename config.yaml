@@ -61,7 +61,9 @@ conversation:
   # well above it, and the interrupting words are fed straight into the next
   # turn (no need to repeat yourself). Set false to disable all barge-in.
   barge_in: true
-  barge_in_on_speech: true # false = wake-word-only interruption
+  barge_in_on_speech: false # TEMP off: sharp TEN VAD + loud self-echo were
+    # firing false barge-ins (ZERO hearing itself). Re-enable once the echo is
+    # handled (BT speaker on / wired speaker + AEC). Wake-word interrupt stays on.
   barge_in_learn_ms: 900 # echo-floor learning window at reply start
   barge_in_speech_ms: 300 # sustained speech needed to trigger the interrupt
   barge_in_ratio:
