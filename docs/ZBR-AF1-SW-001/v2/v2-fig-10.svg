@@ -1,0 +1,108 @@
+<svg viewBox="0 0 1000 620" xmlns="http://www.w3.org/2000/svg" fill="none">
+<defs>
+  <pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+    <line x1="0" y1="0" x2="0" y2="6" stroke="#DED6C4" stroke-width="1"/>
+  </pattern>
+  <pattern id="dot" width="8" height="8" patternUnits="userSpaceOnUse">
+    <circle cx="1" cy="1" r="0.6" fill="#8A8172"/>
+  </pattern>
+</defs>
+      <rect x="22" y="22" width="956" height="576"
+            fill="none" stroke="#B9B1A1" stroke-width="0.6"/>
+      <path d="M 18 34 L 18 18 L 34 18" stroke="#25231B" stroke-width="0.9" fill="none"/>
+      <path d="M 982 34 L 982 18 L 966 18" stroke="#25231B" stroke-width="0.9" fill="none"/>
+      <path d="M 18 586 L 18 602 L 34 602" stroke="#25231B" stroke-width="0.9" fill="none"/>
+      <path d="M 982 586 L 982 602 L 966 602" stroke="#25231B" stroke-width="0.9" fill="none"/>
+    <line x1="120" y1="440" x2="460" y2="440" stroke="#25231B" stroke-width="1"/><line x1="120" y1="100" x2="120" y2="440" stroke="#25231B" stroke-width="1"/><line x1="120" y1="100" x2="120" y2="440" stroke="#DED6C4" stroke-width="0.4"/><line x1="120" y1="440" x2="460" y2="440" stroke="#DED6C4" stroke-width="0.4"/><line x1="154" y1="100" x2="154" y2="440" stroke="#DED6C4" stroke-width="0.4"/><line x1="120" y1="406" x2="460" y2="406" stroke="#DED6C4" stroke-width="0.4"/><line x1="188" y1="100" x2="188" y2="440" stroke="#DED6C4" stroke-width="0.4"/><line x1="120" y1="372" x2="460" y2="372" stroke="#DED6C4" stroke-width="0.4"/><line x1="222" y1="100" x2="222" y2="440" stroke="#DED6C4" stroke-width="0.4"/><line x1="120" y1="338" x2="460" y2="338" stroke="#DED6C4" stroke-width="0.4"/><line x1="256" y1="100" x2="256" y2="440" stroke="#DED6C4" stroke-width="0.4"/><line x1="120" y1="304" x2="460" y2="304" stroke="#DED6C4" stroke-width="0.4"/><line x1="290" y1="100" x2="290" y2="440" stroke="#DED6C4" stroke-width="0.4"/><line x1="120" y1="270" x2="460" y2="270" stroke="#DED6C4" stroke-width="0.4"/><line x1="324" y1="100" x2="324" y2="440" stroke="#DED6C4" stroke-width="0.4"/><line x1="120" y1="236" x2="460" y2="236" stroke="#DED6C4" stroke-width="0.4"/><line x1="358" y1="100" x2="358" y2="440" stroke="#DED6C4" stroke-width="0.4"/><line x1="120" y1="202.00000000000003" x2="460" y2="202.00000000000003" stroke="#DED6C4" stroke-width="0.4"/><line x1="392" y1="100" x2="392" y2="440" stroke="#DED6C4" stroke-width="0.4"/><line x1="120" y1="168" x2="460" y2="168" stroke="#DED6C4" stroke-width="0.4"/><line x1="426" y1="100" x2="426" y2="440" stroke="#DED6C4" stroke-width="0.4"/><line x1="120" y1="134" x2="460" y2="134" stroke="#DED6C4" stroke-width="0.4"/><line x1="460" y1="100" x2="460" y2="440" stroke="#DED6C4" stroke-width="0.4"/><line x1="120" y1="100" x2="460" y2="100" stroke="#DED6C4" stroke-width="0.4"/><line x1="120" y1="440" x2="120" y2="444" stroke="#25231B" stroke-width="0.8"/><text x="120" y="456" font-size="14" fill="#8A8172"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">0.0</text><line x1="116" y1="440" x2="120" y2="440" stroke="#25231B" stroke-width="0.8"/><text x="112" y="443" font-size="14" fill="#8A8172"
+        text-anchor="end" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">0.0</text><line x1="290" y1="440" x2="290" y2="444" stroke="#25231B" stroke-width="0.8"/><text x="290" y="456" font-size="14" fill="#8A8172"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">0.5</text><line x1="116" y1="270" x2="120" y2="270" stroke="#25231B" stroke-width="0.8"/><text x="112" y="273" font-size="14" fill="#8A8172"
+        text-anchor="end" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">0.5</text><line x1="460" y1="440" x2="460" y2="444" stroke="#25231B" stroke-width="0.8"/><text x="460" y="456" font-size="14" fill="#8A8172"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">1.0</text><line x1="116" y1="100" x2="120" y2="100" stroke="#25231B" stroke-width="0.8"/><text x="112" y="103" font-size="14" fill="#8A8172"
+        text-anchor="end" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">1.0</text><text x="290" y="472" font-size="14" fill="#25231B"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="2" font-style="normal">FACE COSINE</text><text x="80" y="270" font-size="14" fill="#25231B"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="2" font-style="normal">VOICE COSINE</text><g transform="translate(86,270) rotate(-90)"><text font-size="8" text-anchor="middle" font-family="Courier New, monospace" letter-spacing="2" font-weight="bold">VOICE COSINE</text></g><polygon points="429.09090909090907,440 415.18181818181813,423 401.27272727272725,406 387.3636363636363,389 373.45454545454544,372 359.5454545454545,355 345.6363636363636,338 331.72727272727275,321 317.8181818181818,304 303.9090909090909,287 290,270 276.0909090909091,253.00000000000003 262.18181818181813,236 248.27272727272722,219 234.36363636363632,201.99999999999997 220.45454545454538,184.99999999999997 206.54545454545448,167.99999999999994 192.63636363636357,150.99999999999994 178.72727272727263,133.99999999999994 164.81818181818173,116.99999999999989 150.90909090909082,99.99999999999994 460,100 460,100 " fill="url(#hatch)" opacity="0.9"/><polyline points="429.09090909090907,440 415.18181818181813,423 401.27272727272725,406 387.3636363636363,389 373.45454545454544,372 359.5454545454545,355 345.6363636363636,338 331.72727272727275,321 317.8181818181818,304 303.9090909090909,287 290,270 276.0909090909091,253.00000000000003 262.18181818181813,236 248.27272727272722,219 234.36363636363632,201.99999999999997 220.45454545454538,184.99999999999997 206.54545454545448,167.99999999999994 192.63636363636357,150.99999999999994 178.72727272727263,133.99999999999994 164.81818181818173,116.99999999999989 150.90909090909082,99.99999999999994" fill="none" stroke="#25231B" stroke-width="1.6"/><text x="364.79999999999995" y="208.8" font-size="16" fill="#25231B"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">ACCEPT (fused)</text><text x="364.79999999999995" y="249.6" font-size="12" fill="#8A8172"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">fusion.threshold = 0.50</text><text x="290" y="88" font-size="16" fill="#25231B"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="2" font-style="normal">PANEL A  ·  BOTH CHANNELS AGREE ON A NAME</text><line x1="560" y1="440" x2="900" y2="440" stroke="#25231B" stroke-width="1"/><line x1="560" y1="100" x2="560" y2="440" stroke="#25231B" stroke-width="1"/><line x1="560" y1="100" x2="560" y2="440" stroke="#DED6C4" stroke-width="0.4"/><line x1="560" y1="440" x2="900" y2="440" stroke="#DED6C4" stroke-width="0.4"/><line x1="594" y1="100" x2="594" y2="440" stroke="#DED6C4" stroke-width="0.4"/><line x1="560" y1="406" x2="900" y2="406" stroke="#DED6C4" stroke-width="0.4"/><line x1="628" y1="100" x2="628" y2="440" stroke="#DED6C4" stroke-width="0.4"/><line x1="560" y1="372" x2="900" y2="372" stroke="#DED6C4" stroke-width="0.4"/><line x1="662" y1="100" x2="662" y2="440" stroke="#DED6C4" stroke-width="0.4"/><line x1="560" y1="338" x2="900" y2="338" stroke="#DED6C4" stroke-width="0.4"/><line x1="696" y1="100" x2="696" y2="440" stroke="#DED6C4" stroke-width="0.4"/><line x1="560" y1="304" x2="900" y2="304" stroke="#DED6C4" stroke-width="0.4"/><line x1="730" y1="100" x2="730" y2="440" stroke="#DED6C4" stroke-width="0.4"/><line x1="560" y1="270" x2="900" y2="270" stroke="#DED6C4" stroke-width="0.4"/><line x1="764" y1="100" x2="764" y2="440" stroke="#DED6C4" stroke-width="0.4"/><line x1="560" y1="236" x2="900" y2="236" stroke="#DED6C4" stroke-width="0.4"/><line x1="798" y1="100" x2="798" y2="440" stroke="#DED6C4" stroke-width="0.4"/><line x1="560" y1="202.00000000000003" x2="900" y2="202.00000000000003" stroke="#DED6C4" stroke-width="0.4"/><line x1="832" y1="100" x2="832" y2="440" stroke="#DED6C4" stroke-width="0.4"/><line x1="560" y1="168" x2="900" y2="168" stroke="#DED6C4" stroke-width="0.4"/><line x1="866" y1="100" x2="866" y2="440" stroke="#DED6C4" stroke-width="0.4"/><line x1="560" y1="134" x2="900" y2="134" stroke="#DED6C4" stroke-width="0.4"/><line x1="900" y1="100" x2="900" y2="440" stroke="#DED6C4" stroke-width="0.4"/><line x1="560" y1="100" x2="900" y2="100" stroke="#DED6C4" stroke-width="0.4"/><line x1="560" y1="440" x2="560" y2="444" stroke="#25231B" stroke-width="0.8"/><text x="560" y="456" font-size="14" fill="#8A8172"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">0.0</text><line x1="556" y1="440" x2="560" y2="440" stroke="#25231B" stroke-width="0.8"/><text x="552" y="443" font-size="14" fill="#8A8172"
+        text-anchor="end" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">0.0</text><line x1="730" y1="440" x2="730" y2="444" stroke="#25231B" stroke-width="0.8"/><text x="730" y="456" font-size="14" fill="#8A8172"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">0.5</text><line x1="556" y1="270" x2="560" y2="270" stroke="#25231B" stroke-width="0.8"/><text x="552" y="273" font-size="14" fill="#8A8172"
+        text-anchor="end" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">0.5</text><line x1="900" y1="440" x2="900" y2="444" stroke="#25231B" stroke-width="0.8"/><text x="900" y="456" font-size="14" fill="#8A8172"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">1.0</text><line x1="556" y1="100" x2="560" y2="100" stroke="#25231B" stroke-width="0.8"/><text x="552" y="103" font-size="14" fill="#8A8172"
+        text-anchor="end" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">1.0</text><text x="730" y="472" font-size="14" fill="#25231B"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="2" font-style="normal">FACE COSINE</text><text x="520" y="270" font-size="14" fill="#25231B"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="2" font-style="normal">VOICE COSINE</text><g transform="translate(526,270) rotate(-90)"><text font-size="8" text-anchor="middle" font-family="Courier New, monospace" letter-spacing="2" font-weight="bold">VOICE COSINE</text></g><rect x="702.8" y="100" width="197.20000000000002" height="340" fill="url(#hatch)" opacity="0.6"/><rect x="560" y="100" width="340" height="187" fill="url(#hatch)" opacity="0.6"/><line x1="702.8" y1="100" x2="702.8" y2="440" stroke="#25231B" stroke-width="1.4"/><line x1="560" y1="287" x2="900" y2="287" stroke="#25231B" stroke-width="1.4"/><text x="706.8" y="114" font-size="12" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">face_threshold 0.42</text><text x="564" y="283" font-size="12" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">voice_threshold 0.45</text><text x="781" y="389" font-size="16" fill="#25231B"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="italic">only the stronger single</text><text x="781" y="412.8" font-size="14" fill="#8A8172"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="italic">channel competes; both must clear</text><text x="730" y="88" font-size="16" fill="#25231B"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="2" font-style="normal">PANEL B  ·  CHANNELS NAME DIFFERENT PEOPLE</text><text x="500" y="490" font-size="14" fill="#8A8172"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="2" font-style="normal">THE TWO PANELS ARE WHY WEAK AGREEING SIGNALS ACCEPT AND WEAK CONFLICTING ONES DO NOT</text>
+    <g transform="translate(520,460)">
+      <rect x="0" y="0" width="460" height="130" fill="none" stroke="#25231B" stroke-width="1"/>
+      <line x1="0" y1="30" x2="460" y2="30" stroke="#25231B" stroke-width="0.7"/>
+      <line x1="0" y1="72" x2="460" y2="72" stroke="#25231B" stroke-width="0.7"/>
+      <line x1="260" y1="30" x2="260" y2="130" stroke="#25231B" stroke-width="0.7"/>
+      <text x="10" y="22" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="2" font-style="normal">ZEROBIONIC</text>
+      <text x="450" y="22" font-size="14" fill="#8A8172"
+        text-anchor="end" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">AF-1 ASSISTIVE ROBOTICS</text>
+      <text x="10" y="52" font-size="11" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">TITLE</text>
+      <text x="10" y="66" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="1" font-style="normal">IDENTITY DECISION SURFACE</text>
+      <text x="10" y="92" font-size="11" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">DOC</text>
+      <text x="10" y="106" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">ZBR-AF1-SW-001</text>
+      <text x="10" y="122" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">REV 0.1</text>
+      <text x="270" y="52" font-size="11" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">FIGURE</text>
+      <text x="270" y="66" font-size="21" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="2" font-style="normal">10</text>
+      <text x="270" y="92" font-size="11" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">SHEET</text>
+      <text x="270" y="106" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">1 OF 1</text>
+      <text x="270" y="122" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">SCALE N.T.S.</text>
+    </g></svg>

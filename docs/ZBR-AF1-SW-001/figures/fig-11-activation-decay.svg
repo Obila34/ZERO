@@ -1,0 +1,103 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1080" width="1600" height="1080">
+  <style>
+    .ink   { fill:none; stroke:#25231B; stroke-width:2;   stroke-linejoin:round; stroke-linecap:round; }
+    .thin  { fill:none; stroke:#25231B; stroke-width:1.2; stroke-linejoin:round; stroke-linecap:round; }
+    .hair  { fill:none; stroke:#8A8172; stroke-width:1;   stroke-linejoin:round; stroke-linecap:round; }
+    .grid  { fill:none; stroke:#E4DFD6; stroke-width:1; }
+    .dash  { fill:none; stroke:#8A8172; stroke-width:1.3; stroke-dasharray:7 6; }
+    .accd  { fill:none; stroke:#D6480C; stroke-width:1.4; stroke-dasharray:6 5; }
+    .sheet { fill:none; stroke:#25231B; stroke-width:1.6; }
+    .rule  { fill:none; stroke:#17150E; stroke-width:1.2; }
+    .acc   { fill:none; stroke:#D6480C; stroke-width:2.4; stroke-linecap:round; }
+    .barI  { fill:#25231B; stroke:none; }
+    .barA  { fill:#D6480C; stroke:none; }
+    .band  { fill:#EFEBE4; stroke:none; }
+    .bandA { fill:#FBE7DC; stroke:none; }
+    .lbl   { font-family:"Courier New",monospace; font-size:16px; letter-spacing:1.8px; fill:#25231B; }
+    .row   { font-family:"Courier New",monospace; font-size:13px; letter-spacing:1.2px; fill:#25231B; }
+    .sub   { font-family:"Courier New",monospace; font-size:12.5px; letter-spacing:1.2px; fill:#8A8172; }
+    .tiny  { font-family:"Courier New",monospace; font-size:10.5px; letter-spacing:1.0px; fill:#8A8172; }
+    .acclb { font-family:"Courier New",monospace; font-size:12px;  letter-spacing:1.4px; fill:#D6480C; }
+    .tbold { font-family:"Courier New",monospace; font-size:14px;  letter-spacing:1.6px; fill:#17150E; font-weight:bold; }
+  </style>
+  <rect width="1600" height="1080" fill="#FFFFFF"/>
+  <rect x="36" y="36" width="1528" height="1008" class="sheet"/>
+
+  <g class="hair">
+    <line x1="36" y1="96" x2="76" y2="96"/><line x1="96" y1="36" x2="96" y2="76"/>
+    <line x1="1524" y1="96" x2="1564" y2="96"/><line x1="1504" y1="36" x2="1504" y2="76"/>
+    <line x1="36" y1="984" x2="76" y2="984"/><line x1="96" y1="1004" x2="96" y2="1044"/>
+    <line x1="1524" y1="984" x2="1564" y2="984"/><line x1="1504" y1="1004" x2="1504" y2="1044"/>
+  </g>
+
+  <text x="130" y="180" class="row">RECENCY CONTRIBUTION TO ACTIVATION</text>
+  <text x="130" y="202" class="tiny">0.2 + 0.8 · exp(-age / memory.retrieval.half_life_days)   ·   SHIPPED VALUE 14</text>
+  <rect x="300" y="240" width="1100" height="480" class="thin"/>
+  <line x1="483.3" y1="240" x2="483.3" y2="720" class="grid"/>
+  <line x1="666.7" y1="240" x2="666.7" y2="720" class="grid"/>
+  <line x1="850.0" y1="240" x2="850.0" y2="720" class="grid"/>
+  <line x1="1033.3" y1="240" x2="1033.3" y2="720" class="grid"/>
+  <line x1="1216.7" y1="240" x2="1216.7" y2="720" class="grid"/>
+  <line x1="300" y1="336.0" x2="1400" y2="336.0" class="grid"/>
+  <line x1="300" y1="432.0" x2="1400" y2="432.0" class="grid"/>
+  <line x1="300" y1="528.0" x2="1400" y2="528.0" class="grid"/>
+  <line x1="300" y1="624.0" x2="1400" y2="624.0" class="grid"/>
+  <rect x="300" y="624.0" width="1100" height="96.0" class="band"/>
+  <line x1="300" y1="624.0" x2="1400" y2="624.0" class="dash"/>
+  <text x="314" y="648.0" class="tiny">FLOOR 0.2 · AN OLD BUT RELEVANT AND IMPORTANT MEMORY CAN STILL SURFACE</text>
+  <polyline class="acc" points="300.0,240.0 309.2,253.5 318.3,266.5 327.5,279.0 336.7,291.1 345.8,302.8 355.0,314.1 364.2,324.9 373.3,335.4 382.5,345.6 391.7,355.3 400.8,364.8 410.0,373.8 419.2,382.6 428.3,391.1 437.5,399.3 446.7,407.1 455.8,414.8 465.0,422.1 474.2,429.2 483.3,436.0 492.5,442.6 501.7,449.0 510.8,455.1 520.0,461.0 529.2,466.8 538.3,472.3 547.5,477.6 556.7,482.7 565.8,487.7 575.0,492.5 584.2,497.1 593.3,501.5 602.5,505.8 611.7,510.0 620.8,514.0 630.0,517.8 639.2,521.6 648.3,525.2 657.5,528.6 666.7,532.0 675.8,535.2 685.0,538.3 694.2,541.3 703.3,544.2 712.5,547.0 721.7,549.7 730.8,552.3 740.0,554.8 749.2,557.3 758.3,559.6 767.5,561.9 776.7,564.1 785.8,566.2 795.0,568.2 804.2,570.1 813.3,572.0 822.5,573.9 831.7,575.6 840.8,577.3 850.0,578.9 859.2,580.5 868.3,582.1 877.5,583.5 886.7,584.9 895.8,586.3 905.0,587.6 914.2,588.9 923.3,590.1 932.5,591.3 941.7,592.5 950.8,593.6 960.0,594.7 969.2,595.7 978.3,596.7 987.5,597.6 996.7,598.6 1005.8,599.5 1015.0,600.3 1024.2,601.1 1033.3,601.9 1042.5,602.7 1051.7,603.5 1060.8,604.2 1070.0,604.9 1079.2,605.6 1088.3,606.2 1097.5,606.8 1106.7,607.4 1115.8,608.0 1125.0,608.6 1134.2,609.1 1143.3,609.6 1152.5,610.1 1161.7,610.6 1170.8,611.1 1180.0,611.5 1189.2,612.0 1198.3,612.4 1207.5,612.8 1216.7,613.2 1225.8,613.6 1235.0,613.9 1244.2,614.3 1253.3,614.6 1262.5,615.0 1271.7,615.3 1280.8,615.6 1290.0,615.9 1299.2,616.2 1308.3,616.4 1317.5,616.7 1326.7,617.0 1335.8,617.2 1345.0,617.5 1354.2,617.7 1363.3,617.9 1372.5,618.1 1381.7,618.3 1390.8,618.5 1400.0,618.7"/>
+  <line x1="556.7" y1="240" x2="556.7" y2="720" class="accd"/>
+  <circle cx="556.7" cy="482.7" r="6" class="thin" fill="#FFFFFF"/>
+  <line x1="477.9" y1="240" x2="477.9" y2="720" class="dash"/>
+  <circle cx="477.9" cy="432.0" r="6" class="thin" fill="#FFFFFF"/>
+  <text x="568.7" y="266" class="acclb">CONFIGURED 14 d</text>
+  <text x="568.7" y="284" class="tiny">falls to 1/e, not to one half</text>
+  <text x="465.9" y="266" class="tiny" text-anchor="end">TRUE HALF-LIFE 9.7 d</text>
+  <line x1="300.0" y1="720" x2="300.0" y2="729" class="hair"/>
+  <text x="300.0" y="748" class="tiny" text-anchor="middle">0 d</text>
+  <line x1="483.3" y1="720" x2="483.3" y2="729" class="hair"/>
+  <text x="483.3" y="748" class="tiny" text-anchor="middle">10 d</text>
+  <line x1="666.7" y1="720" x2="666.7" y2="729" class="hair"/>
+  <text x="666.7" y="748" class="tiny" text-anchor="middle">20 d</text>
+  <line x1="850.0" y1="720" x2="850.0" y2="729" class="hair"/>
+  <text x="850.0" y="748" class="tiny" text-anchor="middle">30 d</text>
+  <line x1="1033.3" y1="720" x2="1033.3" y2="729" class="hair"/>
+  <text x="1033.3" y="748" class="tiny" text-anchor="middle">40 d</text>
+  <line x1="1216.7" y1="720" x2="1216.7" y2="729" class="hair"/>
+  <text x="1216.7" y="748" class="tiny" text-anchor="middle">50 d</text>
+  <line x1="1400.0" y1="720" x2="1400.0" y2="729" class="hair"/>
+  <text x="1400.0" y="748" class="tiny" text-anchor="middle">60 d</text>
+  <text x="288" y="724.0" class="tiny" text-anchor="end">0</text>
+  <text x="288" y="628.0" class="tiny" text-anchor="end">0.2</text>
+  <text x="288" y="532.0" class="tiny" text-anchor="end">0.4</text>
+  <text x="288" y="436.0" class="tiny" text-anchor="end">0.6</text>
+  <text x="288" y="340.0" class="tiny" text-anchor="end">0.8</text>
+  <text x="288" y="244.0" class="tiny" text-anchor="end">1</text>
+  <text x="850.0" y="780" class="sub" text-anchor="middle">AGE SINCE LAST ACCESS</text>
+  <text x="130" y="800" class="acclb">THE PARAMETER IS A TIME CONSTANT, NOT A HALF-LIFE. SETTING IT EXPECTING HALF-LIFE SEMANTICS DECAYS ABOUT 30% FASTER THAN INTENDED.</text>
+  <text x="130" y="822" class="tiny">AGE IS MEASURED FROM LAST ACCESS, NOT CREATION, SO RECALLING A MEMORY RESETS IT TO THE LEFT-HAND EDGE.</text>
+  <line x1="96" y1="884" x2="1040" y2="884" class="rule"/>
+  <text x="96" y="906" class="tbold">LEGEND</text>
+  <line x1="100" y1="942" x2="160" y2="942" class="acc"/>
+  <text x="180" y="947" class="sub">RECENCY FACTOR AGAINST AGE</text>
+  <rect x="100" y="969" width="60" height="18" class="band"/>
+  <text x="180" y="983" class="sub">THE 0.2 FLOOR</text>
+  <line x1="100" y1="1014" x2="160" y2="1014" class="accd"/>
+  <text x="180" y="1019" class="sub">THE CONFIGURED DECAY PARAMETER</text>
+
+  <g>
+    <rect x="1104" y="884" width="460" height="160" class="rule"/>
+    <line x1="1104" y1="928" x2="1564" y2="928" class="rule"/>
+    <line x1="1104" y1="986" x2="1564" y2="986" class="rule"/>
+    <line x1="1104" y1="1015" x2="1564" y2="1015" class="rule"/>
+    <line x1="1360" y1="986" x2="1360" y2="1044" class="rule"/>
+    <text x="1120" y="915" class="tbold">ZEROBIONIC</text>
+    <text x="1548" y="915" class="sub" text-anchor="end">ASSISTIVE ROBOTICS</text>
+    <text x="1120" y="951" class="tiny">TITLE</text>
+    <text x="1120" y="974" class="lbl">MEMORY ACTIVATION DECAY</text>
+    <text x="1120" y="1006" class="sub">DOC ZBR-AF1-SW-001</text>
+    <text x="1376" y="1006" class="sub">FIGURE 11</text>
+    <text x="1120" y="1035" class="sub">REV 0.1</text>
+    <text x="1376" y="1035" class="sub">SHEET 1 OF 1</text>
+  </g>
+</svg>

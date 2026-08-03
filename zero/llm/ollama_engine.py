@@ -71,6 +71,43 @@ class OllamaLLM(LLM):
         except requests.RequestException as e:
             log.warning("LLM warmup failed (will load on first query): %s", e)
 
+    def prefill(self, messages: list[Message]) -> None:
+        """Speculative prefix warm, fired DURING the endpoint silence wait.
+
+        The speculative transcript is appended as the user turn and sent with
+        ``num_predict: 1`` — Ollama processes (and KV-caches) the whole prompt,
+        generates a single throwaway token, and returns. When the real request
+        lands a few hundred ms later, its prefill is already done and the first
+        token starts almost immediately. Prefix caching makes this safe even
+        when the final turn text grows (vision/turn notes are appended AFTER
+        the user text, so the warmed prefix still covers everything up to it).
+
+        One token of generation, no tool-call surface, no state — a wrong
+        speculation costs one wasted GPU beat and nothing else. Must use the
+        SAME options as stream() or Ollama rebuilds the runner (see warmup).
+        Uses its own connection (NOT self._session): on an early commit the
+        real stream can start while this is still in flight, and one Session
+        must not carry two concurrent requests. Never raises."""
+        try:
+            requests.post(
+                f"{self.host}/api/chat",
+                json={
+                    "model": self.model,
+                    "messages": messages,
+                    "stream": False,
+                    "keep_alive": self.keep_alive,
+                    "think": False,
+                    "options": {
+                        "temperature": self.temperature,
+                        "num_predict": 1,
+                        "num_ctx": self.num_ctx,
+                    },
+                },
+                timeout=20,
+            ).raise_for_status()
+        except requests.RequestException as e:
+            log.debug("speculative prefill failed (harmless): %s", e)
+
     def stream(self, messages: list[Message]) -> Iterator[str]:
         payload = {
             "model": self.model,

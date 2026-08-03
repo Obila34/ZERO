@@ -1,0 +1,126 @@
+<svg viewBox="0 0 1500 900" xmlns="http://www.w3.org/2000/svg" fill="none">
+<defs>
+  <pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+    <line x1="0" y1="0" x2="0" y2="6" stroke="#DED6C4" stroke-width="1"/>
+  </pattern>
+  <pattern id="dot" width="8" height="8" patternUnits="userSpaceOnUse">
+    <circle cx="1" cy="1" r="0.6" fill="#8A8172"/>
+  </pattern>
+</defs>
+      <rect x="22" y="22" width="1456" height="856"
+            fill="none" stroke="#B9B1A1" stroke-width="0.6"/>
+      <path d="M 18 34 L 18 18 L 34 18" stroke="#25231B" stroke-width="0.9" fill="none"/>
+      <path d="M 1482 34 L 1482 18 L 1466 18" stroke="#25231B" stroke-width="0.9" fill="none"/>
+      <path d="M 18 866 L 18 882 L 34 882" stroke="#25231B" stroke-width="0.9" fill="none"/>
+      <path d="M 1482 866 L 1482 882 L 1466 882" stroke="#25231B" stroke-width="0.9" fill="none"/>
+    <text x="90" y="140" font-size="21" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="3" font-style="normal">CODE</text><line x1="90" y1="152" x2="490" y2="152" stroke="#25231B" stroke-width="1.2"/><circle cx="98" cy="184" r="3" fill="#25231B"/><text x="112" y="190" font-size="18" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">Python 3.11+</text><circle cx="98" cy="218" r="3" fill="#25231B"/><text x="112" y="224" font-size="18" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">onnxruntime (CPU build)</text><circle cx="98" cy="252" r="3" fill="#25231B"/><text x="112" y="258" font-size="18" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">numpy, opencv-python</text><circle cx="98" cy="286" r="3" fill="#25231B"/><text x="112" y="292" font-size="18" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">sounddevice / pyaudio</text><circle cx="98" cy="320" r="3" fill="#25231B"/><text x="112" y="326" font-size="18" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">python-webrtcvad</text><circle cx="98" cy="354" r="3" fill="#25231B"/><text x="112" y="360" font-size="18" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">gpiozero (Pi only)</text><circle cx="98" cy="388" r="3" fill="#25231B"/><text x="112" y="394" font-size="18" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">FastAPI (server side)</text><circle cx="98" cy="422" r="3" fill="#25231B"/><text x="112" y="428" font-size="18" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">vLLM (server side)</text><circle cx="98" cy="456" r="3" fill="#25231B"/><text x="112" y="462" font-size="18" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">ollama-python</text><text x="530" y="140" font-size="21" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="3" font-style="normal">MODELS</text><line x1="530" y1="152" x2="930" y2="152" stroke="#25231B" stroke-width="1.2"/><circle cx="538" cy="184" r="3" fill="#25231B"/><text x="552" y="190" font-size="18" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">openWakeWord</text><circle cx="538" cy="218" r="3" fill="#25231B"/><text x="552" y="224" font-size="18" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">silero-vad v5 (ONNX)</text><circle cx="538" cy="252" r="3" fill="#25231B"/><text x="552" y="258" font-size="18" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">whisper large-v3-turbo</text><circle cx="538" cy="286" r="3" fill="#25231B"/><text x="552" y="292" font-size="18" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">whisper.cpp base.en</text><circle cx="538" cy="320" r="3" fill="#25231B"/><text x="552" y="326" font-size="18" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">Orpheus 3B</text><circle cx="538" cy="354" r="3" fill="#25231B"/><text x="552" y="360" font-size="18" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">Piper voice (en_US-amy)</text><circle cx="538" cy="388" r="3" fill="#25231B"/><text x="552" y="394" font-size="18" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">YOLOv8-worldv2, YOLO11</text><circle cx="538" cy="422" r="3" fill="#25231B"/><text x="552" y="428" font-size="18" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">ArcFace 512 (buffalo_l)</text><circle cx="538" cy="456" r="3" fill="#25231B"/><text x="552" y="462" font-size="18" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">ECAPA 512 (VoxCeleb)</text><circle cx="538" cy="490" r="3" fill="#25231B"/><text x="552" y="496" font-size="18" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">CLIP object embedder</text><circle cx="538" cy="524" r="3" fill="#25231B"/><text x="552" y="530" font-size="18" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">Depth Anything V2</text><circle cx="538" cy="558" r="3" fill="#25231B"/><text x="552" y="564" font-size="18" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">nomic-embed-text</text><circle cx="538" cy="592" r="3" fill="#25231B"/><text x="552" y="598" font-size="18" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">gemma4 8B (Ollama)</text><text x="970" y="140" font-size="21" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="3" font-style="normal">LICENCES</text><line x1="970" y1="152" x2="1370" y2="152" stroke="#25231B" stroke-width="1.2"/><circle cx="978" cy="184" r="3" fill="#25231B"/><text x="992" y="190" font-size="18" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">Apache 2.0 (most Python parts)</text><circle cx="978" cy="218" r="3" fill="#25231B"/><text x="992" y="224" font-size="18" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">MIT (openWakeWord, ollama)</text><circle cx="978" cy="252" r="3" fill="#25231B"/><text x="992" y="258" font-size="18" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">BSD (numpy, opencv, PyTorch)</text><circle cx="978" cy="286" r="3" fill="#25231B"/><text x="992" y="292" font-size="18" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">AGPL (YOLO family, redistribution)</text><circle cx="978" cy="320" r="3" fill="#25231B"/><text x="992" y="326" font-size="18" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">CC-BY-4.0 (some Piper voices)</text><circle cx="978" cy="354" r="3" fill="#25231B"/><text x="992" y="360" font-size="18" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">Gemma terms (LLM weights)</text><circle cx="978" cy="388" r="3" fill="#25231B"/><text x="992" y="394" font-size="18" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">Orpheus terms (upstream card)</text><circle cx="978" cy="422" r="3" fill="#25231B"/><text x="992" y="428" font-size="18" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">Weights are the supply-chain risk</text><circle cx="978" cy="456" r="3" fill="#25231B"/><text x="992" y="462" font-size="18" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">to watch, not the code</text>
+    <g transform="translate(1020,740)">
+      <rect x="0" y="0" width="460" height="130" fill="none" stroke="#25231B" stroke-width="1"/>
+      <line x1="0" y1="30" x2="460" y2="30" stroke="#25231B" stroke-width="0.7"/>
+      <line x1="0" y1="72" x2="460" y2="72" stroke="#25231B" stroke-width="0.7"/>
+      <line x1="260" y1="30" x2="260" y2="130" stroke="#25231B" stroke-width="0.7"/>
+      <text x="10" y="22" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="2" font-style="normal">ZEROBIONIC</text>
+      <text x="450" y="22" font-size="14" fill="#8A8172"
+        text-anchor="end" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">AF-1 ASSISTIVE ROBOTICS</text>
+      <text x="10" y="52" font-size="11" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">TITLE</text>
+      <text x="10" y="66" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="1" font-style="normal">DEPENDENCIES AND LICENCES</text>
+      <text x="10" y="92" font-size="11" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">DOC</text>
+      <text x="10" y="106" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">ZBR-AF1-SW-001</text>
+      <text x="10" y="122" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">REV 0.1</text>
+      <text x="270" y="52" font-size="11" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">FIGURE</text>
+      <text x="270" y="66" font-size="21" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="2" font-style="normal">20</text>
+      <text x="270" y="92" font-size="11" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">SHEET</text>
+      <text x="270" y="106" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">1 OF 1</text>
+      <text x="270" y="122" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">SCALE N.T.S.</text>
+    </g></svg>

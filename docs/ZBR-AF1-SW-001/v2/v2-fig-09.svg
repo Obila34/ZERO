@@ -1,0 +1,100 @@
+<svg viewBox="0 0 1000 500" xmlns="http://www.w3.org/2000/svg" fill="none">
+<defs>
+  <pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+    <line x1="0" y1="0" x2="0" y2="6" stroke="#DED6C4" stroke-width="1"/>
+  </pattern>
+  <pattern id="dot" width="8" height="8" patternUnits="userSpaceOnUse">
+    <circle cx="1" cy="1" r="0.6" fill="#8A8172"/>
+  </pattern>
+</defs>
+      <rect x="22" y="22" width="956" height="456"
+            fill="none" stroke="#B9B1A1" stroke-width="0.6"/>
+      <path d="M 18 34 L 18 18 L 34 18" stroke="#25231B" stroke-width="0.9" fill="none"/>
+      <path d="M 982 34 L 982 18 L 966 18" stroke="#25231B" stroke-width="0.9" fill="none"/>
+      <path d="M 18 466 L 18 482 L 34 482" stroke="#25231B" stroke-width="0.9" fill="none"/>
+      <path d="M 982 466 L 982 482 L 966 482" stroke="#25231B" stroke-width="0.9" fill="none"/>
+    <line x1="120" y1="240" x2="880" y2="240" stroke="#25231B" stroke-width="3"/><line x1="120" y1="237" x2="120" y2="243" stroke="#25231B" stroke-width="2"/><text x="120" y="260" font-size="14" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">SPEECH ENDS  ·  t = 0</text><text x="880" y="260" font-size="14" fill="#8A8172"
+        text-anchor="end" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">TURN COMMITTED</text><line x1="234" y1="228" x2="234" y2="252" stroke="#25231B" stroke-width="2"/><circle cx="234" cy="240" r="5" fill="#25231B"/><line x1="234" y1="228" x2="234" y2="150" stroke="#8A8172" stroke-width="0.7"/><text x="234" y="146" font-size="16" fill="#25231B"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">SPECULATIVE STT FIRES</text><text x="234" y="132" font-size="12" fill="#8A8172"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">180 ms</text><text x="234" y="116" font-size="12" fill="#8A8172"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="italic">transcribe audio so far, off the hot path</text><line x1="405" y1="228" x2="405" y2="252" stroke="#25231B" stroke-width="2"/><circle cx="405" cy="240" r="5" fill="#25231B"/><line x1="405" y1="252" x2="405" y2="330" stroke="#8A8172" stroke-width="0.7"/><text x="405" y="344" font-size="16" fill="#25231B"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">SILENCE THRESHOLD</text><text x="405" y="358" font-size="12" fill="#8A8172"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">450 ms</text><text x="405" y="374" font-size="12" fill="#8A8172"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="italic">vad.silence_ms</text><line x1="690" y1="228" x2="690" y2="252" stroke="#25231B" stroke-width="2"/><circle cx="690" cy="240" r="5" fill="#25231B"/><line x1="690" y1="228" x2="690" y2="150" stroke="#8A8172" stroke-width="0.7"/><text x="690" y="146" font-size="16" fill="#25231B"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">ADAPTIVE ENDPOINT</text><text x="690" y="132" font-size="12" fill="#8A8172"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">900 ms</text><text x="690" y="116" font-size="12" fill="#8A8172"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="italic">doubled if utterance under 600 ms of speech</text><line x1="468.3333333333333" y1="228" x2="468.3333333333333" y2="252" stroke="#B85425" stroke-width="2"/><circle cx="468.3333333333333" cy="240" r="5" fill="#B85425"/><line x1="468.3333333333333" y1="252" x2="468.3333333333333" y2="330" stroke="#8A8172" stroke-width="0.7"/><text x="468.3333333333333" y="344" font-size="16" fill="#B85425"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">SEMANTIC HOLD CHECK</text><text x="468.3333333333333" y="358" font-size="12" fill="#8A8172"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">550 ms</text><text x="468.3333333333333" y="374" font-size="12" fill="#8A8172"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="italic">last word of speculative transcript</text><line x1="848.3333333333333" y1="228" x2="848.3333333333333" y2="252" stroke="#25231B" stroke-width="2"/><circle cx="848.3333333333333" cy="240" r="5" fill="#25231B"/><line x1="848.3333333333333" y1="228" x2="848.3333333333333" y2="150" stroke="#8A8172" stroke-width="0.7"/><text x="848.3333333333333" y="146" font-size="16" fill="#25231B"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">HOLD WAIT LIMIT</text><text x="848.3333333333333" y="132" font-size="12" fill="#8A8172"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">1150 ms</text><text x="848.3333333333333" y="116" font-size="12" fill="#8A8172"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="italic">+ semantic_hold_wait_ms bounded</text><text x="60" y="370" font-size="16" fill="#B85425"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="1" font-style="normal">SEMANTIC HOLD IS TRI-STATE</text><text x="60" y="386" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">true  → hold one more silence window (transcript ended mid-thought)</text><text x="60" y="400" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">false → commit now (transcript ended in a sentence-final word)</text><text x="60" y="414" font-size="14" fill="#B85425"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">none  → transcript still in flight; wait bounded, do not race</text>
+    <g transform="translate(520,340)">
+      <rect x="0" y="0" width="460" height="130" fill="none" stroke="#25231B" stroke-width="1"/>
+      <line x1="0" y1="30" x2="460" y2="30" stroke="#25231B" stroke-width="0.7"/>
+      <line x1="0" y1="72" x2="460" y2="72" stroke="#25231B" stroke-width="0.7"/>
+      <line x1="260" y1="30" x2="260" y2="130" stroke="#25231B" stroke-width="0.7"/>
+      <text x="10" y="22" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="2" font-style="normal">ZEROBIONIC</text>
+      <text x="450" y="22" font-size="14" fill="#8A8172"
+        text-anchor="end" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">AF-1 ASSISTIVE ROBOTICS</text>
+      <text x="10" y="52" font-size="11" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">TITLE</text>
+      <text x="10" y="66" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="1" font-style="normal">ENDPOINT DECISION LADDER</text>
+      <text x="10" y="92" font-size="11" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">DOC</text>
+      <text x="10" y="106" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">ZBR-AF1-SW-001</text>
+      <text x="10" y="122" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">REV 0.1</text>
+      <text x="270" y="52" font-size="11" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">FIGURE</text>
+      <text x="270" y="66" font-size="21" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="2" font-style="normal">9</text>
+      <text x="270" y="92" font-size="11" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">SHEET</text>
+      <text x="270" y="106" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">1 OF 1</text>
+      <text x="270" y="122" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">SCALE N.T.S.</text>
+    </g></svg>

@@ -20,6 +20,7 @@ import sys
 import threading
 import time
 
+from zero.audio.interrupt import InterruptKind, classify_interrupt
 from zero.config import load_config
 from zero.conversation import Conversation
 from zero.events import EventBus
@@ -204,6 +205,18 @@ class Zero:
             # Eyes: always-on camera + detection (or None if vision disabled /
             # the camera stack isn't installed). Started in run().
             self.eyes = build_vision(self.cfg)
+            # One line of truth about what ACTUALLY loaded. Every stage above
+            # degrades silently by design (missing model -> fallback), and
+            # three silent fallbacks once stacked into "the upgrade changed
+            # nothing". This makes the real pipeline a 2-second log read.
+            log.info(
+                "engines live: vad=%s | turn=%s | speech-bargein=%s | wake=%s",
+                type(self.endpointer).__name__,
+                "smart-turn-v3" if self.turn is not None else "TEXT-HEURISTIC "
+                "(smart-turn model missing?)",
+                "on" if self.cfg.get("conversation.barge_in_on_speech", True)
+                else "OFF (config)",
+                type(self.wake).__name__)
         else:
             self.eyes = None
 
@@ -241,9 +254,19 @@ class Zero:
             trim_at_turns=self.cfg.get("llm.history_trim_at", 8),
         )
         self.state = State.IDLE
-        self._interrupt = False  # set by the barge-in monitor to stop playback
-        self._bargein_frames = None   # the interrupting words, fed to the next STT
+        self._interrupt = False   # HARD stop: cut playback mid-word (correction/wake)
+        self._soft_stop = False   # POLITE stop: finish the sentence, then yield
+        self._bargein_frames = None   # interrupting audio without a transcript
+        self._queued_turn = None      # classified interruption: {text, frames, kind}
+        self._interrupt_note = None   # one-shot note telling the LLM HOW it was cut off
         self._was_interrupted = False  # tell the LLM it got cut off, once
+        self._last_backchannel = 0.0   # cooldown clock for "mm-hmm" while user speaks
+        self._t_utterance_end = 0.0    # end-of-speech marker for the latency budget
+        # Speculative prefill needs the RAW engine (the tool router doesn't
+        # proxy it) — None simply means the old first-token latency.
+        self._llm_prefill = (getattr(base_llm, "prefill", None)
+                             if self.cfg.get("llm.speculative_prefill", True)
+                             else None)
         self._mood = MoodTracker()     # cross-turn emotional state
         self._stt_lock = threading.Lock()  # serialize speculative vs final STT
         self._memory_thread: threading.Thread | None = None  # background fact save
@@ -577,7 +600,7 @@ class Zero:
         if self.speaker_tracker is not None:
             self.speaker_tracker.reset()   # a new conversation, a clean slate
         self._mood.reset()
-        self._was_interrupted = False  # a stale note must not leak across chats
+        self._reset_turn_state()  # stale interrupts/ducks must not leak across chats
         self._face_name = None
         self._last_id_key = None       # fresh conversation: re-introduce who's here
         self._session_log = []         # per-turn (durable_pid, role, text) for memory
@@ -590,88 +613,144 @@ class Zero:
         while True:
             self._drain_events()  # timers/reminders land at turn boundaries
             self._maybe_compact()  # fold trimmed turns into a rolling summary
-            self._to(State.LISTENING)
-            self.mic.resume()  # re-open the mic for the user's turn
-            # On a speech barge-in the interrupting words were already captured —
-            # feed them into this capture so the user never repeats themselves.
-            stash, self._bargein_frames = self._bargein_frames, None
-            if stash:
-                frames_src = itertools.chain(stash, self.mic.frames())
-            else:
-                self.mic.drain()  # drop audio captured while speaking/thinking
-                frames_src = self.mic.frames()
-            # Speculative STT: the moment the user PAUSES (well before the
-            # endpoint confirms), start transcribing the audio so far — the
-            # STT round trip overlaps the silence wait. Skipped when a gate
-            # (voiceid / strict privacy) must run before any transcription.
+
+            # A classified interruption from the last reply? Its words were
+            # ALREADY transcribed while ZERO wound down its sentence — skip
+            # capture AND STT: the response to a queued/correcting interruption
+            # starts with zero listening latency.
+            import numpy as np
+
+            queued, self._queued_turn = self._queued_turn, None
+            pre_text = (queued or {}).get("text")
             spec: dict = {}
-            # Speculation only pays off when STT is the FAST remote. While it's
-            # degraded to the slow local CPU engine, speculating just runs that
-            # ~5s job twice (pause + endpoint) — so skip it and transcribe once.
-            allow_spec = (self.voiceid is None
-                          and not getattr(self.stt, "degraded", False)
-                          and not (self.privacy is not None
-                                   and getattr(self.privacy, "mode", "") == "strict"))
+            if pre_text:
+                frames = queued.get("frames") or []
+                utterance = (np.concatenate(frames).astype("float32") / 32768.0
+                             if frames else np.zeros(1, dtype="float32"))
+                self.mic.pause()
+                self._to(State.THINKING)
+                self._t_utterance_end = time.monotonic()
+            else:
+                self._to(State.LISTENING)
+                self.mic.resume()  # re-open the mic for the user's turn
+                # On an untranscribed barge-in the interrupting audio was still
+                # captured — feed it into this capture so the user never has to
+                # repeat themselves.
+                stash, self._bargein_frames = self._bargein_frames, None
+                if stash:
+                    frames_src = itertools.chain(stash, self.mic.frames())
+                else:
+                    self.mic.drain()  # drop audio captured while speaking/thinking
+                    frames_src = self.mic.frames()
+                # Speculative STT: the moment the user PAUSES (well before the
+                # endpoint confirms), start transcribing the audio so far — the
+                # STT round trip overlaps the silence wait. Skipped when a gate
+                # (voiceid / strict privacy) must run before any transcription.
+                # Speculation only pays off when STT is the FAST remote. While
+                # it's degraded to the slow local CPU engine, speculating just
+                # runs that ~5s job twice — so skip it and transcribe once.
+                allow_spec = (self.voiceid is None
+                              and not getattr(self.stt, "degraded", False)
+                              and not (self.privacy is not None
+                                       and getattr(self.privacy, "mode", "")
+                                       == "strict"))
 
-            def _on_pause(audio_i16):
-                res: dict = {}
+                def _on_pause(audio_i16):
+                    # Always record the pause audio + the turn-model verdict —
+                    # Smart Turn must keep working even when speculative STT is
+                    # gated off (the old coupling silently disabled it).
+                    spec["audio"] = audio_i16
+                    p = None
+                    if self.turn is not None:
+                        p = self.turn.probability(
+                            audio_i16.astype("float32") / 32768.0)
+                    spec["turn_p"] = p
+                    self._maybe_backchannel(audio_i16, p)
+                    if not allow_spec:
+                        return
+                    res: dict = {}
 
-                def run():
-                    with self._stt_lock:
-                        try:
-                            res["text"] = self.stt.transcribe(
-                                audio_i16.astype("float32") / 32768.0, sr)
-                        except Exception as e:
-                            log.debug("speculative stt failed: %s", e)
-                spec["audio"], spec["res"] = audio_i16, res
-                spec["thread"] = t = threading.Thread(
-                    target=run, name="stt-spec", daemon=True)
-                t.start()
+                    def run():
+                        with self._stt_lock:
+                            try:
+                                res["text"] = self.stt.transcribe(
+                                    audio_i16.astype("float32") / 32768.0, sr)
+                            except Exception as e:
+                                log.debug("speculative stt failed: %s", e)
+                        # Speculative LLM prefill: warm the KV cache with this
+                        # transcript while the endpoint is still waiting out
+                        # the silence — by commit time the model has usually
+                        # already read the prompt and first-token is nearly
+                        # instant. Wrong speculation costs one throwaway token.
+                        text = (res.get("text") or "").strip()
+                        if (text and self._llm_prefill is not None
+                                and spec.get("prefilled") != text):
+                            spec["prefilled"] = text
+                            try:
+                                self._llm_prefill(
+                                    [*self.convo.messages(),
+                                     {"role": "user", "content": text}])
+                            except Exception as e:
+                                log.debug("speculative prefill failed: %s", e)
+                    spec["res"] = res
+                    spec["thread"] = t = threading.Thread(
+                        target=run, name="stt-spec", daemon=True)
+                    t.start()
 
-            def _hold() -> bool | None:
-                # Audio-first end-of-turn (Smart Turn v3): judge whether the turn
-                # is finished straight from the waveform at THIS pause — prosody,
-                # intonation, rhythm — no transcript needed. It's authoritative
-                # when it can decide; we fall through to the text heuristic only
-                # when it's off or undecided (too little audio / model error).
-                if self.turn is not None:
-                    audio = spec.get("audio")
-                    if audio is not None:
-                        done = self.turn.complete(
-                            audio.astype("float32") / 32768.0)
-                        if done is not None:
-                            # finished -> don't hold; mid-thought -> hold one more
-                            return not done
-                # Text fallback, tri-state: the speculative transcript for THIS
-                # pause says finished (False), mid-thought (True) — or it's STILL
-                # IN FLIGHT (None), in which case the endpointer waits a bounded
-                # beat instead of racing the STT round trip. That race is why
-                # half-sentences ("...give me a bit of the") used to ship.
-                res = spec.get("res") or {}
-                text = res.get("text")
-                if text is None:
-                    t = spec.get("thread")
-                    if t is not None and t.is_alive():
-                        return None      # transcript pending — worth a short wait
-                    return False         # no speculation ran; commit normally
-                return ends_mid_thought(text)
+                def _hold() -> bool | None:
+                    # Audio-first end-of-turn (Smart Turn v3): judge whether the
+                    # turn is finished straight from the waveform at THIS pause —
+                    # prosody, intonation, rhythm — no transcript needed. The
+                    # verdict was computed once at the pause hook; reuse it.
+                    p = spec.get("turn_p")
+                    if p is not None:
+                        # finished -> don't hold; mid-thought -> hold one more
+                        return not (p >= self.turn.threshold)
+                    # Text fallback, tri-state: the speculative transcript for
+                    # THIS pause says finished (False), mid-thought (True) — or
+                    # it's STILL IN FLIGHT (None), in which case the endpointer
+                    # waits a bounded beat instead of racing the STT round trip.
+                    res = spec.get("res") or {}
+                    text = res.get("text")
+                    if text is None:
+                        t = spec.get("thread")
+                        if t is not None and t.is_alive():
+                            return None  # transcript pending — worth a short wait
+                        return False     # no speculation ran; commit normally
+                    return ends_mid_thought(text)
 
-            utterance = self.endpointer.capture(
-                frames_src, idle_timeout_s=idle_s,
-                on_speech_pause=_on_pause if allow_spec else None,
-                should_hold=_hold if (allow_spec and self.cfg.get(
-                    "vad.semantic_hold", True)) else None)
+                early_thr = self.cfg.get("vad.early_commit_threshold", 0.85)
 
-            if utterance is None or getattr(utterance, "size", 0) == 0:
-                log.info("Sleeping… (no speech for %.0fs — say the wake word to talk again)",
-                         idle_s)
-                self._end_conversation()
-                return
+                def _early(audio_i16) -> bool:
+                    # Predictive endpointing: when the turn model is CONFIDENT
+                    # the thought is complete at the ~180 ms pause mark, commit
+                    # now — the human ~200 ms turn gap — instead of waiting out
+                    # the full silence window.
+                    if not self.cfg.get("vad.early_commit", True):
+                        return False
+                    p = spec.get("turn_p")
+                    return p is not None and p >= early_thr
 
-            # Mute the mic for the whole think+speak phase so ZERO can't transcribe
-            # its own voice off the BT speaker (echo).
-            self.mic.pause()
-            self._to(State.THINKING)
+                use_hold = (self.turn is not None
+                            or (allow_spec
+                                and self.cfg.get("vad.semantic_hold", True)))
+                utterance = self.endpointer.capture(
+                    frames_src, idle_timeout_s=idle_s,
+                    on_speech_pause=_on_pause,
+                    should_hold=_hold if use_hold else None,
+                    early_commit=_early if self.turn is not None else None)
+                self._t_utterance_end = time.monotonic()
+
+                if utterance is None or getattr(utterance, "size", 0) == 0:
+                    log.info("Sleeping… (no speech for %.0fs — say the wake "
+                             "word to talk again)", idle_s)
+                    self._end_conversation()
+                    return
+
+                # Mute the mic for the whole think+speak phase so ZERO can't
+                # transcribe its own voice off the BT speaker (echo).
+                self.mic.pause()
+                self._to(State.THINKING)
 
             # "Only my voice": skip anything that isn't the enrolled owner — before
             # STT, so we don't even transcribe other people / background voices.
@@ -693,7 +772,9 @@ class Zero:
             # means speech resumed / max-cap fired — the spec text is a prefix.
             slack = int(sr * (2 * self.cfg.get("vad.silence_ms", 450)
                               + self.cfg.get("vad.speech_pad_ms", 200) + 400) / 1000)
-            if (spec_a is not None
+            if pre_text:
+                stt_result = {"text": pre_text}  # transcribed at interrupt time
+            elif (spec_a is not None and spec.get("thread") is not None
                     and 0 <= utterance.size - spec_a.size <= slack
                     and bool((utterance[:spec_a.size]
                               == spec_a.astype("float32") / 32768.0).all())):
@@ -717,9 +798,10 @@ class Zero:
             self._turn_notes = []
             if self._was_interrupted:
                 self._was_interrupted = False
-                self._turn_notes.append(
+                self._turn_notes.append(self._interrupt_note or (
                     "(You were interrupted mid-sentence a moment ago — don't "
-                    "restart the old answer; just respond to what they say now.)")
+                    "restart the old answer; just respond to what they say now.)"))
+                self._interrupt_note = None
             self._turn_durable_pid = None  # only a CONFIDENT voice credits memory
             self._turn_speaker = None      # who to tag this turn's training data
             if self.identity is not None:
@@ -778,6 +860,8 @@ class Zero:
             if stt_thread is not None:
                 stt_thread.join(timeout=self.cfg.get("stt.remote_timeout", 30) + 5)
                 text = (stt_result.get("text") or "").strip()
+            elif stt_result.get("text"):
+                text = stt_result["text"].strip()  # queued turn: already transcribed
             else:
                 text = self.stt.transcribe(utterance, sr).strip()
             if not text:
@@ -944,10 +1028,11 @@ class Zero:
                                               filler_audio=self._pick_filler(text))
             finally:
                 self._stop_bargein(monitor)
-            if self._interrupt:
+            if self._interrupt or self._soft_stop:
                 llm_stop.set()  # stop generating a reply nobody is listening to
                 self._was_interrupted = True
-                log.info("barge-in: stopped speaking to listen")
+                log.info("barge-in: %s", "hard stop (correction/wake)"
+                         if self._interrupt else "yielded at the sentence end")
             # Store only what was actually SPOKEN — after a barge-in the model must
             # not "remember" saying sentences the user never heard.
             if reply:
@@ -963,7 +1048,7 @@ class Zero:
                         # verdict may retro-tag it next utterance.
                         self.reward.on_turn(
                             text, reply, affect=turn_affect,
-                            barged_in=self._interrupt,
+                            barged_in=self._interrupt or self._soft_stop,
                             person_id=self._turn_durable_pid)
                 log.info("reply: %r", reply)
 
@@ -1292,6 +1377,7 @@ class Zero:
         self._session_log = []
         self._corpus_log = []
         self._person = None  # identity does not persist across conversations
+        self._reset_turn_state()  # no interrupt/duck/queued-turn survives a session
         self._to(State.IDLE)
 
     def _persist_session(self, session_log: list, corpus_log: list,
@@ -1595,9 +1681,20 @@ class Zero:
                 if item is None:
                     return
                 idx, piece = item
+                # Soft stop (a QUEUE interruption): finish the sentence being
+                # spoken, then yield the floor at the boundary — the polite
+                # human ending, not a mid-word cut.
+                if self._soft_stop and spoke_any and idx != played:
+                    return
                 if not spoke_any:
-                    log.info("first audio out: %.2fs after STT",
-                             time.monotonic() - self._t_reply_start)
+                    now = time.monotonic()
+                    # The end-to-end number that matters: silence from the
+                    # user's last word to ZERO's first sound.
+                    gap = (now - self._t_utterance_end
+                           if self._t_utterance_end else float("nan"))
+                    log.info("first audio out: %.2fs after STT, %.2fs after "
+                             "end of speech",
+                             now - self._t_reply_start, gap)
                     spoke_any = True
                 played = idx
                 yield piece
@@ -1608,9 +1705,10 @@ class Zero:
         self.speaker.play_stream(audio_gen(), self.voice.sample_rate,
                                  should_stop=self._should_interrupt)
 
-        if self._interrupt:
+        if self._interrupt or self._soft_stop:
             # Shut the whole pipeline down and unblock the producer, then return
-            # only the sentences the user actually heard.
+            # only the sentences the user actually heard (a soft stop ended at
+            # a sentence boundary, so `played` is exactly the last one spoken).
             llm_stop.set()
             stop_evt.set()
             self._drain_audio_queue(audio_q, prod)
@@ -1634,12 +1732,138 @@ class Zero:
         """Barge-in hook: True stops playback the instant the wake word fires."""
         return self._interrupt
 
+    def _reset_turn_state(self) -> None:
+        """Clear every cross-turn interrupt artefact — a stale queued turn, a
+        leftover duck, a half-set flag. Called at conversation boundaries so
+        nothing can leak from one conversation (or a crashed turn) into the
+        next."""
+        self._interrupt = False
+        self._soft_stop = False
+        self._bargein_frames = None
+        self._queued_turn = None
+        self._interrupt_note = None
+        self._was_interrupted = False
+        self._last_backchannel = 0.0
+        if not self.text_mode:
+            self.speaker.unduck()
+
+    def _maybe_backchannel(self, audio_i16, turn_p) -> None:
+        """Active listening: at a brief pause deep inside a LONG user turn that
+        is clearly not finished, murmur a soft ack ("Mm-hmm.") the way a human
+        listener signals "I'm with you, keep going". Gated hard: long turn,
+        cooldown, and the turn model must say the thought is NOT complete —
+        backchanneling into a finished question is talking over the answer.
+        Plays with the mic muted so its own echo never enters the capture."""
+        if self.text_mode:
+            return
+        cfg = self.cfg
+        if not cfg.get("conversation.backchannel.enabled", True):
+            return
+        if turn_p is None or turn_p > cfg.get(
+                "conversation.backchannel.max_turn_prob", 0.4):
+            return
+        sr = cfg.get("audio.sample_rate", 16000)
+        min_s = cfg.get("conversation.backchannel.min_speech_ms", 4000) / 1000.0
+        if audio_i16.size < sr * min_s:
+            return
+        cooldown = cfg.get("conversation.backchannel.cooldown_ms", 8000) / 1000.0
+        if time.monotonic() - self._last_backchannel < cooldown:
+            return
+        audios = self._fillers.get("ack") or []
+        if not audios:
+            return
+        self._last_backchannel = time.monotonic()
+        try:
+            self.mic.pause()   # our own murmur must not enter the capture
+            clip = random.choice(audios)
+            self.speaker.play(clip * 0.6, self.voice.sample_rate,
+                              should_stop=lambda: False)
+        except Exception as e:  # a failed murmur must never break the capture
+            log.debug("backchannel failed: %s", e)
+        finally:
+            self.mic.resume()
+
+    def _assess_interruption(self, speech, stop) -> bool:
+        """Sustained speech over the reply. React like a person, in order:
+        DUCK (drop the reply's volume — the audible "I noticed you"), collect
+        the rest of the interruption, transcribe it NOW, and classify:
+
+        * correction  -> cut the reply mid-word (they said we're wrong)
+        * new thought -> finish the current sentence, then answer it (queued)
+        * backchannel -> un-duck and keep talking (they were agreeing)
+        * noise       -> un-duck and keep talking
+
+        Returns True when playback is being stopped (the monitor exits) —
+        False re-arms the detector and keeps watching."""
+        self.speaker.duck(self.cfg.get("conversation.barge_in_duck", 0.35))
+        frames = list(speech.frames)
+        block_ms = self.cfg.get("audio.block_ms", 30)
+        need_quiet = max(1, int(350 / block_ms))
+        cap = max(1, int(4000 / block_ms))
+        quiet = 0
+        for frame in self.mic.frames():
+            if stop.is_set():        # reply ended under us — let the normal
+                self.speaker.unduck()  # turn flow capture whatever this was
+                return True
+            frames.append(frame)
+            if self.endpointer.is_speech_frame(frame):
+                quiet = 0
+            else:
+                quiet += 1
+            if quiet >= need_quiet or len(frames) >= cap:
+                break
+        import numpy as np
+
+        sr = self.cfg.get("audio.sample_rate", 16000)
+        audio = np.concatenate(frames).astype("float32") / 32768.0
+        text, stt_failed = "", False
+        try:
+            with self._stt_lock:
+                text = (self.stt.transcribe(audio, sr) or "").strip()
+        except Exception as e:
+            stt_failed = True
+            log.debug("interrupt stt failed: %s", e)
+        kind = classify_interrupt(text)
+        log.info("interruption %r -> %s", text, kind.value)
+        if kind is InterruptKind.BACKCHANNEL:
+            self.speaker.unduck()   # they were agreeing — carry on at volume
+            return False
+        if kind is InterruptKind.NOISE:
+            if stt_failed:
+                # STT is down but the detector heard REAL sustained speech —
+                # ignoring them would be worse than yielding. Stop politely and
+                # let the next turn re-listen with the audio prepended.
+                self._bargein_frames = frames
+                self._interrupt_note = (
+                    "(They interrupted you but you couldn't make out the words "
+                    "— ask them to repeat it briefly.)")
+                self._soft_stop = True
+                return True
+            self.speaker.unduck()   # a transcribed nothing — hallucinated blip
+            return False
+        self._queued_turn = {"text": text, "frames": frames, "kind": kind.value}
+        if kind is InterruptKind.CORRECTION:
+            self._interrupt_note = (
+                "(They cut you off with a correction — what you were saying "
+                "missed the mark. Don't defend or restart it; address the "
+                "correction directly.)")
+            self._interrupt = True    # hard: playback cuts mid-word
+        else:  # QUEUE — the polite path
+            self._interrupt_note = (
+                "(They said this while you were finishing your last sentence; "
+                "you stopped at the end of it. Respond to this new input now — "
+                "don't mention the overlap.)")
+            self._soft_stop = True    # finish the sentence, then yield
+        return True
+
     def _start_bargein(self):
         """Keep the mic live during playback and interrupt on EITHER the wake
         word OR sustained user speech over the reply (echo-aware, no wake word
-        needed — natural interruption). Returns (stop_event, thread) — both
-        None if barge-in is off / no mic."""
+        needed — natural interruption). Speech interrupts are CLASSIFIED
+        (_assess_interruption) instead of blindly cutting playback. Returns
+        (stop_event, thread) — both None if barge-in is off / no mic."""
         self._interrupt = False
+        self._soft_stop = False
         self._bargein_frames = None
         if self.text_mode or not self.cfg.get("conversation.barge_in", True):
             return None, None
@@ -1661,6 +1885,13 @@ class Zero:
                 # NOT 1.5s of ring — the ring's prefix is ZERO's own reply
                 # echo, which garbled the post-interrupt turn.
                 keep_ms=self.cfg.get("conversation.barge_in_speech_ms", 300) + 600,
+                # The Bluetooth-proof echo test: the mic envelope is correlated
+                # against what the speaker ACTUALLY played (at any lag), so the
+                # reply's own echo — however loud — can't fire a false trigger.
+                played_env=self.speaker.env_snapshot,
+                env_corr_max=self.cfg.get("conversation.barge_in_env_corr", 0.65),
+                floor_percentile=self.cfg.get(
+                    "conversation.barge_in_floor_percentile", 80),
             )
         stop = threading.Event()
 
@@ -1670,15 +1901,14 @@ class Zero:
                     return
                 try:
                     if self.wake.process(frame):
-                        self._interrupt = True
+                        self._interrupt = True   # wake word: always a hard stop
                         return
                     if (speech is not None
                             and speech.update(frame,
                                               active=self.speaker.playing)):
-                        self._bargein_frames = speech.frames
-                        self._interrupt = True
-                        log.info("barge-in: user spoke over the reply")
-                        return
+                        if self._assess_interruption(speech, stop):
+                            return
+                        speech.rearm()   # backchannel/noise: keep watching
                 except Exception as e:  # never let the monitor crash playback
                     log.debug("barge-in monitor error: %s", e)
                     return
@@ -1701,6 +1931,7 @@ class Zero:
             thread.join(timeout=1.5)
             if thread.is_alive():
                 log.warning("barge-in monitor did not exit in time — mic contention")
+        self.speaker.unduck()   # playback is over; a duck must never persist
         self.mic.pause()
 
     def _speak_one(self, text: str) -> None:
@@ -1923,6 +2154,7 @@ class Zero:
                 chunks, llm_stop = self._stream_in_background(messages)
                 if do_speak:
                     self._interrupt = False
+                    self._soft_stop = False  # a stale soft stop would mute this
                     with self._voice_override(voice):
                         reply = self._speak_streaming(chunks, llm_stop)
                 else:

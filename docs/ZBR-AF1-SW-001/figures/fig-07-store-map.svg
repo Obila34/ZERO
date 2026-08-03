@@ -1,0 +1,127 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1080" width="1600" height="1080">
+  <style>
+    .ink   { fill:none; stroke:#25231B; stroke-width:2;   stroke-linejoin:round; stroke-linecap:round; }
+    .thin  { fill:none; stroke:#25231B; stroke-width:1.2; stroke-linejoin:round; stroke-linecap:round; }
+    .hair  { fill:none; stroke:#8A8172; stroke-width:1;   stroke-linejoin:round; stroke-linecap:round; }
+    .dash  { fill:none; stroke:#8A8172; stroke-width:1.4; stroke-dasharray:7 6; }
+    .sheet { fill:none; stroke:#25231B; stroke-width:1.6; }
+    .rule  { fill:none; stroke:#17150E; stroke-width:1.2; }
+    .cabO  { fill:none; stroke:#25231B; stroke-width:9;   stroke-linecap:butt; }
+    .cabI  { fill:none; stroke:#FFFFFF; stroke-width:5;   stroke-linecap:butt; }
+    .cabAO { fill:none; stroke:#D6480C; stroke-width:9;   stroke-linecap:butt; }
+    .fill  { fill:#25231B; stroke:none; }
+    .fillA { fill:#D6480C; stroke:none; }
+    .hdr   { fill:#F2EEE7; stroke:none; }
+    .lbl   { font-family:"Courier New",monospace; font-size:16px; letter-spacing:1.8px; fill:#25231B; }
+    .row   { font-family:"Courier New",monospace; font-size:13px; letter-spacing:1.2px; fill:#25231B; }
+    .sub   { font-family:"Courier New",monospace; font-size:12.5px; letter-spacing:1.2px; fill:#8A8172; }
+    .tiny  { font-family:"Courier New",monospace; font-size:10.5px; letter-spacing:1.0px; fill:#8A8172; }
+    .acclb { font-family:"Courier New",monospace; font-size:13px;  letter-spacing:1.5px; fill:#D6480C; }
+    .tbold { font-family:"Courier New",monospace; font-size:14px;  letter-spacing:1.6px; fill:#17150E; font-weight:bold; }
+  </style>
+  <rect width="1600" height="1080" fill="#FFFFFF"/>
+  <rect x="36" y="36" width="1528" height="1008" class="sheet"/>
+
+  <g class="hair">
+    <line x1="36" y1="96" x2="76" y2="96"/><line x1="96" y1="36" x2="96" y2="76"/>
+    <line x1="1524" y1="96" x2="1564" y2="96"/><line x1="1504" y1="36" x2="1504" y2="76"/>
+    <line x1="36" y1="984" x2="76" y2="984"/><line x1="96" y1="1004" x2="96" y2="1044"/>
+    <line x1="1524" y1="984" x2="1564" y2="984"/><line x1="1504" y1="1004" x2="1504" y2="1044"/>
+  </g>
+
+<rect x="130" y="240" width="420" height="160" rx="3" class="thin"/>
+  <rect x="131" y="241" width="418" height="28" class="hdr"/>
+  <line x1="130" y1="269" x2="550" y2="269" class="thin"/>
+  <text x="144" y="261" class="row">zero_memory.sqlite</text>
+  <text x="146" y="294" class="tiny">memories</text>
+  <text x="146" y="316" class="tiny">person_id, layer, key, value</text>
+  <rect x="146" y="329" width="10" height="10" class="fill"/>
+  <text x="164" y="338" class="tiny">importance, emb, emb_dim</text>
+  <text x="146" y="360" class="tiny">created_at, last_access, protected</text>
+  <rect x="590" y="240" width="420" height="160" rx="3" class="thin"/>
+  <rect x="591" y="241" width="418" height="28" class="hdr"/>
+  <line x1="590" y1="269" x2="1010" y2="269" class="thin"/>
+  <text x="604" y="261" class="row">zero_identity.sqlite</text>
+  <text x="606" y="294" class="tiny">people</text>
+  <text x="606" y="316" class="tiny">id, name UNIQUE NOCASE, created_at</text>
+  <text x="606" y="338" class="tiny">embeddings</text>
+  <rect x="606" y="351" width="10" height="10" class="fill"/>
+  <text x="624" y="360" class="tiny">person_id, kind, dim, vec</text>
+  <rect x="1050" y="240" width="420" height="160" rx="3" class="thin"/>
+  <rect x="1051" y="241" width="418" height="28" class="hdr"/>
+  <line x1="1050" y1="269" x2="1470" y2="269" class="thin"/>
+  <text x="1064" y="261" class="row">zero_guests.sqlite</text>
+  <text x="1066" y="294" class="tiny">guest_samples</text>
+  <text x="1066" y="316" class="tiny">guest (NEGATIVE IDS), created_at</text>
+  <rect x="1066" y="329" width="10" height="10" class="fill"/>
+  <text x="1084" y="338" class="tiny">dim, vec</text>
+  <text x="1066" y="360" class="tiny">capped per guest and in total</text>
+  <rect x="130" y="430" width="420" height="160" rx="3" class="thin"/>
+  <rect x="131" y="431" width="418" height="28" class="hdr"/>
+  <line x1="130" y1="459" x2="550" y2="459" class="thin"/>
+  <text x="144" y="451" class="row">zero_episodes.sqlite</text>
+  <text x="146" y="484" class="tiny">episodes</text>
+  <text x="146" y="506" class="tiny">v, ts, kind, person_id, payload</text>
+  <text x="146" y="528" class="tiny">reward, surprise, consolidated_at</text>
+  <text x="146" y="550" class="tiny">WAL · user_version migrations</text>
+  <rect x="590" y="430" width="420" height="160" rx="3" class="thin"/>
+  <rect x="591" y="431" width="418" height="28" class="hdr"/>
+  <line x1="590" y1="459" x2="1010" y2="459" class="thin"/>
+  <text x="604" y="451" class="row">zero_curiosity.sqlite</text>
+  <text x="606" y="484" class="tiny">questions</text>
+  <text x="606" y="506" class="tiny">source_key UNIQUE, text</text>
+  <text x="606" y="528" class="tiny">priority, person_id, asked_at</text>
+  <rect x="1050" y="430" width="420" height="160" rx="3" class="thin"/>
+  <rect x="1051" y="431" width="418" height="28" class="hdr"/>
+  <line x1="1050" y1="459" x2="1470" y2="459" class="thin"/>
+  <text x="1064" y="451" class="row">zero_objects.sqlite</text>
+  <text x="1066" y="484" class="tiny">objects</text>
+  <text x="1066" y="506" class="tiny">name NOCASE, person_id, created_at</text>
+  <rect x="1066" y="519" width="10" height="10" class="fill"/>
+  <text x="1084" y="528" class="tiny">dim, vec</text>
+  <rect x="130" y="620" width="420" height="160" rx="3" class="dash"/>
+  <rect x="131" y="621" width="418" height="28" class="hdr"/>
+  <line x1="130" y1="649" x2="550" y2="649" class="dash"/>
+  <text x="144" y="641" class="row">interactions.jsonl</text>
+  <text x="146" y="674" class="tiny">ONE RECORD PER SPEAKER PER SESSION</text>
+  <text x="146" y="696" class="tiny">turns, speaker id, timestamp</text>
+  <text x="146" y="718" class="tiny">appended under a lock</text>
+  <rect x="590" y="620" width="420" height="160" rx="3" class="dash"/>
+  <rect x="591" y="621" width="418" height="28" class="hdr"/>
+  <line x1="590" y1="649" x2="1010" y2="649" class="dash"/>
+  <text x="604" y="641" class="row">voiceprint.npy</text>
+  <text x="606" y="674" class="tiny">ENROLLED OWNER VOICEPRINT</text>
+  <text x="606" y="696" class="tiny">NumPy array</text>
+  <rect x="1050" y="620" width="420" height="160" rx="3" class="dash"/>
+  <rect x="1051" y="621" width="418" height="28" class="hdr"/>
+  <line x1="1050" y1="649" x2="1470" y2="649" class="dash"/>
+  <text x="1064" y="641" class="row">world_surprise.json</text>
+  <text x="1066" y="674" class="tiny">RUNNING PREDICTOR STATISTICS</text>
+  <text x="1066" y="696" class="tiny">rewritten by the surprise gate</text>
+  <line x1="130" y1="812" x2="1470" y2="812" class="rule"/>
+  <text x="800" y="840" class="acclb" text-anchor="middle">person_id  ·  POSITIVE = ENROLLED PERSON  ·  NEGATIVE = PROVISIONAL GUEST  ·  NULL = ANONYMOUS</text>
+  <line x1="96" y1="884" x2="1040" y2="884" class="rule"/>
+  <text x="96" y="906" class="tbold">LEGEND</text>
+  <rect x="123" y="936" width="12" height="12" class="fill"/>
+  <text x="180" y="947" class="sub">FLOAT32 LITTLE-ENDIAN BLOB, DIMENSION IN THE ADJACENT COLUMN</text>
+  <rect x="100" y="969" width="60" height="18" class="thin"/>
+  <text x="180" y="983" class="sub">SQLITE DATABASE</text>
+  <rect x="100" y="1005" width="60" height="18" class="dash"/>
+  <text x="180" y="1019" class="sub">FLAT FILE, NOT A DATABASE</text>
+
+  <g>
+    <rect x="1104" y="884" width="460" height="160" class="rule"/>
+    <line x1="1104" y1="928" x2="1564" y2="928" class="rule"/>
+    <line x1="1104" y1="986" x2="1564" y2="986" class="rule"/>
+    <line x1="1104" y1="1015" x2="1564" y2="1015" class="rule"/>
+    <line x1="1360" y1="986" x2="1360" y2="1044" class="rule"/>
+    <text x="1120" y="915" class="tbold">ZEROBIONIC</text>
+    <text x="1548" y="915" class="sub" text-anchor="end">ASSISTIVE ROBOTICS</text>
+    <text x="1120" y="951" class="tiny">TITLE</text>
+    <text x="1120" y="974" class="lbl">PERSISTENT STORE MAP</text>
+    <text x="1120" y="1006" class="sub">DOC ZBR-AF1-SW-001</text>
+    <text x="1376" y="1006" class="sub">FIGURE 7</text>
+    <text x="1120" y="1035" class="sub">REV 0.1</text>
+    <text x="1376" y="1035" class="sub">SHEET 1 OF 1</text>
+  </g>
+</svg>

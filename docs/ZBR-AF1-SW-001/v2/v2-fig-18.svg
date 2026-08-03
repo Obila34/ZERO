@@ -1,0 +1,100 @@
+<svg viewBox="0 0 1000 560" xmlns="http://www.w3.org/2000/svg" fill="none">
+<defs>
+  <pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+    <line x1="0" y1="0" x2="0" y2="6" stroke="#DED6C4" stroke-width="1"/>
+  </pattern>
+  <pattern id="dot" width="8" height="8" patternUnits="userSpaceOnUse">
+    <circle cx="1" cy="1" r="0.6" fill="#8A8172"/>
+  </pattern>
+</defs>
+      <rect x="22" y="22" width="956" height="516"
+            fill="none" stroke="#B9B1A1" stroke-width="0.6"/>
+      <path d="M 18 34 L 18 18 L 34 18" stroke="#25231B" stroke-width="0.9" fill="none"/>
+      <path d="M 982 34 L 982 18 L 966 18" stroke="#25231B" stroke-width="0.9" fill="none"/>
+      <path d="M 18 526 L 18 542 L 34 542" stroke="#25231B" stroke-width="0.9" fill="none"/>
+      <path d="M 982 526 L 982 542 L 966 542" stroke="#25231B" stroke-width="0.9" fill="none"/>
+    <path d="M 90 120 C 260 100, 340 200, 500 180 S 780 300, 920 260 L 920 340 C 780 380, 500 360, 340 400 S 160 480, 90 460" fill="none" stroke="#25231B" stroke-width="2"/><circle cx="150" cy="118" r="4" fill="#25231B"/><text x="158" y="114" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">wake:</text><text x="158" y="126" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">accepted score 0.72</text><circle cx="320" cy="170" r="4" fill="#25231B"/><text x="328" y="166" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">vad:</text><text x="328" y="178" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">utterance rms 3120 peak 12480</text><circle cx="500" cy="180" r="4" fill="#25231B"/><text x="508" y="176" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">stt-spec:</text><text x="508" y="188" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">"what is the" (partial)</text><circle cx="680" cy="220" r="4" fill="#25231B"/><text x="688" y="216" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">endpoint:</text><text x="688" y="228" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">committed after 450 ms</text><circle cx="850" cy="260" r="4" fill="#25231B"/><text x="858" y="256" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">llm:</text><text x="858" y="268" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">first token in 620 ms</text><circle cx="800" cy="340" r="4" fill="#25231B"/><text x="808" y="336" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">tts:</text><text x="808" y="348" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">first audio in 220 ms</text><circle cx="480" cy="380" r="4" fill="#25231B"/><text x="488" y="376" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">affect:</text><text x="488" y="388" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">valence +0.3 confident</text><circle cx="260" cy="430" r="4" fill="#25231B"/><text x="268" y="426" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">memory:</text><text x="268" y="438" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">wrote 2 facts under person 3</text><text x="60" y="430" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="2" font-style="normal">LOAD-BEARING TRIAGE LINES  ·  do not remove:</text><text x="70" y="450" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">· listening… heartbeat every 5 s</text><text x="70" y="464" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">· utterance: rms=… peak=…</text><text x="70" y="478" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">· barge-in armed: … speech gate</text><text x="70" y="492" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">· degraded: STT/TTS switched to local</text>
+    <g transform="translate(520,400)">
+      <rect x="0" y="0" width="460" height="130" fill="none" stroke="#25231B" stroke-width="1"/>
+      <line x1="0" y1="30" x2="460" y2="30" stroke="#25231B" stroke-width="0.7"/>
+      <line x1="0" y1="72" x2="460" y2="72" stroke="#25231B" stroke-width="0.7"/>
+      <line x1="260" y1="30" x2="260" y2="130" stroke="#25231B" stroke-width="0.7"/>
+      <text x="10" y="22" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="2" font-style="normal">ZEROBIONIC</text>
+      <text x="450" y="22" font-size="14" fill="#8A8172"
+        text-anchor="end" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">AF-1 ASSISTIVE ROBOTICS</text>
+      <text x="10" y="52" font-size="11" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">TITLE</text>
+      <text x="10" y="66" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="1" font-style="normal">A SESSION READ FROM THE LOGS</text>
+      <text x="10" y="92" font-size="11" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">DOC</text>
+      <text x="10" y="106" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">ZBR-AF1-SW-001</text>
+      <text x="10" y="122" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">REV 0.1</text>
+      <text x="270" y="52" font-size="11" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">FIGURE</text>
+      <text x="270" y="66" font-size="21" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="2" font-style="normal">18</text>
+      <text x="270" y="92" font-size="11" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">SHEET</text>
+      <text x="270" y="106" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">1 OF 1</text>
+      <text x="270" y="122" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">SCALE N.T.S.</text>
+    </g></svg>

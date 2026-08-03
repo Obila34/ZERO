@@ -1,0 +1,88 @@
+<svg viewBox="0 0 1000 520" xmlns="http://www.w3.org/2000/svg" fill="none">
+<defs>
+  <pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+    <line x1="0" y1="0" x2="0" y2="6" stroke="#DED6C4" stroke-width="1"/>
+  </pattern>
+  <pattern id="dot" width="8" height="8" patternUnits="userSpaceOnUse">
+    <circle cx="1" cy="1" r="0.6" fill="#8A8172"/>
+  </pattern>
+</defs>
+      <rect x="22" y="22" width="956" height="476"
+            fill="none" stroke="#B9B1A1" stroke-width="0.6"/>
+      <path d="M 18 34 L 18 18 L 34 18" stroke="#25231B" stroke-width="0.9" fill="none"/>
+      <path d="M 982 34 L 982 18 L 966 18" stroke="#25231B" stroke-width="0.9" fill="none"/>
+      <path d="M 18 486 L 18 502 L 34 502" stroke="#25231B" stroke-width="0.9" fill="none"/>
+      <path d="M 982 486 L 982 502 L 966 502" stroke="#25231B" stroke-width="0.9" fill="none"/>
+    <line x1="130" y1="410" x2="870" y2="410" stroke="#25231B" stroke-width="1"/><line x1="130" y1="90" x2="130" y2="410" stroke="#25231B" stroke-width="1"/><line x1="130" y1="410" x2="130" y2="416" stroke="#25231B" stroke-width="0.9"/><text x="130" y="428" font-size="14" fill="#8A8172"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">0d</text><line x1="191.66666666666666" y1="410" x2="191.66666666666666" y2="413" stroke="#25231B" stroke-width="0.5"/><line x1="253.33333333333331" y1="410" x2="253.33333333333331" y2="416" stroke="#25231B" stroke-width="0.9"/><text x="253.33333333333331" y="428" font-size="14" fill="#8A8172"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">10d</text><line x1="315" y1="410" x2="315" y2="413" stroke="#25231B" stroke-width="0.5"/><line x1="376.66666666666663" y1="410" x2="376.66666666666663" y2="416" stroke="#25231B" stroke-width="0.9"/><text x="376.66666666666663" y="428" font-size="14" fill="#8A8172"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">20d</text><line x1="438.33333333333337" y1="410" x2="438.33333333333337" y2="413" stroke="#25231B" stroke-width="0.5"/><line x1="500" y1="410" x2="500" y2="416" stroke="#25231B" stroke-width="0.9"/><text x="500" y="428" font-size="14" fill="#8A8172"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">30d</text><line x1="561.6666666666667" y1="410" x2="561.6666666666667" y2="413" stroke="#25231B" stroke-width="0.5"/><line x1="623.3333333333333" y1="410" x2="623.3333333333333" y2="416" stroke="#25231B" stroke-width="0.9"/><text x="623.3333333333333" y="428" font-size="14" fill="#8A8172"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">40d</text><line x1="685" y1="410" x2="685" y2="413" stroke="#25231B" stroke-width="0.5"/><line x1="746.6666666666667" y1="410" x2="746.6666666666667" y2="416" stroke="#25231B" stroke-width="0.9"/><text x="746.6666666666667" y="428" font-size="14" fill="#8A8172"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">50d</text><line x1="808.3333333333333" y1="410" x2="808.3333333333333" y2="413" stroke="#25231B" stroke-width="0.5"/><line x1="870" y1="410" x2="870" y2="416" stroke="#25231B" stroke-width="0.9"/><text x="870" y="428" font-size="14" fill="#8A8172"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">60d</text><line x1="124" y1="410" x2="130" y2="410" stroke="#25231B" stroke-width="0.9"/><text x="120" y="413" font-size="14" fill="#8A8172"
+        text-anchor="end" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">0.0</text><line x1="130" y1="410" x2="870" y2="410" stroke="#DED6C4" stroke-width="0.4"/><line x1="127" y1="378" x2="130" y2="378" stroke="#25231B" stroke-width="0.5"/><line x1="130" y1="378" x2="870" y2="378" stroke="#DED6C4" stroke-width="0.4"/><line x1="127" y1="346" x2="130" y2="346" stroke="#25231B" stroke-width="0.5"/><line x1="130" y1="346" x2="870" y2="346" stroke="#DED6C4" stroke-width="0.4"/><line x1="127" y1="314" x2="130" y2="314" stroke="#25231B" stroke-width="0.5"/><line x1="130" y1="314" x2="870" y2="314" stroke="#DED6C4" stroke-width="0.4"/><line x1="127" y1="282" x2="130" y2="282" stroke="#25231B" stroke-width="0.5"/><line x1="130" y1="282" x2="870" y2="282" stroke="#DED6C4" stroke-width="0.4"/><line x1="124" y1="250" x2="130" y2="250" stroke="#25231B" stroke-width="0.9"/><text x="120" y="253" font-size="14" fill="#8A8172"
+        text-anchor="end" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">0.5</text><line x1="130" y1="250" x2="870" y2="250" stroke="#DED6C4" stroke-width="0.4"/><line x1="127" y1="218" x2="130" y2="218" stroke="#25231B" stroke-width="0.5"/><line x1="130" y1="218" x2="870" y2="218" stroke="#DED6C4" stroke-width="0.4"/><line x1="127" y1="186" x2="130" y2="186" stroke="#25231B" stroke-width="0.5"/><line x1="130" y1="186" x2="870" y2="186" stroke="#DED6C4" stroke-width="0.4"/><line x1="127" y1="154.00000000000003" x2="130" y2="154.00000000000003" stroke="#25231B" stroke-width="0.5"/><line x1="130" y1="154.00000000000003" x2="870" y2="154.00000000000003" stroke="#DED6C4" stroke-width="0.4"/><line x1="127" y1="122" x2="130" y2="122" stroke="#25231B" stroke-width="0.5"/><line x1="130" y1="122" x2="870" y2="122" stroke="#DED6C4" stroke-width="0.4"/><line x1="124" y1="90.00000000000006" x2="130" y2="90.00000000000006" stroke="#25231B" stroke-width="0.9"/><text x="120" y="93.00000000000006" font-size="14" fill="#8A8172"
+        text-anchor="end" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">1.0</text><line x1="130" y1="90.00000000000006" x2="870" y2="90.00000000000006" stroke="#DED6C4" stroke-width="0.4"/><polyline points="130,90 136.16666666666666,98.98151824067327 142.33333333333334,107.64792839577018 148.5,116.01028573489378 154.66666666666666,124.07925766395351 160.83333333333334,131.86513733299626 167,139.3778567666203 173.16666666666666,146.62699953372032 179.33333333333334,153.6218129727268 185.5,160.37121998793424 191.66666666666666,166.88383043196666 197.83333333333331,173.16795208889948 204,179.23160127204972 210.16666666666669,185.0825130499519 216.33333333333331,190.72815111356584 222.5,196.17571729730244 228.66666666666669,201.43216076601362 234.83333333333331,206.50418687966507 241,211.39826574700038 247.16666666666666,216.12064047910806 253.33333333333331,220.67733515342 259.5,225.0741624983002 265.66666666666663,229.3167313080276 271.83333333333337,233.41045359763044 278,237.3605515067008 284.1666666666667,241.17206396099476 290.33333333333337,244.8498531003168 296.5,248.3986104808883 302.66666666666663,251.82286306011076 308.83333333333337,255.12697897136076 315,258.3151730961803 321.1666666666667,261.39151244097303 327.33333333333337,264.35992132506357 333.5,267.2241863867391 339.66666666666663,269.9879614136586 345.83333333333337,272.6547720037913 352,275.22802006283155 358.1666666666667,277.71098814382464 364.3333333333333,280.10684363454254 370.5,282.4186427979484 376.66666666666663,284.6493346709054 382.83333333333337,286.8017648261034 389,288.87867900200195 395.1666666666667,290.8827266054194 401.3333333333333,292.8164640912382 407.5,294.68235822353523 413.6666666666667,296.4827892222995 419.8333333333333,298.2200537997494 426,299.89636809012416 432.1666666666667,301.51387047668607 438.33333333333337,303.0746243195399 444.5,304.5806205877501 450.6666666666667,306.0337803991114 456.8333333333333,307.435957470815 463,308.78894048413525 469.16666666666663,310.0944553661529 475.3333333333333,311.3541674914271 481.5,312.5696838064234 487.6666666666667,313.74255487940815 493.8333333333333,314.8742768784242 500,315.96629347987175 506.16666666666663,317.0199977101279 512.3333333333334,318.0367337225546 518.5,319.0177985121627 524.6666666666667,319.96444357011796 530.8333333333333,320.87787648020026 537,321.759262459253 543.1666666666667,322.6097258435874 549.3333333333333,323.4303515232365 555.5,324.22218632589136 561.6666666666667,324.9862403522819 567.8333333333333,325.72348826470807 574,326.43487053036336 580.1666666666666,327.12129462103786 586.3333333333334,327.78363617073103 592.5,328.42274009265026 598.6666666666666,329.039421657021 604.8333333333334,329.63446753108286 611,330.20863678259815 617.1666666666667,330.7626618481536 623.3333333333333,331.29724946748996 629.5,331.8130815850517 635.6666666666667,332.31081621990637 641.8333333333333,332.79108830514406 648,333.2545104978268 654.1666666666667,333.70167396052244 660.3333333333334,334.1331491154182 666.5,334.54948637197765 672.6666666666666,334.95121682906813 678.8333333333334,335.3388529524547 685,335.71288922852517 691.1666666666666,336.07380279507913 697.3333333333334,336.4220540499874 703.5,336.7580872384961 709.6666666666666,337.0823310199264 715.8333333333333,337.3951990144921 722,337.6970903309323 728.1666666666666,337.9883900756331 734.3333333333334,338.26946984388644 740.5,338.5406881939146 746.6666666666667,338.80239110426317 752.8333333333334,339.0549124151471 759,339.2985742543128 765.1666666666666,339.533687447959 771.3333333333334,339.76055191724043 777.5,339.97945706086165 783.6666666666666,340.1906821242469 789.8333333333334,340.39449655575845 796,340.5911603504171 802.1666666666666,340.780924381564 808.3333333333333,340.964030720886 814.5,341.14071294721344 820.6666666666666,341.31119644448404 826.8333333333334,341.4756986892528 833,341.6344295281152 839.1666666666667,341.78759144539714 845.3333333333334,341.9353798214531 851.5,342.0779831819025 857.6666666666666,342.2155834381211 863.8333333333334,342.34835611929617 870,342.4764705963391" fill="none" stroke="#25231B" stroke-width="2"/><line x1="130" y1="346" x2="870" y2="346" stroke="#8A8172" stroke-width="0.9" stroke-dasharray="4 3"/><text x="648" y="340" font-size="14" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">FLOOR 0.2  ·  keeps old-but-important memories reachable</text><line x1="302.66666666666663" y1="90" x2="302.66666666666663" y2="410" stroke="#B85425" stroke-width="0.9" stroke-dasharray="3 3"/><text x="308.66666666666663" y="108" font-size="14" fill="#B85425"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">CONFIGURED "half_life_days" = 14</text><text x="308.66666666666663" y="122" font-size="12" fill="#B85425"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="italic">(behaves as a time constant, not a half-life)</text><line x1="249.63333333333333" y1="90" x2="249.63333333333333" y2="410" stroke="#25231B" stroke-width="0.9" stroke-dasharray="1 3"/><text x="241.63333333333333" y="108" font-size="14" fill="#25231B"
+        text-anchor="end" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">TRUE HALF-LIFE ≈ 9.7 d</text><text x="500" y="450" font-size="14" fill="#25231B"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="2" font-style="normal">AGE SINCE LAST ACCESS (days)</text><g transform="translate(86,250) rotate(-90)"><text font-size="8" text-anchor="middle" font-family="Courier New, monospace" letter-spacing="2" font-weight="bold">RECENCY CONTRIBUTION</text></g>
+    <g transform="translate(520,360)">
+      <rect x="0" y="0" width="460" height="130" fill="none" stroke="#25231B" stroke-width="1"/>
+      <line x1="0" y1="30" x2="460" y2="30" stroke="#25231B" stroke-width="0.7"/>
+      <line x1="0" y1="72" x2="460" y2="72" stroke="#25231B" stroke-width="0.7"/>
+      <line x1="260" y1="30" x2="260" y2="130" stroke="#25231B" stroke-width="0.7"/>
+      <text x="10" y="22" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="2" font-style="normal">ZEROBIONIC</text>
+      <text x="450" y="22" font-size="14" fill="#8A8172"
+        text-anchor="end" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">AF-1 ASSISTIVE ROBOTICS</text>
+      <text x="10" y="52" font-size="11" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">TITLE</text>
+      <text x="10" y="66" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="1" font-style="normal">MEMORY ACTIVATION DECAY</text>
+      <text x="10" y="92" font-size="11" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">DOC</text>
+      <text x="10" y="106" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">ZBR-AF1-SW-001</text>
+      <text x="10" y="122" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">REV 0.1</text>
+      <text x="270" y="52" font-size="11" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">FIGURE</text>
+      <text x="270" y="66" font-size="21" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="2" font-style="normal">11</text>
+      <text x="270" y="92" font-size="11" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">SHEET</text>
+      <text x="270" y="106" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">1 OF 1</text>
+      <text x="270" y="122" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">SCALE N.T.S.</text>
+    </g></svg>

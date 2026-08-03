@@ -1,0 +1,106 @@
+<svg viewBox="0 0 1500 1100" xmlns="http://www.w3.org/2000/svg" fill="none">
+<defs>
+  <pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+    <line x1="0" y1="0" x2="0" y2="6" stroke="#DED6C4" stroke-width="1"/>
+  </pattern>
+  <pattern id="dot" width="8" height="8" patternUnits="userSpaceOnUse">
+    <circle cx="1" cy="1" r="0.6" fill="#8A8172"/>
+  </pattern>
+</defs>
+      <rect x="22" y="22" width="1456" height="1056"
+            fill="none" stroke="#B9B1A1" stroke-width="0.6"/>
+      <path d="M 18 34 L 18 18 L 34 18" stroke="#25231B" stroke-width="0.9" fill="none"/>
+      <path d="M 1482 34 L 1482 18 L 1466 18" stroke="#25231B" stroke-width="0.9" fill="none"/>
+      <path d="M 18 1066 L 18 1082 L 34 1082" stroke="#25231B" stroke-width="0.9" fill="none"/>
+      <path d="M 1482 1066 L 1482 1082 L 1466 1082" stroke="#25231B" stroke-width="0.9" fill="none"/>
+    <rect x="78" y="158" width="660" height="260" fill="none" stroke="#8A8172" stroke-width="0.5"/><rect x="70" y="150" width="660" height="260" fill="none" stroke="#25231B" stroke-width="1.6"/><rect x="70" y="150" width="14" height="260" fill="#B85425" opacity="0.7"/><text x="104" y="190" font-size="23" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="2" font-style="normal">SCHEMA DRIFT</text><line x1="104" y1="204" x2="706" y2="204" stroke="#25231B" stroke-width="0.8"/><text x="104" y="240" font-size="18" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">zero/vision/schemas.py and server/vision/shared/schemas.py</text><text x="104" y="262" font-size="18" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">have diverged. The sync_schemas.py script referenced in the</text><text x="104" y="284" font-size="18" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">docstring does not exist in the repository.</text><rect x="778" y="158" width="660" height="260" fill="none" stroke="#8A8172" stroke-width="0.5"/><rect x="770" y="150" width="660" height="260" fill="none" stroke="#25231B" stroke-width="1.6"/><rect x="770" y="150" width="14" height="260" fill="#B85425" opacity="0.7"/><text x="804" y="190" font-size="23" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="2" font-style="normal">HALF_LIFE_DAYS  NAME</text><line x1="804" y1="204" x2="1406" y2="204" stroke="#25231B" stroke-width="0.8"/><text x="804" y="240" font-size="18" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">Used as a time constant, not a half life. Rename the key or</text><text x="804" y="262" font-size="18" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">divide by ln(2) on read; either resolves the surprise for</text><text x="804" y="284" font-size="18" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">anyone tuning it.</text><rect x="78" y="448" width="660" height="260" fill="none" stroke="#8A8172" stroke-width="0.5"/><rect x="70" y="440" width="660" height="260" fill="none" stroke="#25231B" stroke-width="1.6"/><rect x="70" y="440" width="14" height="260" fill="#B85425" opacity="0.7"/><text x="104" y="480" font-size="23" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="2" font-style="normal">FILLER PRE-SYNTH</text><line x1="104" y1="494" x2="706" y2="494" stroke="#25231B" stroke-width="0.8"/><text x="104" y="530" font-size="18" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">Aborts silently after two consecutive TTS failures. Add a</text><text x="104" y="552" font-size="18" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">counter to the status endpoint so the state is visible before</text><text x="104" y="574" font-size="18" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">it becomes silence.</text><rect x="778" y="448" width="660" height="260" fill="none" stroke="#8A8172" stroke-width="0.5"/><rect x="770" y="440" width="660" height="260" fill="none" stroke="#25231B" stroke-width="1.6"/><rect x="770" y="440" width="14" height="260" fill="#B85425" opacity="0.7"/><text x="804" y="480" font-size="23" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="2" font-style="normal">CONTROL PLANE AUTH</text><line x1="804" y1="494" x2="1406" y2="494" stroke="#25231B" stroke-width="0.8"/><text x="804" y="530" font-size="18" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">The control plane binds 0.0.0.0 with no auth, a deliberate</text><text x="804" y="552" font-size="18" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">trade for a LAN only device. If the deployment target changes,</text><text x="804" y="574" font-size="18" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">add a signed token in the header set.</text><rect x="78" y="738" width="660" height="260" fill="none" stroke="#8A8172" stroke-width="0.5"/><rect x="70" y="730" width="660" height="260" fill="none" stroke="#25231B" stroke-width="1.6"/><rect x="70" y="730" width="14" height="260" fill="#B85425" opacity="0.7"/><text x="104" y="770" font-size="23" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="2" font-style="normal">VAD DEFAULT vs SHIPPED</text><line x1="104" y1="784" x2="706" y2="784" stroke="#25231B" stroke-width="0.8"/><text x="104" y="820" font-size="18" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">Factory defaults to silero; config.yaml overrides to webrtc. A</text><text x="104" y="842" font-size="18" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">reader of the factory in isolation draws the wrong conclusion.</text><text x="104" y="864" font-size="18" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">Reflect the choice in the default.</text><rect x="778" y="738" width="660" height="260" fill="none" stroke="#8A8172" stroke-width="0.5"/><rect x="770" y="730" width="660" height="260" fill="none" stroke="#25231B" stroke-width="1.6"/><rect x="770" y="730" width="14" height="260" fill="#B85425" opacity="0.7"/><text x="804" y="770" font-size="23" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="2" font-style="normal">EPISODE CONSOLIDATION</text><line x1="804" y1="784" x2="1406" y2="784" stroke="#25231B" stroke-width="0.8"/><text x="804" y="820" font-size="18" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">The nightly consolidation job is scaffolded but off by</text><text x="804" y="842" font-size="18" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">default. Its win over ordinary memory writes has not been</text><text x="804" y="864" font-size="18" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">measured yet on this subsystem.</text>
+    <g transform="translate(1020,940)">
+      <rect x="0" y="0" width="460" height="130" fill="none" stroke="#25231B" stroke-width="1"/>
+      <line x1="0" y1="30" x2="460" y2="30" stroke="#25231B" stroke-width="0.7"/>
+      <line x1="0" y1="72" x2="460" y2="72" stroke="#25231B" stroke-width="0.7"/>
+      <line x1="260" y1="30" x2="260" y2="130" stroke="#25231B" stroke-width="0.7"/>
+      <text x="10" y="22" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="2" font-style="normal">ZEROBIONIC</text>
+      <text x="450" y="22" font-size="14" fill="#8A8172"
+        text-anchor="end" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">AF-1 ASSISTIVE ROBOTICS</text>
+      <text x="10" y="52" font-size="11" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">TITLE</text>
+      <text x="10" y="66" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="1" font-style="normal">OPEN ITEMS AND DECISIONS</text>
+      <text x="10" y="92" font-size="11" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">DOC</text>
+      <text x="10" y="106" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">ZBR-AF1-SW-001</text>
+      <text x="10" y="122" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">REV 0.1</text>
+      <text x="270" y="52" font-size="11" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">FIGURE</text>
+      <text x="270" y="66" font-size="21" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="2" font-style="normal">21</text>
+      <text x="270" y="92" font-size="11" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">SHEET</text>
+      <text x="270" y="106" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">1 OF 1</text>
+      <text x="270" y="122" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">SCALE N.T.S.</text>
+    </g></svg>

@@ -331,6 +331,175 @@ class TestIouTracker:
         assert ("moved", "cup") not in evs
 
 
+class TestInterruptClassifier:
+    def _c(self, text):
+        from zero.audio.interrupt import classify_interrupt
+
+        return classify_interrupt(text).value
+
+    def test_corrections_cut_immediately(self):
+        assert self._c("no, I meant Tuesday") == "correction"
+        assert self._c("wait, that's wrong") == "correction"
+        assert self._c("okay stop") == "correction"
+        assert self._c("actually, make it three") == "correction"
+        assert self._c("hold on") == "correction"
+
+    def test_backchannels_are_waved_through(self):
+        assert self._c("yeah") == "backchannel"
+        assert self._c("mm-hmm") == "backchannel"
+        assert self._c("oh wow") == "backchannel"
+        assert self._c("right right") == "backchannel"
+        assert self._c("makes sense") == "backchannel"
+
+    def test_new_thoughts_are_queued(self):
+        assert self._c("what's the weather tomorrow") == "queue"
+        assert self._c("can you also set a timer") == "queue"
+        # "no" deep inside a sentence is content, not a correction opener.
+        assert self._c("there is no milk left by the way") == "queue"
+
+    def test_noise_is_ignored(self):
+        assert self._c("") == "noise"
+        assert self._c("   ") == "noise"
+        assert self._c(None) == "noise"
+
+    def test_never_raises_on_junk(self):
+        assert self._c("...!!!") == "noise"
+        assert self._c("🤖🤖") == "noise"
+
+
+class TestBargeInPercentileFloor:
+    def test_one_loud_syllable_cannot_wedge_the_gate(self):
+        # Old max-floor: one 3000-RMS blip in the learn window locked the gate
+        # at 6000 and the user could never interrupt. Percentile floor ignores
+        # the outlier: normal speech still triggers.
+        d = SpeechBargeIn(is_speech=lambda f: True, block_ms=BLOCK_MS,
+                          learn_ms=300, trigger_ms=90, ratio=2.0, min_rms=250)
+        frames = [_frame(400)] * 9 + [_frame(3000)]      # one loud blip
+        for f in frames:
+            d.update(f)
+        fired = [d.update(_frame(1500)) for _ in range(5)]
+        assert any(fired)
+
+
+class TestBargeInEnvelopeCorrelation:
+    def test_echo_that_tracks_playback_is_suppressed(self):
+        import time as _t
+
+        # The "played" envelope reports exactly what the mic hears (perfect
+        # echo, zero lag): correlation must veto the trigger even though the
+        # level beats the gate.
+        played = []
+
+        def env():
+            return list(played)
+
+        d = SpeechBargeIn(is_speech=lambda f: True, block_ms=BLOCK_MS,
+                          learn_ms=90, trigger_ms=90, ratio=2.0, min_rms=250,
+                          played_env=env, env_corr_max=0.65)
+        rng = np.random.default_rng(7)
+        for _ in range(40):  # learn + echo phase: mic == played (varying level)
+            level = int(rng.uniform(300, 3000))
+            played.append((_t.monotonic(), float(level)))
+            d.update(_frame(level))
+        # Louder echo, still perfectly tracking playback -> suppressed.
+        fired = []
+        for _ in range(20):
+            level = int(rng.uniform(2000, 6000))
+            played.append((_t.monotonic(), float(level)))
+            fired.append(d.update(_frame(level)))
+        assert not any(fired)
+
+    def test_uncorrelated_speech_still_triggers(self):
+        import time as _t
+
+        played = []
+
+        def env():
+            return list(played)
+
+        d = SpeechBargeIn(is_speech=lambda f: True, block_ms=BLOCK_MS,
+                          learn_ms=90, trigger_ms=90, ratio=2.0, min_rms=250,
+                          played_env=env, env_corr_max=0.65)
+        rng = np.random.default_rng(7)
+        for _ in range(40):
+            level = int(rng.uniform(300, 500))
+            played.append((_t.monotonic(), float(level)))
+            d.update(_frame(level))
+        # Playback stays quiet; the mic jumps loud independently (a person).
+        fired = []
+        for _ in range(6):
+            played.append((_t.monotonic(), float(rng.uniform(300, 500))))
+            fired.append(d.update(_frame(4000)))
+        assert any(fired)
+
+
+class TestBargeInRearm:
+    def test_rearm_clears_the_run_but_keeps_the_floor(self):
+        d = SpeechBargeIn(is_speech=lambda f: True, block_ms=BLOCK_MS,
+                          learn_ms=90, trigger_ms=90, ratio=2.0, min_rms=250)
+        for _ in range(3):
+            d.update(_frame(400))
+        while not d.update(_frame(4000)):
+            pass
+        d.rearm()
+        # Echo-level frames after rearm: no instant retrigger.
+        assert not d.update(_frame(400))
+        # But sustained loud speech triggers again without re-learning.
+        fired = [d.update(_frame(4000)) for _ in range(4)]
+        assert any(fired)
+
+
+class TestEarlyCommit:
+    def test_confident_prediction_commits_at_the_spec_pause(self):
+        flags = [True] * 5 + [False] * 30
+        ep = ScriptedEndpointer(flags, silence_ms=600)   # normal wait: 20 blocks
+        utt = ep.capture(iter(_frame(2000) for _ in range(len(flags))),
+                         early_commit=lambda audio: True)
+        # Committed at the speculative-pause mark (6 blocks of silence), not 20.
+        assert utt is not None and utt.size == (5 + ep.spec_blocks) * BLOCK
+
+    def test_unsure_prediction_waits_the_full_window(self):
+        flags = [True] * 5 + [False] * 30
+        ep = ScriptedEndpointer(flags, silence_ms=600)
+        utt = ep.capture(iter(_frame(2000) for _ in range(len(flags))),
+                         early_commit=lambda audio: False)
+        assert utt is not None and utt.size == 25 * BLOCK  # 5 speech + 20 sil
+
+    def test_early_commit_error_never_breaks_capture(self):
+        flags = [True] * 5 + [False] * 30
+        ep = ScriptedEndpointer(flags, silence_ms=600)
+        utt = ep.capture(iter(_frame(2000) for _ in range(len(flags))),
+                         early_commit=lambda audio: 1 / 0)
+        assert utt is not None and utt.size > 0
+
+
+class TestSmileShelf:
+    def test_brightens_highs_without_touching_lows(self):
+        from zero.tts.orchestrator import _SmileShelf
+
+        sr = 22050
+        t = np.arange(sr) / sr
+        low = np.sin(2 * np.pi * 200 * t).astype(np.float32) * 0.3
+        high = np.sin(2 * np.pi * 4000 * t).astype(np.float32) * 0.3
+
+        def gain(x):
+            y = _SmileShelf(sr).process(x)
+            return float(np.sqrt(np.mean(y**2)) / np.sqrt(np.mean(x**2)))
+
+        assert abs(gain(low) - 1.0) < 0.05          # lows untouched
+        assert gain(high) > 1.15                    # ~+2.5dB above the shelf
+
+    def test_streaming_chunks_join_without_a_seam(self):
+        from zero.tts.orchestrator import _SmileShelf
+
+        sr = 22050
+        x = np.sin(2 * np.pi * 3000 * np.arange(sr) / sr).astype(np.float32)
+        whole = _SmileShelf(sr).process(x)
+        s = _SmileShelf(sr)
+        parts = np.concatenate([s.process(c) for c in np.array_split(x, 7)])
+        assert np.allclose(whole, parts, atol=1e-6)
+
+
 class TestStripStageDirections:
     def _run(self, *chunks):
         from zero.tts.orchestrator import strip_asides

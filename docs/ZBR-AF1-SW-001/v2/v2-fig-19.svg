@@ -1,0 +1,135 @@
+<svg viewBox="0 0 1600 1200" xmlns="http://www.w3.org/2000/svg" fill="none">
+<defs>
+  <pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+    <line x1="0" y1="0" x2="0" y2="6" stroke="#DED6C4" stroke-width="1"/>
+  </pattern>
+  <pattern id="dot" width="8" height="8" patternUnits="userSpaceOnUse">
+    <circle cx="1" cy="1" r="0.6" fill="#8A8172"/>
+  </pattern>
+</defs>
+      <rect x="22" y="22" width="1556" height="1156"
+            fill="none" stroke="#B9B1A1" stroke-width="0.6"/>
+      <path d="M 18 34 L 18 18 L 34 18" stroke="#25231B" stroke-width="0.9" fill="none"/>
+      <path d="M 1582 34 L 1582 18 L 1566 18" stroke="#25231B" stroke-width="0.9" fill="none"/>
+      <path d="M 18 1166 L 18 1182 L 34 1182" stroke="#25231B" stroke-width="0.9" fill="none"/>
+      <path d="M 1582 1166 L 1582 1182 L 1566 1182" stroke="#25231B" stroke-width="0.9" fill="none"/>
+    <rect x="80" y="150" width="440" height="220" fill="none" stroke="#25231B" stroke-width="1.6"/><line x1="80" y1="192" x2="520" y2="192" stroke="#25231B" stroke-width="0.9"/><text x="94" y="178" font-size="19" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="2" font-style="normal">ON THE GPU NODE</text><text x="94" y="220" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">1.  bash scripts/run_gpu_servers.sh</text><text x="94" y="244" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">2.  curl :9000/health, :9100/health, :8000/health</text><text x="94" y="268" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">3.  curl :11434/api/tags   (list of models)</text><rect x="80" y="410" width="440" height="220" fill="none" stroke="#25231B" stroke-width="1.6"/><line x1="80" y1="452" x2="520" y2="452" stroke="#25231B" stroke-width="0.9"/><text x="94" y="438" font-size="19" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="2" font-style="normal">ON THE PI  (TUNNEL)</text><text x="94" y="480" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">1.  GPU_HOST=... bash scripts/pi_tunnel.sh</text><text x="94" y="504" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">2.  curl 127.0.0.1:9000/health</text><text x="94" y="528" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">3.  curl 127.0.0.1:11435/api/tags</text><rect x="80" y="670" width="440" height="220" fill="none" stroke="#25231B" stroke-width="1.6"/><line x1="80" y1="712" x2="520" y2="712" stroke="#25231B" stroke-width="0.9"/><text x="94" y="698" font-size="19" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="2" font-style="normal">ON THE PI  (ZERO)</text><text x="94" y="740" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">1.  systemctl start zero</text><text x="94" y="764" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">2.  poll 127.0.0.1:8090/health for ready:true</text><text x="94" y="788" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">3.  say the wake word</text><rect x="560" y="150" width="440" height="220" fill="none" stroke="#25231B" stroke-width="1.6"/><line x1="560" y1="192" x2="1000" y2="192" stroke="#25231B" stroke-width="0.9"/><text x="574" y="178" font-size="19" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="2" font-style="normal">TRIAGE  ·  NO REPLY</text><text x="574" y="220" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">check vad "listening..." heartbeat</text><text x="574" y="244" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">if no wake acceptance: raise or lower wake.threshold</text><text x="574" y="268" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">if no endpoint commit: check tunnel to :9000</text><rect x="560" y="410" width="440" height="220" fill="none" stroke="#25231B" stroke-width="1.6"/><line x1="560" y1="452" x2="1000" y2="452" stroke="#25231B" stroke-width="0.9"/><text x="574" y="438" font-size="19" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="2" font-style="normal">TRIAGE  ·  ROBOT SLOW</text><text x="574" y="480" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">read degraded flag in /zero/status</text><text x="574" y="504" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">ollama ps  (chat model resident?)</text><text x="574" y="528" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">grep for slow embed lines in the log</text><rect x="560" y="670" width="440" height="220" fill="none" stroke="#25231B" stroke-width="1.6"/><line x1="560" y1="712" x2="1000" y2="712" stroke="#25231B" stroke-width="0.9"/><text x="574" y="698" font-size="19" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="2" font-style="normal">TRIAGE  ·  DEAF AFTER REPLY</text><text x="574" y="740" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">check monitor thread joined before mic pause</text><text x="574" y="764" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">confirm producer sentinel blocking put in use</text><text x="574" y="788" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">these were the two barge-in shutdown bugs</text><rect x="1040" y="150" width="440" height="220" fill="none" stroke="#25231B" stroke-width="1.6"/><line x1="1040" y1="192" x2="1480" y2="192" stroke="#25231B" stroke-width="0.9"/><text x="1054" y="178" font-size="19" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="2" font-style="normal">DEPLOY A CONFIG CHANGE</text><text x="1054" y="220" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">1.  edit config.local.yaml</text><text x="1054" y="244" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">2.  systemctl restart zero</text><text x="1054" y="268" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">3.  journalctl -u zero -f</text><text x="1054" y="292" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">4.  curl /health, wait for ready:true</text><rect x="1040" y="410" width="440" height="220" fill="none" stroke="#25231B" stroke-width="1.6"/><line x1="1040" y1="452" x2="1480" y2="452" stroke="#25231B" stroke-width="0.9"/><text x="1054" y="438" font-size="19" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="2" font-style="normal">BACKUP</text><text x="1054" y="480" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">stop zero, cp the six sqlite files,</text><text x="1054" y="504" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">cp voiceprint.npy and data/corpus/,</text><text x="1054" y="528" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">start zero.</text><rect x="1040" y="670" width="440" height="220" fill="none" stroke="#25231B" stroke-width="1.6"/><line x1="1040" y1="712" x2="1480" y2="712" stroke="#25231B" stroke-width="0.9"/><text x="1054" y="698" font-size="19" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="2" font-style="normal">RESTORE</text><text x="1054" y="740" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">stop zero, replace the files in place,</text><text x="1054" y="764" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">start zero,</text><text x="1054" y="788" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">verify by asking the robot to recall a known fact.</text><path d="M 520 260 C 540 260, 540 260, 560 260"
+                fill="none" stroke="#25231B" stroke-width="1.2"/><rect x="556" y="256" width="8" height="8" fill="#25231B"/><path d="M 520 520 C 540 520, 540 520, 560 520"
+                fill="none" stroke="#25231B" stroke-width="1.2"/><rect x="556" y="516" width="8" height="8" fill="#25231B"/><path d="M 520 780 C 540 780, 540 780, 560 780"
+                fill="none" stroke="#25231B" stroke-width="1.2"/><rect x="556" y="776" width="8" height="8" fill="#25231B"/>
+    <g transform="translate(1120,1040)">
+      <rect x="0" y="0" width="460" height="130" fill="none" stroke="#25231B" stroke-width="1"/>
+      <line x1="0" y1="30" x2="460" y2="30" stroke="#25231B" stroke-width="0.7"/>
+      <line x1="0" y1="72" x2="460" y2="72" stroke="#25231B" stroke-width="0.7"/>
+      <line x1="260" y1="30" x2="260" y2="130" stroke="#25231B" stroke-width="0.7"/>
+      <text x="10" y="22" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="2" font-style="normal">ZEROBIONIC</text>
+      <text x="450" y="22" font-size="14" fill="#8A8172"
+        text-anchor="end" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">AF-1 ASSISTIVE ROBOTICS</text>
+      <text x="10" y="52" font-size="11" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">TITLE</text>
+      <text x="10" y="66" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="1" font-style="normal">OPERATIONS RUNBOOK</text>
+      <text x="10" y="92" font-size="11" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">DOC</text>
+      <text x="10" y="106" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">ZBR-AF1-SW-001</text>
+      <text x="10" y="122" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">REV 0.1</text>
+      <text x="270" y="52" font-size="11" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">FIGURE</text>
+      <text x="270" y="66" font-size="21" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="2" font-style="normal">19</text>
+      <text x="270" y="92" font-size="11" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">SHEET</text>
+      <text x="270" y="106" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">1 OF 1</text>
+      <text x="270" y="122" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">SCALE N.T.S.</text>
+    </g></svg>

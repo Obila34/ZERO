@@ -1,0 +1,135 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1080" width="1600" height="1080">
+  <style>
+    .ink   { fill:none; stroke:#25231B; stroke-width:2;   stroke-linejoin:round; stroke-linecap:round; }
+    .thin  { fill:none; stroke:#25231B; stroke-width:1.2; stroke-linejoin:round; stroke-linecap:round; }
+    .hair  { fill:none; stroke:#8A8172; stroke-width:1;   stroke-linejoin:round; stroke-linecap:round; }
+    .dash  { fill:none; stroke:#8A8172; stroke-width:1.2; stroke-dasharray:6 6; }
+    .sheet { fill:none; stroke:#25231B; stroke-width:1.6; }
+    .rule  { fill:none; stroke:#17150E; stroke-width:1.2; }
+    .acc   { fill:none; stroke:#D6480C; stroke-width:2;   stroke-linecap:round; }
+    .accd  { fill:none; stroke:#D6480C; stroke-width:1.2; stroke-dasharray:5 5; }
+    .barI  { fill:#25231B; stroke:none; }
+    .barA  { fill:#D6480C; stroke:none; }
+    .barG  { fill:#C9C3B8; stroke:none; }
+    .barN  { fill:none; stroke:#8A8172; stroke-width:1.2; stroke-dasharray:5 4; }
+    .band  { fill:#EFEBE4; stroke:none; }
+    .lbl   { font-family:"Courier New",monospace; font-size:16px; letter-spacing:1.8px; fill:#25231B; }
+    .row   { font-family:"Courier New",monospace; font-size:12.5px; letter-spacing:1.1px; fill:#25231B; }
+    .sub   { font-family:"Courier New",monospace; font-size:12.5px; letter-spacing:1.2px; fill:#8A8172; }
+    .tiny  { font-family:"Courier New",monospace; font-size:11px;  letter-spacing:1.0px; fill:#8A8172; }
+    .acclb { font-family:"Courier New",monospace; font-size:12px;  letter-spacing:1.4px; fill:#D6480C; }
+    .tbold { font-family:"Courier New",monospace; font-size:14px;  letter-spacing:1.6px; fill:#17150E; font-weight:bold; }
+  </style>
+  <rect width="1600" height="1080" fill="#FFFFFF"/>
+  <rect x="36" y="36" width="1528" height="1008" class="sheet"/>
+
+  <g class="hair">
+    <line x1="36" y1="96" x2="76" y2="96"/><line x1="96" y1="36" x2="96" y2="76"/>
+    <line x1="1524" y1="96" x2="1564" y2="96"/><line x1="1504" y1="36" x2="1504" y2="76"/>
+    <line x1="36" y1="984" x2="76" y2="984"/><line x1="96" y1="1004" x2="96" y2="1044"/>
+    <line x1="1524" y1="984" x2="1564" y2="984"/><line x1="1504" y1="1004" x2="1504" y2="1044"/>
+  </g>
+
+<text x="120" y="212" class="tbold">FACULTY</text>
+  <text x="640" y="212" class="tbold">CONTACT</text>
+  <text x="1330" y="212" class="tbold" text-anchor="middle">DEGRADED</text>
+  <line x1="120" y1="226" x2="1420" y2="226" class="rule"/>
+  <text x="120" y="287" class="row">SPEECH TO TEXT</text>
+  <circle cx="600" cy="282" r="6" class="thin" fill="#FFFFFF"/>
+  <line x1="520" y1="282" x2="594" y2="282" class="thin"/>
+  <line x1="604" y1="279" x2="700" y2="256" class="ink"/>
+  <rect x="700" y="250" width="12" height="12" class="barI"/>
+  <line x1="712" y1="256" x2="760" y2="256" class="thin"/>
+  <text x="772" y="261" class="row">WHISPER LARGE-V3-TURBO :9000</text>
+  <rect x="700" y="296" width="12" height="12" fill="none" stroke="#8A8172" stroke-width="1.2"/>
+  <line x1="712" y1="302" x2="760" y2="302" class="dash"/>
+  <text x="772" y="307" class="sub">WHISPER.CPP BASE.EN</text>
+  <circle cx="1330" cy="282" r="11" class="thin" fill="#FFFFFF"/>
+  <line x1="120" y1="322" x2="1420" y2="322" class="hair" opacity="0.5"/>
+  <text x="120" y="379" class="row">SPEECH SYNTHESIS</text>
+  <circle cx="600" cy="374" r="6" class="thin" fill="#FFFFFF"/>
+  <line x1="520" y1="374" x2="594" y2="374" class="thin"/>
+  <line x1="604" y1="371" x2="700" y2="348" class="ink"/>
+  <rect x="700" y="342" width="12" height="12" class="barI"/>
+  <line x1="712" y1="348" x2="760" y2="348" class="thin"/>
+  <text x="772" y="353" class="row">ORPHEUS 3B VIA VLLM :9100</text>
+  <rect x="700" y="388" width="12" height="12" fill="none" stroke="#8A8172" stroke-width="1.2"/>
+  <line x1="712" y1="394" x2="760" y2="394" class="dash"/>
+  <text x="772" y="399" class="sub">PIPER VOICE</text>
+  <circle cx="1330" cy="374" r="11" class="thin" fill="#FFFFFF"/>
+  <line x1="120" y1="414" x2="1420" y2="414" class="hair" opacity="0.5"/>
+  <text x="120" y="471" class="row">OBJECT DETECTION</text>
+  <circle cx="600" cy="466" r="6" class="thin" fill="#FFFFFF"/>
+  <line x1="520" y1="466" x2="594" y2="466" class="thin"/>
+  <line x1="604" y1="463" x2="700" y2="440" class="ink"/>
+  <rect x="700" y="434" width="12" height="12" class="barI"/>
+  <line x1="712" y1="440" x2="760" y2="440" class="thin"/>
+  <text x="772" y="445" class="row">YOLO11X ON GPU :8000</text>
+  <rect x="700" y="480" width="12" height="12" fill="none" stroke="#8A8172" stroke-width="1.2"/>
+  <line x1="712" y1="486" x2="760" y2="486" class="dash"/>
+  <text x="772" y="491" class="sub">YOLO11N ONNX ON PI</text>
+  <circle cx="1330" cy="466" r="11" class="thin" fill="#FFFFFF"/>
+  <line x1="120" y1="506" x2="1420" y2="506" class="hair" opacity="0.5"/>
+  <text x="120" y="563" class="row">VOICE EMBEDDING</text>
+  <circle cx="600" cy="558" r="6" class="thin" fill="#FFFFFF"/>
+  <line x1="520" y1="558" x2="594" y2="558" class="thin"/>
+  <line x1="604" y1="555" x2="700" y2="532" class="ink"/>
+  <rect x="700" y="526" width="12" height="12" class="barI"/>
+  <line x1="712" y1="532" x2="760" y2="532" class="thin"/>
+  <text x="772" y="537" class="row">ECAPA ON GPU :8000</text>
+  <rect x="700" y="572" width="12" height="12" fill="none" stroke="#8A8172" stroke-width="1.2"/>
+  <line x1="712" y1="578" x2="760" y2="578" class="dash"/>
+  <text x="772" y="583" class="sub">ECAPA ONNX ON PI</text>
+  <circle cx="1330" cy="558" r="11" class="thin" fill="#FFFFFF"/>
+  <line x1="120" y1="598" x2="1420" y2="598" class="hair" opacity="0.5"/>
+  <text x="120" y="655" class="row">FACE RECOGNITION</text>
+  <circle cx="600" cy="650" r="6" class="thin" fill="#FFFFFF"/>
+  <line x1="520" y1="650" x2="594" y2="650" class="thin"/>
+  <line x1="604" y1="647" x2="700" y2="624" class="ink"/>
+  <rect x="700" y="618" width="12" height="12" class="barI"/>
+  <line x1="712" y1="624" x2="760" y2="624" class="thin"/>
+  <text x="772" y="629" class="row">FACE MODEL ON GPU :8000</text>
+  <rect x="700" y="664" width="12" height="12" fill="none" stroke="#8A8172" stroke-width="1.2"/>
+  <line x1="712" y1="670" x2="760" y2="670" class="dash"/>
+  <text x="772" y="675" class="sub">FACE ONNX ON PI</text>
+  <circle cx="1330" cy="650" r="11" class="thin" fill="#FFFFFF"/>
+  <line x1="120" y1="690" x2="1420" y2="690" class="hair" opacity="0.5"/>
+  <text x="120" y="747" class="row">OBJECT EMBEDDING</text>
+  <circle cx="600" cy="742" r="6" class="thin" fill="#FFFFFF"/>
+  <line x1="520" y1="742" x2="594" y2="742" class="thin"/>
+  <line x1="604" y1="739" x2="700" y2="716" class="ink"/>
+  <rect x="700" y="710" width="12" height="12" class="barI"/>
+  <line x1="712" y1="716" x2="760" y2="716" class="thin"/>
+  <text x="772" y="721" class="row">CLIP ON GPU :8000</text>
+  <rect x="700" y="756" width="12" height="12" fill="none" stroke="#8A8172" stroke-width="1.2"/>
+  <line x1="712" y1="762" x2="760" y2="762" class="dash"/>
+  <text x="772" y="767" class="sub">COLOUR HISTOGRAM ON PI</text>
+  <circle cx="1330" cy="742" r="11" class="thin" fill="#FFFFFF"/>
+  <line x1="120" y1="782" x2="1420" y2="782" class="hair" opacity="0.5"/>
+  <text x="120" y="840" class="tiny">EVERY LAMP SHOWN UNLIT: THE TUNNEL IS UP AND ALL SIX FACULTIES ARE ON THEIR REMOTE CONTACT.</text>
+  <text x="120" y="862" class="tiny">A CHANGEOVER LIGHTS THE LAMP, AND THE LIT SET IS WHAT THE PERSONA PROMPT IS TOLD ABOUT ONCE PER TURN.</text>
+  <line x1="96" y1="884" x2="1040" y2="884" class="rule"/>
+  <text x="96" y="906" class="tbold">LEGEND</text>
+  <rect x="123" y="935" width="14" height="14" class="barI"/>
+  <text x="180" y="947" class="sub">CLOSED CONTACT · CARRYING THE FACULTY NOW</text>
+  <rect x="123" y="971" width="14" height="14" fill="none" stroke="#8A8172" stroke-width="1.2"/>
+  <text x="180" y="983" class="sub">OPEN CONTACT · MODEL NOT YET CONSTRUCTED</text>
+  <circle cx="130" cy="1014" r="9" class="thin" fill="#FFFFFF"/>
+  <text x="180" y="1019" class="sub">DEGRADED LAMP · FEEDS THE SELF-STATE NOTE</text>
+
+  <g>
+    <rect x="1104" y="884" width="460" height="160" class="rule"/>
+    <line x1="1104" y1="928" x2="1564" y2="928" class="rule"/>
+    <line x1="1104" y1="986" x2="1564" y2="986" class="rule"/>
+    <line x1="1104" y1="1015" x2="1564" y2="1015" class="rule"/>
+    <line x1="1360" y1="986" x2="1360" y2="1044" class="rule"/>
+    <text x="1120" y="915" class="tbold">ZEROBIONIC</text>
+    <text x="1548" y="915" class="sub" text-anchor="end">ASSISTIVE ROBOTICS</text>
+    <text x="1120" y="951" class="tiny">TITLE</text>
+    <text x="1120" y="974" class="lbl">FALLBACK CHANGEOVER</text>
+    <text x="1120" y="1006" class="sub">DOC ZBR-AF1-SW-001</text>
+    <text x="1376" y="1006" class="sub">FIGURE 5</text>
+    <text x="1120" y="1035" class="sub">REV 0.1</text>
+    <text x="1376" y="1035" class="sub">SHEET 1 OF 1</text>
+  </g>
+</svg>

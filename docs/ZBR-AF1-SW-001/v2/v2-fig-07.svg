@@ -1,0 +1,154 @@
+<svg viewBox="0 0 1000 620" xmlns="http://www.w3.org/2000/svg" fill="none">
+<defs>
+  <pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+    <line x1="0" y1="0" x2="0" y2="6" stroke="#DED6C4" stroke-width="1"/>
+  </pattern>
+  <pattern id="dot" width="8" height="8" patternUnits="userSpaceOnUse">
+    <circle cx="1" cy="1" r="0.6" fill="#8A8172"/>
+  </pattern>
+</defs>
+      <rect x="22" y="22" width="956" height="576"
+            fill="none" stroke="#B9B1A1" stroke-width="0.6"/>
+      <path d="M 18 34 L 18 18 L 34 18" stroke="#25231B" stroke-width="0.9" fill="none"/>
+      <path d="M 982 34 L 982 18 L 966 18" stroke="#25231B" stroke-width="0.9" fill="none"/>
+      <path d="M 18 586 L 18 602 L 34 602" stroke="#25231B" stroke-width="0.9" fill="none"/>
+      <path d="M 982 586 L 982 602 L 966 602" stroke="#25231B" stroke-width="0.9" fill="none"/>
+    <circle cx="500" cy="320" r="120" fill="none" stroke="#25231B" stroke-width="2"/><circle cx="500" cy="320" r="90" fill="url(#hatch)"/><text x="500" y="314" font-size="21" fill="#25231B"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">ZERO PROCESS</text><text x="500" y="330" font-size="14" fill="#8A8172"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="italic">one brain, four states</text><line x1="347.0315625431024" y1="423.0748299580306" x2="408.2189375258614" y2="397.306122468523"
+                stroke="#25231B" stroke-width="1"/><rect x="247.03156254310238" y="411.0748299580306" width="100" height="24" fill="none" stroke="#25231B" stroke-width="0.8"/><text x="251.03156254310238" y="426.0748299580306" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">/health</text><text x="343.0315625431024" y="426.0748299580306" font-size="12" fill="#8A8172"
+        text-anchor="end" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">GET</text><text x="251.03156254310238" y="445.0748299580306" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="italic">liveness probe</text><line x1="317.3822119375384" y1="385.24167248953125" x2="390.429327162523" y2="368.9312543671484"
+                stroke="#25231B" stroke-width="1"/><rect x="217.3822119375384" y="373.24167248953125" width="100" height="24" fill="none" stroke="#25231B" stroke-width="0.8"/><text x="221.3822119375384" y="388.24167248953125" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">/zero/status</text><text x="313.3822119375384" y="388.24167248953125" font-size="12" fill="#8A8172"
+        text-anchor="end" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">GET</text><text x="221.3822119375384" y="407.24167248953125" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="italic">state + degradation</text><line x1="301.9568007574726" y1="342.32689834307786" x2="381.17408045448354" y2="336.7451737573084"
+                stroke="#25231B" stroke-width="1"/><rect x="201.9568007574726" y="330.32689834307786" width="100" height="24" fill="none" stroke="#25231B" stroke-width="0.8"/><text x="205.9568007574726" y="345.32689834307786" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">/zero/say</text><text x="297.9568007574726" y="345.32689834307786" font-size="12" fill="#8A8172"
+        text-anchor="end" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">POST</text><text x="205.9568007574726" y="364.32689834307786" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="italic">speak a line</text><line x1="301.9568007574726" y1="297.67310165692214" x2="381.17408045448354" y2="303.2548262426916"
+                stroke="#25231B" stroke-width="1"/><rect x="201.9568007574726" y="285.67310165692214" width="100" height="24" fill="none" stroke="#25231B" stroke-width="0.8"/><text x="205.9568007574726" y="300.67310165692214" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">/zero/turn</text><text x="297.9568007574726" y="300.67310165692214" font-size="12" fill="#8A8172"
+        text-anchor="end" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">POST</text><text x="205.9568007574726" y="319.67310165692214" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="italic">push-to-talk audio</text><line x1="317.38221193753833" y1="254.7583275104688" x2="390.429327162523" y2="271.0687456328516"
+                stroke="#25231B" stroke-width="1"/><rect x="217.38221193753833" y="242.7583275104688" width="100" height="24" fill="none" stroke="#25231B" stroke-width="0.8"/><text x="221.38221193753833" y="257.7583275104688" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">/zero/turn_text</text><text x="313.38221193753833" y="257.7583275104688" font-size="12" fill="#8A8172"
+        text-anchor="end" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">POST</text><text x="221.38221193753833" y="276.7583275104688" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="italic">typed input</text><line x1="347.0315625431023" y1="216.9251700419694" x2="408.2189375258614" y2="242.69387753147709"
+                stroke="#25231B" stroke-width="1"/><rect x="247.03156254310232" y="204.9251700419694" width="100" height="24" fill="none" stroke="#25231B" stroke-width="0.8"/><text x="251.03156254310232" y="219.9251700419694" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">/zero/control</text><text x="343.0315625431023" y="219.9251700419694" font-size="12" fill="#8A8172"
+        text-anchor="end" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">POST</text><text x="251.03156254310232" y="238.9251700419694" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="italic">end conversation</text><text x="60" y="100" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="2" font-style="normal">INBOUND  ·  AF-1 APPLICATION</text><text x="60" y="114" font-size="14" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">HTTP :8090  ·  bound to 0.0.0.0</text><line x1="652.9684374568976" y1="216.9251700419694" x2="591.7810624741386" y2="242.69387753147709"
+                stroke="#25231B" stroke-width="1"/><rect x="652.9684374568976" y="204.9251700419694" width="120" height="24" fill="none" stroke="#25231B" stroke-width="0.8"/><text x="656.9684374568976" y="219.9251700419694" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">/transcribe</text><text x="768.9684374568976" y="219.9251700419694" font-size="12" fill="#8A8172"
+        text-anchor="end" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">:9000 whisper</text><text x="656.9684374568976" y="238.9251700419694" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="italic">audio → text</text><line x1="682.6177880624616" y1="254.75832751046877" x2="609.570672837477" y2="271.0687456328516"
+                stroke="#25231B" stroke-width="1"/><rect x="682.6177880624616" y="242.75832751046877" width="120" height="24" fill="none" stroke="#25231B" stroke-width="0.8"/><text x="686.6177880624616" y="257.7583275104688" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">/tts</text><text x="798.6177880624616" y="257.7583275104688" font-size="12" fill="#8A8172"
+        text-anchor="end" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">:9100 orpheus</text><text x="686.6177880624616" y="276.7583275104688" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="italic">text → wav 24 kHz</text><line x1="698.0431992425274" y1="297.67310165692214" x2="618.8259195455164" y2="303.2548262426916"
+                stroke="#25231B" stroke-width="1"/><rect x="698.0431992425274" y="285.67310165692214" width="120" height="24" fill="none" stroke="#25231B" stroke-width="0.8"/><text x="702.0431992425274" y="300.67310165692214" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">/facts + /analyze</text><text x="814.0431992425274" y="300.67310165692214" font-size="12" fill="#8A8172"
+        text-anchor="end" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">:8000 vision</text><text x="702.0431992425274" y="319.67310165692214" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="italic">depth, scene, VLM</text><line x1="698.0431992425274" y1="342.32689834307786" x2="618.8259195455164" y2="336.7451737573084"
+                stroke="#25231B" stroke-width="1"/><rect x="698.0431992425274" y="330.32689834307786" width="120" height="24" fill="none" stroke="#25231B" stroke-width="0.8"/><text x="702.0431992425274" y="345.32689834307786" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">/perceive/*</text><text x="814.0431992425274" y="345.32689834307786" font-size="12" fill="#8A8172"
+        text-anchor="end" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">:8000 embedders</text><text x="702.0431992425274" y="364.32689834307786" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="italic">face, voice, obj</text><line x1="682.6177880624616" y1="385.2416724895312" x2="609.570672837477" y2="368.9312543671484"
+                stroke="#25231B" stroke-width="1"/><rect x="682.6177880624616" y="373.2416724895312" width="120" height="24" fill="none" stroke="#25231B" stroke-width="0.8"/><text x="686.6177880624616" y="388.2416724895312" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">/api/chat</text><text x="798.6177880624616" y="388.2416724895312" font-size="12" fill="#8A8172"
+        text-anchor="end" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">:11435 → :11434</text><text x="686.6177880624616" y="407.2416724895312" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="italic">language model</text><line x1="652.9684374568976" y1="423.0748299580306" x2="591.7810624741386" y2="397.3061224685229"
+                stroke="#25231B" stroke-width="1"/><rect x="652.9684374568976" y="411.0748299580306" width="120" height="24" fill="none" stroke="#25231B" stroke-width="0.8"/><text x="656.9684374568976" y="426.0748299580306" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">/search</text><text x="768.9684374568976" y="426.0748299580306" font-size="12" fill="#8A8172"
+        text-anchor="end" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">:8080 searxng</text><text x="656.9684374568976" y="445.0748299580306" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="italic">web search</text><text x="940" y="100" font-size="16" fill="#25231B"
+        text-anchor="end" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="2" font-style="normal">OUTBOUND  ·  GPU NODE VIA TUNNEL</text><text x="940" y="114" font-size="14" fill="#8A8172"
+        text-anchor="end" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">HTTP over SSH forwards to 127.0.0.1</text>
+    <g transform="translate(520,460)">
+      <rect x="0" y="0" width="460" height="130" fill="none" stroke="#25231B" stroke-width="1"/>
+      <line x1="0" y1="30" x2="460" y2="30" stroke="#25231B" stroke-width="0.7"/>
+      <line x1="0" y1="72" x2="460" y2="72" stroke="#25231B" stroke-width="0.7"/>
+      <line x1="260" y1="30" x2="260" y2="130" stroke="#25231B" stroke-width="0.7"/>
+      <text x="10" y="22" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="2" font-style="normal">ZEROBIONIC</text>
+      <text x="450" y="22" font-size="14" fill="#8A8172"
+        text-anchor="end" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">AF-1 ASSISTIVE ROBOTICS</text>
+      <text x="10" y="52" font-size="11" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">TITLE</text>
+      <text x="10" y="66" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="1" font-style="normal">CONTROL PLANE SURFACE</text>
+      <text x="10" y="92" font-size="11" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">DOC</text>
+      <text x="10" y="106" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">ZBR-AF1-SW-001</text>
+      <text x="10" y="122" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">REV 0.1</text>
+      <text x="270" y="52" font-size="11" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">FIGURE</text>
+      <text x="270" y="66" font-size="21" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="2" font-style="normal">7</text>
+      <text x="270" y="92" font-size="11" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">SHEET</text>
+      <text x="270" y="106" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">1 OF 1</text>
+      <text x="270" y="122" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">SCALE N.T.S.</text>
+    </g></svg>

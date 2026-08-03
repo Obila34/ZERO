@@ -75,11 +75,20 @@ class _BaseEndpointer:
     def capture(self, frames: Iterable[np.ndarray],
                 idle_timeout_s: float | None = None,
                 on_speech_pause=None,
-                should_hold=None) -> np.ndarray | None:
+                should_hold=None,
+                early_commit=None) -> np.ndarray | None:
         """Collect one utterance from the owner. Returns the audio, or None only on
         a true idle timeout (no speech for `idle_timeout_s`). A too-quiet utterance
         (background) is NOT an idle timeout — we drop it and keep listening, so a
         stray background blip doesn't end the conversation.
+
+        ``early_commit(audio_so_far) -> bool``: predictive endpointing. Called
+        once per pause at the speculative-pause mark (~180 ms), well before the
+        normal silence window. True = the turn is CONFIDENTLY complete (e.g.
+        Smart Turn P(done) is high) — commit right now instead of waiting out
+        the rest of the silence. This is what closes the gap to the human
+        ~200 ms turn-taking rhythm; the full silence window remains the
+        fallback whenever the predictor is absent or unsure.
         """
         self._on_capture_start()   # reset stateful VAD (silero) per utterance
         idle_limit = int(idle_timeout_s * 1000 / self.block_ms) if idle_timeout_s else None
@@ -127,12 +136,22 @@ class _BaseEndpointer:
                         hold_until = 0  # speech resumed — a fresh endpoint decision
                     else:
                         trailing_silence += 1
-                        if (on_speech_pause is not None
-                                and trailing_silence == self.spec_blocks):
-                            try:  # speculative STT must never break capture
-                                on_speech_pause(np.concatenate(collected))
-                            except Exception as e:
-                                log.debug("speech-pause hook failed: %s", e)
+                        if trailing_silence == self.spec_blocks:
+                            audio_so_far = np.concatenate(collected)
+                            if on_speech_pause is not None:
+                                try:  # speculative STT must never break capture
+                                    on_speech_pause(audio_so_far)
+                                except Exception as e:
+                                    log.debug("speech-pause hook failed: %s", e)
+                            if early_commit is not None:
+                                try:  # prediction must never break capture
+                                    if early_commit(audio_so_far):
+                                        log.debug("early commit: turn predicted "
+                                                  "complete at %dms of silence",
+                                                  trailing_silence * self.block_ms)
+                                        break
+                                except Exception as e:
+                                    log.debug("early-commit hook failed: %s", e)
                         need = self.silence_blocks
                         if (self.fast_end_speech_blocks
                                 and len(collected) - trailing_silence

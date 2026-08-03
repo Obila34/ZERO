@@ -1,0 +1,157 @@
+<svg viewBox="0 0 1600 1200" xmlns="http://www.w3.org/2000/svg" fill="none">
+<defs>
+  <pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+    <line x1="0" y1="0" x2="0" y2="6" stroke="#DED6C4" stroke-width="1"/>
+  </pattern>
+  <pattern id="dot" width="8" height="8" patternUnits="userSpaceOnUse">
+    <circle cx="1" cy="1" r="0.6" fill="#8A8172"/>
+  </pattern>
+</defs>
+      <rect x="22" y="22" width="1556" height="1156"
+            fill="none" stroke="#B9B1A1" stroke-width="0.6"/>
+      <path d="M 18 34 L 18 18 L 34 18" stroke="#25231B" stroke-width="0.9" fill="none"/>
+      <path d="M 1582 34 L 1582 18 L 1566 18" stroke="#25231B" stroke-width="0.9" fill="none"/>
+      <path d="M 18 1166 L 18 1182 L 34 1182" stroke="#25231B" stroke-width="0.9" fill="none"/>
+      <path d="M 1582 1166 L 1582 1182 L 1566 1182" stroke="#25231B" stroke-width="0.9" fill="none"/>
+    <rect x="660" y="106" width="280" height="68" fill="url(#hatch)" stroke="#25231B" stroke-width="1.8"/><text x="800" y="134" font-size="28" fill="#25231B"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">config.yaml</text><text x="800" y="158" font-size="16" fill="#8A8172"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="italic">deep-merged with config.local.yaml at load</text><rect x="180" y="310" width="200" height="60" fill="none" stroke="#25231B" stroke-width="1.4"/><text x="280" y="338" font-size="21" fill="#25231B"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">audio</text><text x="280" y="358" font-size="14" fill="#8A8172"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="italic">sample rate, gain, aec</text><path d="M 280 310 C 280 240, 800 240, 800 174"
+                fill="none" stroke="#8A8172" stroke-width="0.5"/><rect x="440" y="310" width="200" height="60" fill="none" stroke="#25231B" stroke-width="1.4"/><text x="540" y="338" font-size="21" fill="#25231B"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">privacy</text><text x="540" y="358" font-size="14" fill="#8A8172"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="italic">bystander_mode</text><path d="M 540 310 C 540 240, 800 240, 800 174"
+                fill="none" stroke="#8A8172" stroke-width="0.5"/><rect x="700" y="310" width="200" height="60" fill="none" stroke="#25231B" stroke-width="1.4"/><text x="800" y="338" font-size="21" fill="#25231B"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">control</text><text x="800" y="358" font-size="14" fill="#8A8172"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="italic">host, port, person_id</text><path d="M 800 310 C 800 240, 800 240, 800 174"
+                fill="none" stroke="#8A8172" stroke-width="0.5"/><rect x="960" y="310" width="200" height="60" fill="none" stroke="#25231B" stroke-width="1.4"/><text x="1060" y="338" font-size="21" fill="#25231B"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">conversation</text><text x="1060" y="358" font-size="14" fill="#8A8172"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="italic">sleep, filler, barge in</text><path d="M 1060 310 C 1060 240, 800 240, 800 174"
+                fill="none" stroke="#8A8172" stroke-width="0.5"/><rect x="1220" y="310" width="200" height="60" fill="none" stroke="#25231B" stroke-width="1.4"/><text x="1320" y="338" font-size="21" fill="#25231B"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">memory</text><text x="1320" y="358" font-size="14" fill="#8A8172"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="italic">retrieval, forgetting</text><path d="M 1320 310 C 1320 240, 800 240, 800 174"
+                fill="none" stroke="#8A8172" stroke-width="0.5"/><rect x="180" y="440" width="200" height="60" fill="none" stroke="#25231B" stroke-width="1.4"/><text x="280" y="468" font-size="21" fill="#25231B"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">learning</text><text x="280" y="488" font-size="14" fill="#8A8172"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="italic">objects, corpus, episodes</text><path d="M 280 440 C 280 240, 800 240, 800 174"
+                fill="none" stroke="#8A8172" stroke-width="0.5"/><rect x="440" y="440" width="200" height="60" fill="none" stroke="#25231B" stroke-width="1.4"/><text x="540" y="468" font-size="21" fill="#25231B"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">perception</text><text x="540" y="488" font-size="14" fill="#8A8172"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="italic">remote, affect, diarize</text><path d="M 540 440 C 540 240, 800 240, 800 174"
+                fill="none" stroke="#8A8172" stroke-width="0.5"/><rect x="700" y="440" width="200" height="60" fill="none" stroke="#25231B" stroke-width="1.4"/><text x="800" y="468" font-size="21" fill="#25231B"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">proactive</text><text x="800" y="488" font-size="14" fill="#8A8172"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="italic">quiet_hours, cooldowns</text><path d="M 800 440 C 800 240, 800 240, 800 174"
+                fill="none" stroke="#8A8172" stroke-width="0.5"/><rect x="960" y="440" width="200" height="60" fill="none" stroke="#25231B" stroke-width="1.4"/><text x="1060" y="468" font-size="21" fill="#25231B"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">preferences</text><text x="1060" y="488" font-size="14" fill="#8A8172"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="italic">enabled</text><path d="M 1060 440 C 1060 240, 800 240, 800 174"
+                fill="none" stroke="#8A8172" stroke-width="0.5"/><rect x="1220" y="440" width="200" height="60" fill="none" stroke="#25231B" stroke-width="1.4"/><text x="1320" y="468" font-size="21" fill="#25231B"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">tools</text><text x="1320" y="488" font-size="14" fill="#8A8172"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="italic">allow, websearch</text><path d="M 1320 440 C 1320 240, 800 240, 800 174"
+                fill="none" stroke="#8A8172" stroke-width="0.5"/><rect x="180" y="570" width="200" height="60" fill="none" stroke="#25231B" stroke-width="1.4"/><text x="280" y="598" font-size="21" fill="#25231B"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">identity</text><text x="280" y="618" font-size="14" fill="#8A8172"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="italic">fusion, guests, session</text><path d="M 280 570 C 280 240, 800 240, 800 174"
+                fill="none" stroke="#8A8172" stroke-width="0.5"/><rect x="440" y="570" width="200" height="60" fill="none" stroke="#25231B" stroke-width="1.4"/><text x="540" y="598" font-size="21" fill="#25231B"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">voiceid</text><text x="540" y="618" font-size="14" fill="#8A8172"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="italic">enabled, threshold</text><path d="M 540 570 C 540 240, 800 240, 800 174"
+                fill="none" stroke="#8A8172" stroke-width="0.5"/><rect x="700" y="570" width="200" height="60" fill="none" stroke="#25231B" stroke-width="1.4"/><text x="800" y="598" font-size="21" fill="#25231B"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">wake</text><text x="800" y="618" font-size="14" fill="#8A8172"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="italic">model, threshold</text><path d="M 800 570 C 800 240, 800 240, 800 174"
+                fill="none" stroke="#8A8172" stroke-width="0.5"/><rect x="960" y="570" width="200" height="60" fill="none" stroke="#25231B" stroke-width="1.4"/><text x="1060" y="598" font-size="21" fill="#25231B"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">vad</text><text x="1060" y="618" font-size="14" fill="#8A8172"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="italic">silence, semantic_hold</text><path d="M 1060 570 C 1060 240, 800 240, 800 174"
+                fill="none" stroke="#8A8172" stroke-width="0.5"/><rect x="1220" y="570" width="200" height="60" fill="none" stroke="#25231B" stroke-width="1.4"/><text x="1320" y="598" font-size="21" fill="#25231B"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">stt</text><text x="1320" y="618" font-size="14" fill="#8A8172"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="italic">engine, remote, fallback</text><path d="M 1320 570 C 1320 240, 800 240, 800 174"
+                fill="none" stroke="#8A8172" stroke-width="0.5"/><rect x="180" y="700" width="200" height="60" fill="none" stroke="#25231B" stroke-width="1.4"/><text x="280" y="728" font-size="21" fill="#25231B"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">llm</text><text x="280" y="748" font-size="14" fill="#8A8172"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="italic">host, model, history</text><path d="M 280 700 C 280 240, 800 240, 800 174"
+                fill="none" stroke="#8A8172" stroke-width="0.5"/><rect x="440" y="700" width="200" height="60" fill="none" stroke="#25231B" stroke-width="1.4"/><text x="540" y="728" font-size="21" fill="#25231B"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">tts</text><text x="540" y="748" font-size="14" fill="#8A8172"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="italic">engine, orpheus, piper</text><path d="M 540 700 C 540 240, 800 240, 800 174"
+                fill="none" stroke="#8A8172" stroke-width="0.5"/><rect x="700" y="700" width="200" height="60" fill="none" stroke="#25231B" stroke-width="1.4"/><text x="800" y="728" font-size="21" fill="#25231B"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">vision</text><text x="800" y="748" font-size="14" fill="#8A8172"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="italic">camera, detect, gpu</text><path d="M 800 700 C 800 240, 800 240, 800 174"
+                fill="none" stroke="#8A8172" stroke-width="0.5"/><rect x="960" y="700" width="200" height="60" fill="none" stroke="#25231B" stroke-width="1.4"/><text x="1060" y="728" font-size="21" fill="#25231B"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">world</text><text x="1060" y="748" font-size="14" fill="#8A8172"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="italic">motion, gate, surprise</text><path d="M 1060 700 C 1060 240, 800 240, 800 174"
+                fill="none" stroke="#8A8172" stroke-width="0.5"/>
+    <g transform="translate(1120,1040)">
+      <rect x="0" y="0" width="460" height="130" fill="none" stroke="#25231B" stroke-width="1"/>
+      <line x1="0" y1="30" x2="460" y2="30" stroke="#25231B" stroke-width="0.7"/>
+      <line x1="0" y1="72" x2="460" y2="72" stroke="#25231B" stroke-width="0.7"/>
+      <line x1="260" y1="30" x2="260" y2="130" stroke="#25231B" stroke-width="0.7"/>
+      <text x="10" y="22" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="2" font-style="normal">ZEROBIONIC</text>
+      <text x="450" y="22" font-size="14" fill="#8A8172"
+        text-anchor="end" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">AF-1 ASSISTIVE ROBOTICS</text>
+      <text x="10" y="52" font-size="11" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">TITLE</text>
+      <text x="10" y="66" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="1" font-style="normal">CONFIGURATION ANATOMY</text>
+      <text x="10" y="92" font-size="11" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">DOC</text>
+      <text x="10" y="106" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">ZBR-AF1-SW-001</text>
+      <text x="10" y="122" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">REV 0.1</text>
+      <text x="270" y="52" font-size="11" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">FIGURE</text>
+      <text x="270" y="66" font-size="21" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="2" font-style="normal">15</text>
+      <text x="270" y="92" font-size="11" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">SHEET</text>
+      <text x="270" y="106" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">1 OF 1</text>
+      <text x="270" y="122" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">SCALE N.T.S.</text>
+    </g></svg>

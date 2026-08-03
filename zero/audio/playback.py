@@ -3,9 +3,20 @@
 play() streams a float32 waveform to the output device in small chunks and
 checks a `should_stop` callback between chunks, so the main loop can cut
 playback short the instant a new wake word fires (barge-in).
+
+Two duplex hooks live here because only the speaker knows what actually left
+the device:
+
+* Ducking — `duck()` drops the output gain mid-stream (the human "yield"
+  gesture while an interruption is being assessed); `unduck()` restores it.
+* Envelope tap — the RMS of every chunk written is recorded with a timestamp,
+  so the barge-in detector can correlate what the mic hears against what the
+  speaker is playing (the Bluetooth-proof echo test).
 """
 from __future__ import annotations
 
+import time
+from collections import deque
 from typing import Callable, Iterable
 
 import numpy as np
@@ -31,6 +42,28 @@ class Speaker:
         # the barge-in detector keys its echo calibration off this, so it must
         # not include prebuffering time (when the room is still silent).
         self.playing = False
+        # Output gain [0..1]. duck() lowers it mid-stream (yield gesture while
+        # an interruption is assessed); reset to 1.0 by every new play call so
+        # a duck can never leak into the next reply.
+        self.gain = 1.0
+        # Envelope tap: (monotonic_t, rms) of each chunk as WRITTEN (post-gain
+        # — that's what the room hears). Bounded; readers snapshot it.
+        self._env: deque = deque(maxlen=96)
+
+    def duck(self, factor: float = 0.35) -> None:
+        self.gain = float(min(1.0, max(0.0, factor)))
+
+    def unduck(self) -> None:
+        self.gain = 1.0
+
+    def env_snapshot(self) -> list:
+        """Recent played-audio envelope for the barge-in correlation guard."""
+        return list(self._env)
+
+    def _tap(self, block: np.ndarray) -> None:
+        # int16-scale RMS to match the mic side's units.
+        self._env.append((time.monotonic(),
+                          float(np.sqrt(np.mean(block ** 2))) * 32768.0))
 
     def play(
         self,
@@ -44,6 +77,7 @@ class Speaker:
             return True
         audio = np.asarray(audio, dtype=np.float32)
         chunk = max(1, int(sample_rate * self.chunk_ms / 1000))
+        self.gain = 1.0  # a leftover duck must never quiet a fresh utterance
 
         try:
             with sd.OutputStream(
@@ -58,7 +92,10 @@ class Speaker:
                         log.info("playback interrupted (barge-in)")
                         return False
                     block = audio[start : start + chunk]
+                    if self.gain != 1.0:
+                        block = block * self.gain
                     stream.write(block.reshape(-1, 1))
+                    self._tap(block)
                     if self.echo_ref is not None:
                         self.echo_ref.push(block, sample_rate)
             return True
@@ -84,6 +121,8 @@ class Speaker:
         pending: list[np.ndarray] = []
         buffered = 0
 
+        self.gain = 1.0  # a leftover duck must never quiet a fresh reply
+
         def write(block: np.ndarray) -> bool:
             nonlocal stream
             if should_stop is not None and should_stop():
@@ -95,7 +134,10 @@ class Speaker:
                                          dtype="float32")
                 stream.start()
                 self.playing = True  # sound is now really leaving the device
+            if self.gain != 1.0:
+                block = block * self.gain
             stream.write(block.reshape(-1, 1))
+            self._tap(block)
             if self.echo_ref is not None:
                 self.echo_ref.push(block, sample_rate)
             return True

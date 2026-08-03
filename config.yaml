@@ -61,9 +61,12 @@ conversation:
   # well above it, and the interrupting words are fed straight into the next
   # turn (no need to repeat yourself). Set false to disable all barge-in.
   barge_in: true
-  barge_in_on_speech: false # TEMP off: sharp TEN VAD + loud self-echo were
-    # firing false barge-ins (ZERO hearing itself). Re-enable once the echo is
-    # handled (BT speaker on / wired speaker + AEC). Wake-word interrupt stays on.
+  barge_in_on_speech:
+    true # re-enabled: the old false-trigger problem (ZERO hearing its own
+    # echo) is now handled by envelope correlation — the mic envelope is
+    # compared against what the speaker ACTUALLY played (at any lag up to
+    # ~400ms, so Bluetooth's drifting latency doesn't matter). Echo moves
+    # WITH the reply; a person doesn't.
   barge_in_learn_ms: 900 # echo-floor learning window at reply start
   barge_in_speech_ms: 300 # sustained speech needed to trigger the interrupt
   barge_in_ratio:
@@ -73,6 +76,33 @@ conversation:
     # "barge-in armed: ... speech gate" log line: your voice must beat
     # the gate. Self-triggers = raise; never triggers = lower.
   barge_in_min_rms: 250 # absolute int16 RMS floor for foreground speech
+  barge_in_floor_percentile:
+    80 # echo floor = this percentile of recent echo RMS (was: max of the
+    # learn window — one loud syllable early in the reply wedged the gate
+    # above the user's voice). Lower = easier to interrupt.
+  barge_in_env_corr:
+    0.65 # mic-vs-played envelope correlation above this = own echo, never a
+    # trigger. Raise toward 1.0 if real interruptions get eaten; lower if
+    # echo still self-triggers.
+  barge_in_duck:
+    0.35 # output gain while an interruption is being assessed — the audible
+    # "I noticed you" yield gesture. 1.0 = no ducking.
+
+  # What an interruption MEANS (zero/audio/interrupt.py): corrections ("no,
+  # I meant—", "wait, stop") cut the reply mid-word; backchannels ("yeah",
+  # "mhm") are waved through and the reply continues; anything else is a new
+  # thought — ZERO finishes its current SENTENCE, then answers it (the queued
+  # words are already transcribed, so that answer starts instantly).
+
+  # Active listening: during a LONG user turn, at a pause the turn model says
+  # is mid-thought, murmur a quiet "Mm-hmm." like a human listener. Hard-gated
+  # (length + cooldown + turn-model confidence) so it never talks over a
+  # finished question.
+  backchannel:
+    enabled: true
+    min_speech_ms: 4000 # only inside genuinely long turns (stories)
+    cooldown_ms: 8000 # at most one murmur per this window
+    max_turn_prob: 0.4 # only when P(turn complete) is LOW (clearly mid-thought)
 
   # Tiny neutral backchannel that fits ANY input (a committal "let me think" on a
   # casual "how are you" breaks the illusion). Played only sometimes, and only if
@@ -357,6 +387,14 @@ vad:
   smart_turn_threshold:
     0.5 # P(turn complete) >= this -> commit; below -> hold as mid-thought.
     # Raise to hold longer (fewer early cut-offs); lower to commit sooner.
+  # Predictive endpointing: when Smart Turn is CONFIDENT the thought is done
+  # at the ~180ms pause mark, commit right there — the human ~200ms turn gap —
+  # instead of waiting out the full silence_ms. The silence window remains the
+  # fallback whenever the model is absent or unsure.
+  early_commit: true
+  early_commit_threshold:
+    0.85 # P(turn complete) needed to commit at the 180ms mark. Raise if ZERO
+    # ever jumps in before you've finished; lower for snappier replies.
   silence_ms: 450 # trailing silence that ends an utterance (adaptive: see below)
   semantic_hold:
     true # endpoint intelligence: the early (speculative) transcript of a
@@ -415,6 +453,12 @@ stt:
 
 llm:
   engine: ollama
+  # Speculative prefill: while the endpointer is still waiting out the silence,
+  # the speculative transcript is sent ahead with num_predict=1 so the model
+  # reads (and KV-caches) the whole prompt early. By the time the real request
+  # lands, prefill is already done — first token starts almost immediately.
+  # A wrong speculation costs one throwaway token on the GPU, nothing else.
+  speculative_prefill: true
   # GPU offload: host is the SSH tunnel to the GPU's Ollama (Pi:11435 -> node:11434).
   # Gemma4 (8B) runs there at ~100 tok/s. Local fallback: host 127.0.0.1:11434 +
   # model qwen2.5:3b-instruct (needs the Pi's own Ollama running).

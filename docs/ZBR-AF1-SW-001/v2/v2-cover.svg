@@ -1,0 +1,107 @@
+<svg viewBox="0 0 1000 1250" xmlns="http://www.w3.org/2000/svg" fill="none">
+<defs>
+  <pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+    <line x1="0" y1="0" x2="0" y2="6" stroke="#DED6C4" stroke-width="1"/>
+  </pattern>
+  <pattern id="dot" width="8" height="8" patternUnits="userSpaceOnUse">
+    <circle cx="1" cy="1" r="0.6" fill="#8A8172"/>
+  </pattern>
+</defs>
+      <rect x="22" y="22" width="956" height="1206"
+            fill="none" stroke="#B9B1A1" stroke-width="0.6"/>
+      <path d="M 18 34 L 18 18 L 34 18" stroke="#25231B" stroke-width="0.9" fill="none"/>
+      <path d="M 982 34 L 982 18 L 966 18" stroke="#25231B" stroke-width="0.9" fill="none"/>
+      <path d="M 18 1216 L 18 1232 L 34 1232" stroke="#25231B" stroke-width="0.9" fill="none"/>
+      <path d="M 982 1216 L 982 1232 L 966 1232" stroke="#25231B" stroke-width="0.9" fill="none"/>
+    <text x="80" y="80" font-size="39" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="6" font-style="normal">ZEROBIONIC</text><text x="80" y="106" font-size="16" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="4" font-style="normal">AF-1 ASSISTIVE HUMANOID PROGRAM</text><line x1="80" y1="120" x2="920" y2="120" stroke="#25231B" stroke-width="1.4"/>
+      <!-- shoulders -->
+      <path d="M 240 780
+               C 240 740, 270 710, 320 710
+               L 680 710
+               C 730 710, 760 740, 760 780
+               L 760 1040
+               L 240 1040 Z"
+            fill="none" stroke="#25231B" stroke-width="2"/>
+      <!-- collar detail -->
+      <line x1="320" y1="710" x2="360" y2="750" stroke="#25231B" stroke-width="1"/>
+      <line x1="680" y1="710" x2="640" y2="750" stroke="#25231B" stroke-width="1"/>
+      <line x1="360" y1="750" x2="640" y2="750" stroke="#25231B" stroke-width="1"/>
+      <!-- chest emblem -->
+      <circle cx="500" cy="840" r="34" fill="none" stroke="#25231B" stroke-width="1.4"/>
+      <circle cx="500" cy="840" r="22" fill="none" stroke="#25231B" stroke-width="1"/>
+      <circle cx="500" cy="840" r="8" fill="#25231B"/>
+      <text x="500" y="900" font-size="16" fill="#25231B"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="4" font-style="normal">AF-1</text>
+      <!-- side plating hints -->
+      <line x1="280" y1="810" x2="280" y2="1020" stroke="#25231B" stroke-width="0.8"/>
+      <line x1="720" y1="810" x2="720" y2="1020" stroke="#25231B" stroke-width="0.8"/>
+    
+      <path d="
+        M 360 440
+        C 320 460, 300 520, 305 580
+        C 310 640, 320 670, 350 695
+        L 650 695
+        C 680 670, 690 640, 695 580
+        C 700 520, 680 460, 640 440
+        Z"
+        fill="none" stroke="#25231B" stroke-width="2"/>
+      <line x1="320" y1="550" x2="680" y2="550" stroke="#25231B" stroke-width="1.4"/>
+      <line x1="320" y1="570" x2="680" y2="570" stroke="#25231B" stroke-width="1.4"/>
+      <circle cx="400" cy="560" r="10" fill="none" stroke="#25231B" stroke-width="1.4"/>
+      <circle cx="400" cy="560" r="5" fill="#25231B"/>
+      <circle cx="600" cy="560" r="10" fill="none" stroke="#25231B" stroke-width="1.4"/>
+      <circle cx="600" cy="560" r="5" fill="#25231B"/>
+      <!-- mic grille -->
+      <line x1="440" y1="655" x2="440" y2="680" stroke="#25231B" stroke-width="1"/><line x1="450" y1="655" x2="450" y2="680" stroke="#25231B" stroke-width="1"/><line x1="460" y1="655" x2="460" y2="680" stroke="#25231B" stroke-width="1"/><line x1="470" y1="655" x2="470" y2="680" stroke="#25231B" stroke-width="1"/><line x1="480" y1="655" x2="480" y2="680" stroke="#25231B" stroke-width="1"/><line x1="490" y1="655" x2="490" y2="680" stroke="#25231B" stroke-width="1"/><line x1="500" y1="655" x2="500" y2="680" stroke="#25231B" stroke-width="1"/><line x1="510" y1="655" x2="510" y2="680" stroke="#25231B" stroke-width="1"/><line x1="520" y1="655" x2="520" y2="680" stroke="#25231B" stroke-width="1"/><line x1="530" y1="655" x2="530" y2="680" stroke="#25231B" stroke-width="1"/><line x1="540" y1="655" x2="540" y2="680" stroke="#25231B" stroke-width="1"/><line x1="550" y1="655" x2="550" y2="680" stroke="#25231B" stroke-width="1"/>
+      <!-- crown antenna -->
+      <line x1="490" y1="430" x2="495" y2="370" stroke="#25231B" stroke-width="1.4"/>
+      <circle cx="495" cy="370" r="4" fill="none" stroke="#25231B" stroke-width="1.4"/>
+      <line x1="495" y1="370" x2="495" y2="340" stroke="#25231B" stroke-width="1.4"/>
+    <polyline points="400,560 260,560 120,400"
+        stroke="#8A8172" stroke-width="0.9" fill="none"/><circle cx="400" cy="560" r="2" fill="#8A8172"/><rect x="118.5" y="398.5" width="3" height="3" fill="#8A8172"/><text x="126" y="409" font-size="14" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">STEREO APERTURES</text><polyline points="600,560 675,560 750,400"
+        stroke="#8A8172" stroke-width="0.9" fill="none"/><circle cx="600" cy="560" r="2" fill="#8A8172"/><rect x="748.5" y="398.5" width="3" height="3" fill="#8A8172"/><text x="756" y="409" font-size="14" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">FACE EMBEDDER FEEDS</text><polyline points="500,667 625,667 750,540"
+        stroke="#8A8172" stroke-width="0.9" fill="none"/><circle cx="500" cy="667" r="2" fill="#8A8172"/><rect x="748.5" y="538.5" width="3" height="3" fill="#8A8172"/><text x="756" y="549" font-size="14" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">MIC GRILLE  ·  16 kHz MONO</text><polyline points="500,840 310,840 120,900"
+        stroke="#8A8172" stroke-width="0.9" fill="none"/><circle cx="500" cy="840" r="2" fill="#8A8172"/><rect x="118.5" y="898.5" width="3" height="3" fill="#8A8172"/><text x="126" y="909" font-size="14" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">CHEST EMBLEM</text><text x="80" y="1040" font-size="35" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="4" font-style="normal">ZERO  ·  BRAIN BUILD  ·  INTELLIGENCE STACK</text><text x="80" y="1068" font-size="18" fill="#8A8172"
+        text-anchor="start" font-family="Constantia, serif" font-weight="normal"
+        letter-spacing="0" font-style="italic">Conversational Subsystem for the AF-1 Assistive Robotics Platform</text><line x1="80" y1="1090" x2="920" y2="1090" stroke="#25231B" stroke-width="1"/><text x="80" y="1110" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="2" font-style="normal">DOCUMENT</text><text x="80" y="1124" font-size="18" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">ZBR-AF1-SW-001</text><text x="80" y="1142" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="2" font-style="normal">REVISION</text><text x="80" y="1156" font-size="18" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">0.1  ·  first public draft</text><text x="340" y="1110" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="2" font-style="normal">PREPARED BY</text><text x="340" y="1124" font-size="18" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">Denis Obila</text><text x="340" y="1142" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="2" font-style="normal">ROLE</text><text x="340" y="1156" font-size="18" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">ZERO Systems Lead, Zerobionic</text><text x="640" y="1110" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="2" font-style="normal">REPOSITORY</text><text x="640" y="1124" font-size="18" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">git commit as tagged in Section 12</text><text x="640" y="1142" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="2" font-style="normal">TARGET HARDWARE</text><text x="640" y="1156" font-size="18" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">AF-1 head Pi 5 + GPU node</text><text x="80" y="1190" font-size="14" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="4" font-style="normal">CONFIDENTIAL  ·  INTERNAL ENGINEERING DOCUMENT</text></svg>

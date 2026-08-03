@@ -1,0 +1,234 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1080" width="1600" height="1080">
+  <style>
+    .ink   { fill:none; stroke:#25231B; stroke-width:1.6; stroke-linejoin:round; stroke-linecap:round; }
+    .thin  { fill:none; stroke:#25231B; stroke-width:1.2; stroke-linejoin:round; stroke-linecap:round; }
+    .hair  { fill:none; stroke:#8A8172; stroke-width:1;   stroke-linejoin:round; stroke-linecap:round; }
+    .dashb { fill:none; stroke:#8A8172; stroke-width:1.3; stroke-dasharray:8 7; }
+    .sheet { fill:none; stroke:#25231B; stroke-width:1.6; }
+    .rule  { fill:none; stroke:#17150E; stroke-width:1.2; }
+    .link  { fill:none; stroke:#25231B; stroke-width:2; stroke-linejoin:round; stroke-linecap:round; }
+    .cabO  { fill:none; stroke:#D6480C; stroke-width:5;   stroke-linecap:butt; stroke-linejoin:round; }
+    .cabI  { fill:none; stroke:#FFFFFF; stroke-width:2.2; stroke-linecap:butt; stroke-linejoin:round; }
+    .taper { fill:#25231B; stroke:none; }
+    .taperG{ fill:#8A8172; stroke:none; }
+    .dot   { fill:#25231B; stroke:none; }
+    .zone  { fill:#F7F5F1; stroke:none; }
+    .blk   { fill:#FFFFFF; stroke:#25231B; stroke-width:1.6; }
+    .blkA  { fill:#FFFFFF; stroke:#D6480C; stroke-width:2; }
+    .bt    { font-family:"Courier New",monospace; font-size:11px; letter-spacing:0.5px; fill:#25231B; }
+    .bs    { font-family:"Courier New",monospace; font-size:9px;  letter-spacing:0.4px; fill:#8A8172; }
+    .rowl  { font-family:"Courier New",monospace; font-size:13px; letter-spacing:1.4px; fill:#25231B; }
+    .zonel { font-family:"Courier New",monospace; font-size:12px; letter-spacing:1.4px; fill:#8A8172; }
+    .sub   { font-family:"Courier New",monospace; font-size:12.5px; letter-spacing:1.2px; fill:#8A8172; }
+    .tiny  { font-family:"Courier New",monospace; font-size:10.5px; letter-spacing:1.0px; fill:#8A8172; }
+    .acclb { font-family:"Courier New",monospace; font-size:11px;  letter-spacing:1.2px; fill:#D6480C; }
+    .lbl   { font-family:"Courier New",monospace; font-size:16px; letter-spacing:1.8px; fill:#25231B; }
+    .tbold { font-family:"Courier New",monospace; font-size:14px;  letter-spacing:1.6px; fill:#17150E; font-weight:bold; }
+  </style>
+  <rect width="1600" height="1080" fill="#FFFFFF"/>
+  <rect x="36" y="36" width="1528" height="1008" class="sheet"/>
+
+  <g class="hair">
+    <line x1="36" y1="96" x2="76" y2="96"/><line x1="96" y1="36" x2="96" y2="76"/>
+    <line x1="1524" y1="96" x2="1564" y2="96"/><line x1="1504" y1="36" x2="1504" y2="76"/>
+    <line x1="36" y1="984" x2="76" y2="984"/><line x1="96" y1="1004" x2="96" y2="1044"/>
+    <line x1="1524" y1="984" x2="1564" y2="984"/><line x1="1504" y1="1004" x2="1504" y2="1044"/>
+  </g>
+
+  <rect x="130" y="116" width="1340" height="94" class="zone"/>
+  <rect x="130" y="694" width="1340" height="86" class="zone"/>
+  <line x1="96" y1="226" x2="1504" y2="226" class="dashb"/>
+  <line x1="96" y1="676" x2="1504" y2="676" class="dashb"/>
+  <rect x="120" y="213" width="250" height="26" fill="#FFFFFF"/>
+  <text x="130" y="231" class="acclb">SSH TUNNEL BOUNDARY</text>
+  <rect x="120" y="663" width="200" height="26" fill="#FFFFFF"/>
+  <text x="130" y="681" class="sub">DISK BOUNDARY</text>
+  <text x="130" y="106" class="zonel">GPU NODE</text>
+  <text x="130" y="308" class="zonel">PI 5 HEAD</text>
+  <text x="130" y="714" class="zonel">DISK</text>
+  <rect x="300" y="140" width="230" height="70" rx="3" class="blkA"/>
+  <text x="415" y="172" class="bt" text-anchor="middle">WHISPER</text>
+  <text x="415" y="192" class="bs" text-anchor="middle">:9000  large-v3-turbo</text>
+  <rect x="560" y="140" width="230" height="70" rx="3" class="blkA"/>
+  <text x="675" y="172" class="bt" text-anchor="middle">OLLAMA</text>
+  <text x="675" y="192" class="bs" text-anchor="middle">:11435  gemma4 8B</text>
+  <rect x="820" y="140" width="230" height="70" rx="3" class="blkA"/>
+  <text x="935" y="172" class="bt" text-anchor="middle">ORPHEUS</text>
+  <text x="935" y="192" class="bs" text-anchor="middle">:9100  3B via vLLM</text>
+  <rect x="1090" y="140" width="300" height="70" rx="3" class="blkA"/>
+  <text x="1240" y="172" class="bt" text-anchor="middle">VISION + PERCEIVE</text>
+  <text x="1240" y="192" class="bs" text-anchor="middle">:8000  depth, VLM, embeds</text>
+  <text x="236" y="331" class="rowl" text-anchor="end">SEE</text>
+  <text x="236" y="399" class="rowl" text-anchor="end">HEAR</text>
+  <text x="236" y="467" class="rowl" text-anchor="end">KNOW</text>
+  <text x="236" y="551" class="rowl" text-anchor="end">SPEAK</text>
+  <text x="236" y="629" class="rowl" text-anchor="end">KEEP</text>
+  <rect x="250" y="300" width="128" height="52" rx="3" class="blk"/>
+  <text x="314" y="323" class="bt" text-anchor="middle">CAMERA</text>
+  <text x="314" y="339" class="bs" text-anchor="middle">640x480 30fps</text>
+  <rect x="396" y="300" width="128" height="52" rx="3" class="blk"/>
+  <text x="460" y="323" class="bt" text-anchor="middle">MOTION</text>
+  <text x="460" y="339" class="bs" text-anchor="middle">tier 0, every frame</text>
+  <rect x="542" y="300" width="128" height="52" rx="3" class="blk"/>
+  <text x="606" y="323" class="bt" text-anchor="middle">DETECT</text>
+  <text x="606" y="339" class="bs" text-anchor="middle">tier 1, gated</text>
+  <rect x="688" y="300" width="128" height="52" rx="3" class="blk"/>
+  <text x="752" y="330" class="bt" text-anchor="middle">TRACK+COLOUR</text>
+  <rect x="834" y="300" width="128" height="52" rx="3" class="blk"/>
+  <text x="898" y="323" class="bt" text-anchor="middle">WORLD STATE</text>
+  <text x="898" y="339" class="bs" text-anchor="middle">shared read surface</text>
+  <rect x="250" y="368" width="128" height="52" rx="3" class="blk"/>
+  <text x="314" y="391" class="bt" text-anchor="middle">MICROPHONE</text>
+  <text x="314" y="407" class="bs" text-anchor="middle">16k mono 30ms</text>
+  <rect x="396" y="368" width="128" height="52" rx="3" class="blk"/>
+  <text x="460" y="391" class="bt" text-anchor="middle">WAKE WORD</text>
+  <text x="460" y="407" class="bs" text-anchor="middle">openWakeWord</text>
+  <rect x="542" y="368" width="128" height="52" rx="3" class="blk"/>
+  <text x="606" y="391" class="bt" text-anchor="middle">ENDPOINT+VAD</text>
+  <text x="606" y="407" class="bs" text-anchor="middle">silero, semantic hold</text>
+  <rect x="688" y="368" width="128" height="52" rx="3" class="blk"/>
+  <text x="752" y="391" class="bt" text-anchor="middle">SPEC STT</text>
+  <text x="752" y="407" class="bs" text-anchor="middle">starts at first pause</text>
+  <rect x="834" y="368" width="128" height="52" rx="3" class="blk"/>
+  <text x="898" y="391" class="bt" text-anchor="middle">STT</text>
+  <text x="898" y="407" class="bs" text-anchor="middle">final transcript</text>
+  <rect x="250" y="436" width="128" height="52" rx="3" class="blkA"/>
+  <text x="314" y="459" class="bt" text-anchor="middle">AF-1 CONTROL</text>
+  <text x="314" y="475" class="bs" text-anchor="middle">:8090 ffmpeg decode</text>
+  <rect x="834" y="436" width="128" height="52" rx="3" class="blk"/>
+  <text x="898" y="459" class="bt" text-anchor="middle">IDENTITY</text>
+  <text x="898" y="475" class="bs" text-anchor="middle">face + voice fusion</text>
+  <rect x="980" y="436" width="128" height="52" rx="3" class="blk"/>
+  <text x="1044" y="459" class="bt" text-anchor="middle">AFFECT+MOOD</text>
+  <text x="1044" y="475" class="bs" text-anchor="middle">cross-turn EMA</text>
+  <rect x="1126" y="436" width="128" height="52" rx="3" class="blk"/>
+  <text x="1190" y="459" class="bt" text-anchor="middle">RECALL</text>
+  <text x="1190" y="475" class="bs" text-anchor="middle">300 ms hard budget</text>
+  <rect x="1272" y="300.0" width="128" height="188.0" rx="3" class="blk"/>
+  <text x="1336.0" y="386" class="bt" text-anchor="middle">PROMPT</text>
+  <text x="1336.0" y="402" class="bt" text-anchor="middle">ASSEMBLY</text>
+  <text x="1336.0" y="422" class="bs" text-anchor="middle">ephemeral notes</text>
+  <text x="1336.0" y="436" class="bs" text-anchor="middle">never stored</text>
+  <polygon class="taper" points="378,322.4 396,324.6 396,327.4 378,329.6"/>
+  <polygon class="taper" points="524,322.4 542,324.6 542,327.4 524,329.6"/>
+  <polygon class="taper" points="670,322.4 688,324.6 688,327.4 670,329.6"/>
+  <polygon class="taper" points="816,322.4 834,324.6 834,327.4 816,329.6"/>
+  <polygon class="taper" points="378,390.4 396,392.6 396,395.4 378,397.6"/>
+  <polygon class="taper" points="524,390.4 542,392.6 542,395.4 524,397.6"/>
+  <polygon class="taper" points="670,390.4 688,392.6 688,395.4 670,397.6"/>
+  <polygon class="taper" points="816,390.4 834,392.6 834,395.4 816,397.6"/>
+  <polygon class="taper" points="962,322.4 1272,324.6 1272,327.4 962,329.6"/>
+  <polygon class="taper" points="962,390.4 1272,392.6 1272,395.4 962,397.6"/>
+  <polygon class="taper" points="962,458.4 980,460.6 980,463.4 962,465.6"/>
+  <polygon class="taper" points="1108,458.4 1126,460.6 1126,463.4 1108,465.6"/>
+  <polygon class="taper" points="1254,458.4 1272,460.6 1272,463.4 1254,465.6"/>
+  <path d="M 606.0 420.0 L 606.0 444 L 834 444" class="link"/>
+  <circle cx="834" cy="444" r="4.5" class="dot"/>
+  <path d="M 378 462 L 824 462 L 824 394 L 834 394" class="link"/>
+  <circle cx="834" cy="394" r="4.5" class="dot"/>
+  <ellipse cx="948" cy="473.0" rx="7" ry="2.6" class="thin"/>
+  <path d="M 941 473.0 L 941 481.0 A 7 2.6 0 0 0 955 481.0 L 955 473.0" class="thin"/>
+  <ellipse cx="1240" cy="473.0" rx="7" ry="2.6" class="thin"/>
+  <path d="M 1233 473.0 L 1233 481.0 A 7 2.6 0 0 0 1247 481.0 L 1247 473.0" class="thin"/>
+  <circle cx="1450" cy="394" r="17" class="ink" fill="#FFFFFF"/>
+  <text x="1450" y="399" class="bt" text-anchor="middle">A</text>
+  <circle cx="196" cy="546" r="17" class="ink" fill="#FFFFFF"/>
+  <text x="196" y="551" class="bt" text-anchor="middle">A</text>
+  <polygon class="taper" points="1400,390.4 1433,392.6 1433,395.4 1400,397.6"/>
+  <rect x="396" y="520" width="128" height="52" rx="3" class="blk"/>
+  <text x="460" y="543" class="bt" text-anchor="middle">GENERATE</text>
+  <text x="460" y="559" class="bs" text-anchor="middle">streamed, background</text>
+  <rect x="542" y="520" width="128" height="52" rx="3" class="blk"/>
+  <text x="606" y="543" class="bt" text-anchor="middle">SENTENCE SPLIT</text>
+  <text x="606" y="559" class="bs" text-anchor="middle">speak as it arrives</text>
+  <rect x="688" y="520" width="128" height="52" rx="3" class="blk"/>
+  <text x="752" y="543" class="bt" text-anchor="middle">SYNTHESIS</text>
+  <text x="752" y="559" class="bs" text-anchor="middle">cue tags translated</text>
+  <rect x="834" y="520" width="128" height="52" rx="3" class="blk"/>
+  <text x="898" y="543" class="bt" text-anchor="middle">PLAYBACK</text>
+  <text x="898" y="559" class="bs" text-anchor="middle">interruptible</text>
+  <rect x="980" y="520" width="128" height="52" rx="3" class="blk"/>
+  <text x="1044" y="550" class="bt" text-anchor="middle">SPEAKER</text>
+  <rect x="834" y="598" width="128" height="52" rx="3" class="blk"/>
+  <text x="898" y="621" class="bt" text-anchor="middle">BARGE-IN</text>
+  <text x="898" y="637" class="bs" text-anchor="middle">monitors the mic</text>
+  <rect x="980" y="598" width="128" height="52" rx="3" class="blk"/>
+  <text x="1044" y="621" class="bt" text-anchor="middle">SESSION LOG</text>
+  <text x="1044" y="637" class="bs" text-anchor="middle">per speaker</text>
+  <rect x="1126" y="598" width="128" height="52" rx="3" class="blk"/>
+  <text x="1190" y="621" class="bt" text-anchor="middle">REWARD TAG</text>
+  <text x="1190" y="637" class="bs" text-anchor="middle">episode + outcome</text>
+  <rect x="1272" y="598" width="128" height="52" rx="3" class="blk"/>
+  <text x="1336" y="621" class="bt" text-anchor="middle">PERSIST</text>
+  <text x="1336" y="637" class="bs" text-anchor="middle">to every store</text>
+  <polygon class="taper" points="213,542.4 396,544.6 396,547.4 213,549.6"/>
+  <polygon class="taper" points="524,542.4 542,544.6 542,547.4 524,549.6"/>
+  <polygon class="taper" points="670,542.4 688,544.6 688,547.4 670,549.6"/>
+  <polygon class="taper" points="816,542.4 834,544.6 834,547.4 816,549.6"/>
+  <polygon class="taper" points="962,542.4 980,544.6 980,547.4 962,549.6"/>
+  <polygon class="taper" points="1108,620.4 1126,622.6 1126,625.4 1108,627.6"/>
+  <polygon class="taper" points="1254,620.4 1272,622.6 1272,625.4 1254,627.6"/>
+  <path d="M 898.0 598.0 L 898.0 572.0" class="link"/>
+  <circle cx="898.0" cy="572.0" r="4.5" class="dot"/>
+  <path d="M 1044.0 572.0 L 1044.0 598.0" class="link"/>
+  <circle cx="1044.0" cy="598.0" r="4.5" class="dot"/>
+  <path d="M 680 300.0 L 680 238 L 1180.0 238 L 1180.0 210" class="cabO"/>
+  <path d="M 680 300.0 L 680 238 L 1180.0 238 L 1180.0 210" class="cabI"/>
+  <path d="M 972 368.0 L 972 248 L 415.0 248 L 415.0 210" class="cabO"/>
+  <path d="M 972 368.0 L 972 248 L 415.0 248 L 415.0 210" class="cabI"/>
+  <path d="M 824 436.0 L 824 258 L 1300.0 258 L 1300.0 210" class="cabO"/>
+  <path d="M 824 436.0 L 824 258 L 1300.0 258 L 1300.0 210" class="cabI"/>
+  <path d="M 1190.0 436.0 L 1190.0 268 L 635.0 268 L 635.0 210" class="cabO"/>
+  <path d="M 1190.0 436.0 L 1190.0 268 L 635.0 268 L 635.0 210" class="cabI"/>
+  <path d="M 1336.0 300.0 L 1336.0 278 L 715.0 278 L 715.0 210" class="cabO"/>
+  <path d="M 1336.0 300.0 L 1336.0 278 L 715.0 278 L 715.0 210" class="cabI"/>
+  <path d="M 816 546 L 1505 546 L 1505 288 L 935.0 288 L 935.0 210" class="cabO"/>
+  <path d="M 816 546 L 1505 546 L 1505 288 L 935.0 288 L 935.0 210" class="cabI"/>
+  <line x1="400.0" y1="690" x2="1385.0" y2="690" class="thin"/>
+  <path d="M 1336.0 650.0 L 1336.0 690" class="link"/>
+  <line x1="400.0" y1="690" x2="400.0" y2="698" class="hair"/>
+  <rect x="300" y="698" width="200" height="44" rx="3" class="thin"/>
+  <text x="400.0" y="725" class="bs" text-anchor="middle">zero_memory</text>
+  <line x1="660.0" y1="690" x2="660.0" y2="698" class="hair"/>
+  <rect x="530" y="698" width="260" height="44" rx="3" class="thin"/>
+  <text x="660.0" y="725" class="bs" text-anchor="middle">zero_identity · guests</text>
+  <line x1="920.0" y1="690" x2="920.0" y2="698" class="hair"/>
+  <rect x="820" y="698" width="200" height="44" rx="3" class="thin"/>
+  <text x="920.0" y="725" class="bs" text-anchor="middle">zero_episodes</text>
+  <line x1="1165.0" y1="690" x2="1165.0" y2="698" class="hair"/>
+  <rect x="1050" y="698" width="230" height="44" rx="3" class="thin"/>
+  <text x="1165.0" y="725" class="bs" text-anchor="middle">interactions.jsonl</text>
+  <line x1="1385.0" y1="690" x2="1385.0" y2="698" class="hair"/>
+  <rect x="1300" y="698" width="170" height="44" rx="3" class="thin"/>
+  <text x="1385.0" y="725" class="bs" text-anchor="middle">curiosity · objects</text>
+  <text x="130" y="800" class="acclb">PERCEPTION NEVER SITS ON THE REPLY PATH: THE SCENE IS ALREADY PERCEIVED BEFORE ANYONE ASKS ABOUT IT.</text>
+  <text x="130" y="822" class="tiny">EPHEMERAL NOTES ARE ATTACHED TO A THROWAWAY COPY OF THE MESSAGES AND NEVER ENTER HISTORY, WHICH IS WHAT KEEPS THE CACHED PREFIX STABLE.</text>
+  <line x1="96" y1="856" x2="1040" y2="856" class="rule"/>
+  <text x="96" y="878" class="tbold">LEGEND</text>
+  <polygon class="taper" points="100,901.5 160,904.4 160,907.6 100,910.5"/>
+  <text x="180" y="911" class="sub">DATA PATH · WIDE END IS THE SOURCE, NARROW END THE DESTINATION</text>
+  <line x1="100" y1="938" x2="160" y2="938" class="cabO"/><line x1="100" y1="938" x2="160" y2="938" class="cabI"/>
+  <text x="180" y="943" class="sub">ROUND TRIP ACROSS THE SSH TUNNEL</text>
+  <line x1="100" y1="970" x2="152" y2="970" class="link"/><circle cx="156" cy="970" r="4.5" class="dot"/>
+  <text x="180" y="975" class="sub">TERMINAL DOT MARKS WHERE A PATH JOINS</text>
+  <ellipse cx="130" cy="1000" rx="7" ry="2.6" class="thin"/>
+  <path d="M 123 1000 L 123 1008 A 7 2.6 0 0 0 137 1008 L 137 1000" class="thin"/>
+  <text x="180" y="1007" class="sub">BLOCK READS OR WRITES PERSISTENT STATE</text>
+  <text x="96" y="1032" class="tiny">SIGNAL READS LEFT TO RIGHT. SHEET CONNECTOR A CONTINUES THE UPPER TIER INTO THE LOWER TIER.</text>
+
+  <g>
+    <rect x="1104" y="856" width="460" height="160" class="rule"/>
+    <line x1="1104" y1="900" x2="1564" y2="900" class="rule"/>
+    <line x1="1104" y1="958" x2="1564" y2="958" class="rule"/>
+    <line x1="1104" y1="987" x2="1564" y2="987" class="rule"/>
+    <line x1="1360" y1="958" x2="1360" y2="1016" class="rule"/>
+    <text x="1120" y="887" class="tbold">ZEROBIONIC</text>
+    <text x="1548" y="887" class="sub" text-anchor="end">ASSISTIVE ROBOTICS</text>
+    <text x="1120" y="923" class="tiny">TITLE</text>
+    <text x="1120" y="946" class="lbl">SYSTEM DATA FLOW</text>
+    <text x="1120" y="978" class="sub">DOC ZBR-AF1-SW-001</text>
+    <text x="1376" y="978" class="sub">FIGURE 8</text>
+    <text x="1120" y="1007" class="sub">REV 0.1</text>
+    <text x="1376" y="1007" class="sub">SHEET 1 OF 1</text>
+  </g>
+</svg>

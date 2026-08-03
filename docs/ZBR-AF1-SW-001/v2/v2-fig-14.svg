@@ -1,0 +1,108 @@
+<svg viewBox="0 0 1000 620" xmlns="http://www.w3.org/2000/svg" fill="none">
+<defs>
+  <pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+    <line x1="0" y1="0" x2="0" y2="6" stroke="#DED6C4" stroke-width="1"/>
+  </pattern>
+  <pattern id="dot" width="8" height="8" patternUnits="userSpaceOnUse">
+    <circle cx="1" cy="1" r="0.6" fill="#8A8172"/>
+  </pattern>
+</defs>
+      <rect x="22" y="22" width="956" height="576"
+            fill="none" stroke="#B9B1A1" stroke-width="0.6"/>
+      <path d="M 18 34 L 18 18 L 34 18" stroke="#25231B" stroke-width="0.9" fill="none"/>
+      <path d="M 982 34 L 982 18 L 966 18" stroke="#25231B" stroke-width="0.9" fill="none"/>
+      <path d="M 18 586 L 18 602 L 34 602" stroke="#25231B" stroke-width="0.9" fill="none"/>
+      <path d="M 982 586 L 982 602 L 966 602" stroke="#25231B" stroke-width="0.9" fill="none"/>
+    <line x1="80" y1="120" x2="80" y2="490" stroke="#25231B" stroke-width="2"/><text x="80" y="106" font-size="14" fill="#25231B"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="2" font-style="normal">RAIL</text><line x1="80" y1="130" x2="120" y2="130" stroke="#25231B" stroke-width="1.4"/><rect x="120" y="110" width="80" height="40" fill="none" stroke="#25231B" stroke-width="1.4"/><line x1="140" y1="130" x2="180" y2="120" stroke="#25231B" stroke-width="1.8"/><circle cx="140" cy="130" r="3" fill="#25231B"/><circle cx="180" cy="120" r="3" fill="#25231B"/><text x="210" y="125" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">TUNNEL LOSS</text><text x="210" y="138" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="italic">trip: client raise</text><text x="500" y="133" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">lazy local STT/TTS, degraded flag, robot narrates it</text><line x1="80" y1="182" x2="120" y2="182" stroke="#25231B" stroke-width="1.4"/><rect x="120" y="162" width="80" height="40" fill="none" stroke="#25231B" stroke-width="1.4"/><line x1="140" y1="182" x2="180" y2="172" stroke="#25231B" stroke-width="1.8"/><circle cx="140" cy="182" r="3" fill="#25231B"/><circle cx="180" cy="172" r="3" fill="#25231B"/><text x="210" y="177" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">CAMERA ABSENT</text><text x="210" y="190" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="italic">trip: None from factory</text><text x="500" y="185" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">voice-only path, LLM told "you are blind"</text><line x1="80" y1="234" x2="120" y2="234" stroke="#25231B" stroke-width="1.4"/><rect x="120" y="214" width="80" height="40" fill="none" stroke="#25231B" stroke-width="1.4"/><line x1="140" y1="234" x2="180" y2="224" stroke="#25231B" stroke-width="1.8"/><circle cx="140" cy="234" r="3" fill="#25231B"/><circle cx="180" cy="224" r="3" fill="#25231B"/><text x="210" y="229" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">GPU SERVER SLOW</text><text x="210" y="242" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="italic">trip: embed timeout 3 s</text><text x="500" y="237" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">auto-degrade to hash embeddings for the session</text><line x1="80" y1="286" x2="120" y2="286" stroke="#25231B" stroke-width="1.4"/><rect x="120" y="266" width="80" height="40" fill="none" stroke="#25231B" stroke-width="1.4"/><line x1="140" y1="286" x2="180" y2="276" stroke="#25231B" stroke-width="1.8"/><circle cx="140" cy="286" r="3" fill="#25231B"/><circle cx="180" cy="276" r="3" fill="#25231B"/><text x="210" y="281" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">OLLAMA COLD/OOM</text><text x="210" y="294" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="italic">trip: stream error</text><text x="500" y="289" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">retry once, then say so; KV quantised to keep resident</text><line x1="80" y1="338" x2="120" y2="338" stroke="#25231B" stroke-width="1.4"/><rect x="120" y="318" width="80" height="40" fill="none" stroke="#25231B" stroke-width="1.4"/><line x1="140" y1="338" x2="180" y2="328" stroke="#25231B" stroke-width="1.8"/><circle cx="140" cy="338" r="3" fill="#25231B"/><circle cx="180" cy="328" r="3" fill="#25231B"/><text x="210" y="333" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">AUDIO DEVICE GONE</text><text x="210" y="346" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="italic">trip: PortAudio raise</text><text x="500" y="341" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">process refuses to start; systemd Restart=on-failure</text><line x1="80" y1="390" x2="120" y2="390" stroke="#25231B" stroke-width="1.4"/><rect x="120" y="370" width="80" height="40" fill="none" stroke="#25231B" stroke-width="1.4"/><line x1="140" y1="390" x2="180" y2="380" stroke="#25231B" stroke-width="1.8"/><circle cx="140" cy="390" r="3" fill="#25231B"/><circle cx="180" cy="380" r="3" fill="#25231B"/><text x="210" y="385" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">WHISPER HALLUCINATES</text><text x="210" y="398" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="italic">trip: gate: min words/ms/rms</text><text x="500" y="393" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">no phantom guest minted, corpus stays clean</text><line x1="80" y1="442" x2="120" y2="442" stroke="#25231B" stroke-width="1.4"/><rect x="120" y="422" width="80" height="40" fill="none" stroke="#25231B" stroke-width="1.4"/><line x1="140" y1="442" x2="180" y2="432" stroke="#25231B" stroke-width="1.8"/><circle cx="140" cy="442" r="3" fill="#25231B"/><circle cx="180" cy="432" r="3" fill="#25231B"/><text x="210" y="437" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">MEMORY DB LOCK</text><text x="210" y="450" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="italic">trip: sqlite busy</text><text x="500" y="445" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">skip write, retry next turn; WAL for readers</text><line x1="80" y1="494" x2="120" y2="494" stroke="#25231B" stroke-width="1.4"/><rect x="120" y="474" width="80" height="40" fill="none" stroke="#25231B" stroke-width="1.4"/><line x1="140" y1="494" x2="180" y2="484" stroke="#25231B" stroke-width="1.8"/><circle cx="140" cy="494" r="3" fill="#25231B"/><circle cx="180" cy="484" r="3" fill="#25231B"/><text x="210" y="489" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">CONTROL EXCEPTION</text><text x="210" y="502" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="italic">trip: handler catch</text><text x="500" y="497" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">HTTP 500 with 200-char excerpt; process survives</text>
+    <g transform="translate(520,460)">
+      <rect x="0" y="0" width="460" height="130" fill="none" stroke="#25231B" stroke-width="1"/>
+      <line x1="0" y1="30" x2="460" y2="30" stroke="#25231B" stroke-width="0.7"/>
+      <line x1="0" y1="72" x2="460" y2="72" stroke="#25231B" stroke-width="0.7"/>
+      <line x1="260" y1="30" x2="260" y2="130" stroke="#25231B" stroke-width="0.7"/>
+      <text x="10" y="22" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="2" font-style="normal">ZEROBIONIC</text>
+      <text x="450" y="22" font-size="14" fill="#8A8172"
+        text-anchor="end" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">AF-1 ASSISTIVE ROBOTICS</text>
+      <text x="10" y="52" font-size="11" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">TITLE</text>
+      <text x="10" y="66" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="1" font-style="normal">FAILURE TRIAGE  ·  BREAKER PANEL</text>
+      <text x="10" y="92" font-size="11" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">DOC</text>
+      <text x="10" y="106" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">ZBR-AF1-SW-001</text>
+      <text x="10" y="122" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">REV 0.1</text>
+      <text x="270" y="52" font-size="11" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">FIGURE</text>
+      <text x="270" y="66" font-size="21" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="2" font-style="normal">14</text>
+      <text x="270" y="92" font-size="11" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">SHEET</text>
+      <text x="270" y="106" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">1 OF 1</text>
+      <text x="270" y="122" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">SCALE N.T.S.</text>
+    </g></svg>

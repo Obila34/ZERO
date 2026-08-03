@@ -1,0 +1,108 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1080" width="1600" height="1080">
+  <style>
+    .ink   { fill:none; stroke:#25231B; stroke-width:2;   stroke-linejoin:round; stroke-linecap:round; }
+    .thin  { fill:none; stroke:#25231B; stroke-width:1.2; stroke-linejoin:round; stroke-linecap:round; }
+    .hair  { fill:none; stroke:#8A8172; stroke-width:1;   stroke-linejoin:round; stroke-linecap:round; }
+    .dash  { fill:none; stroke:#8A8172; stroke-width:1.2; stroke-dasharray:6 6; }
+    .sheet { fill:none; stroke:#25231B; stroke-width:1.6; }
+    .rule  { fill:none; stroke:#17150E; stroke-width:1.2; }
+    .acc   { fill:none; stroke:#D6480C; stroke-width:2;   stroke-linecap:round; }
+    .accd  { fill:none; stroke:#D6480C; stroke-width:1.2; stroke-dasharray:5 5; }
+    .barI  { fill:#25231B; stroke:none; }
+    .barA  { fill:#D6480C; stroke:none; }
+    .barG  { fill:#C9C3B8; stroke:none; }
+    .barN  { fill:none; stroke:#8A8172; stroke-width:1.2; stroke-dasharray:5 4; }
+    .band  { fill:#EFEBE4; stroke:none; }
+    .lbl   { font-family:"Courier New",monospace; font-size:16px; letter-spacing:1.8px; fill:#25231B; }
+    .row   { font-family:"Courier New",monospace; font-size:12.5px; letter-spacing:1.1px; fill:#25231B; }
+    .sub   { font-family:"Courier New",monospace; font-size:12.5px; letter-spacing:1.2px; fill:#8A8172; }
+    .tiny  { font-family:"Courier New",monospace; font-size:11px;  letter-spacing:1.0px; fill:#8A8172; }
+    .acclb { font-family:"Courier New",monospace; font-size:12px;  letter-spacing:1.4px; fill:#D6480C; }
+    .tbold { font-family:"Courier New",monospace; font-size:14px;  letter-spacing:1.6px; fill:#17150E; font-weight:bold; }
+  </style>
+  <rect width="1600" height="1080" fill="#FFFFFF"/>
+  <rect x="36" y="36" width="1528" height="1008" class="sheet"/>
+
+  <g class="hair">
+    <line x1="36" y1="96" x2="76" y2="96"/><line x1="96" y1="36" x2="96" y2="76"/>
+    <line x1="1524" y1="96" x2="1564" y2="96"/><line x1="1504" y1="36" x2="1504" y2="76"/>
+    <line x1="36" y1="984" x2="76" y2="984"/><line x1="96" y1="1004" x2="96" y2="1044"/>
+    <line x1="1524" y1="984" x2="1564" y2="984"/><line x1="1504" y1="1004" x2="1504" y2="1044"/>
+  </g>
+
+<rect x="470.0" y="240" width="395.8" height="330" class="band"/>
+  <rect x="865.8" y="240" width="237.5" height="330" fill="#F7F4EF"/>
+  <line x1="865.8" y1="240" x2="865.8" y2="570" class="dash"/>
+  <line x1="1103.3" y1="240" x2="1103.3" y2="570" class="dash"/>
+  <text x="667.9" y="228" class="tiny" text-anchor="middle">MOTION ACTIVE</text>
+  <text x="984.6" y="228" class="acclb" text-anchor="middle">LINGER 3.0 s</text>
+  <text x="1261.7" y="228" class="tiny" text-anchor="middle">STILL</text>
+  <text x="452" y="296" class="row" text-anchor="end">TIER 0 · MOTION</text>
+  <text x="452" y="316" class="tiny" text-anchor="end">EVERY FRAME</text>
+  <line x1="470" y1="300" x2="1420" y2="300" class="hair"/>
+  <rect x="470.0" y="289" width="950.0" height="22" rx="2" class="barI"/>
+  <text x="452" y="416" class="row" text-anchor="end">TIER 1 · DETECT</text>
+  <text x="452" y="436" class="tiny" text-anchor="end">GATED</text>
+  <line x1="470" y1="420" x2="1420" y2="420" class="hair"/>
+  <rect x="470.0" y="409" width="633.3" height="22" rx="2" class="barI"/>
+  <line x1="1103.3" y1="406" x2="1103.3" y2="434" class="ink"/>
+  <line x1="1261.7" y1="406" x2="1261.7" y2="434" class="ink"/>
+  <line x1="1420.0" y1="406" x2="1420.0" y2="434" class="ink"/>
+  <text x="452" y="536" class="row" text-anchor="end">TIER 2 · NARRATE</text>
+  <text x="452" y="556" class="tiny" text-anchor="end">3.0 s</text>
+  <line x1="470" y1="540" x2="1420" y2="540" class="hair"/>
+  <line x1="470.0" y1="526" x2="470.0" y2="554" class="ink"/>
+  <line x1="707.5" y1="526" x2="707.5" y2="554" class="ink"/>
+  <line x1="945.0" y1="526" x2="945.0" y2="554" class="ink"/>
+  <line x1="1182.5" y1="526" x2="1182.5" y2="554" class="ink"/>
+  <line x1="1420.0" y1="526" x2="1420.0" y2="554" class="ink"/>
+  <line x1="470" y1="600" x2="1420" y2="600" class="thin"/>
+  <line x1="470.0" y1="600" x2="470.0" y2="610" class="hair"/>
+  <text x="470.0" y="628" class="tiny" text-anchor="middle">0 s</text>
+  <line x1="549.2" y1="600" x2="549.2" y2="606" class="hair"/>
+  <line x1="628.3" y1="600" x2="628.3" y2="606" class="hair"/>
+  <line x1="707.5" y1="600" x2="707.5" y2="610" class="hair"/>
+  <text x="707.5" y="628" class="tiny" text-anchor="middle">3 s</text>
+  <line x1="786.7" y1="600" x2="786.7" y2="606" class="hair"/>
+  <line x1="865.8" y1="600" x2="865.8" y2="606" class="hair"/>
+  <line x1="945.0" y1="600" x2="945.0" y2="610" class="hair"/>
+  <text x="945.0" y="628" class="tiny" text-anchor="middle">6 s</text>
+  <line x1="1024.2" y1="600" x2="1024.2" y2="606" class="hair"/>
+  <line x1="1103.3" y1="600" x2="1103.3" y2="606" class="hair"/>
+  <line x1="1182.5" y1="600" x2="1182.5" y2="610" class="hair"/>
+  <text x="1182.5" y="628" class="tiny" text-anchor="middle">9 s</text>
+  <line x1="1261.7" y1="600" x2="1261.7" y2="606" class="hair"/>
+  <line x1="1340.8" y1="600" x2="1340.8" y2="606" class="hair"/>
+  <line x1="1420.0" y1="600" x2="1420.0" y2="610" class="hair"/>
+  <text x="1420.0" y="628" class="tiny" text-anchor="middle">12 s</text>
+  <text x="470" y="690" class="tbold">TIER 1 DUTY CEILING</text>
+  <rect x="470" y="706" width="700" height="26" class="thin"/>
+  <rect x="470" y="706" width="420" height="26" class="barI"/>
+  <line x1="890" y1="698" x2="890" y2="740" class="acc"/>
+  <text x="902" y="724" class="acclb">60% HARD CEILING</text>
+  <text x="470" y="756" class="tiny">THE CEILING IS INDEPENDENT OF MOTION AND OVERRIDES THE GATE.</text>
+  <line x1="96" y1="884" x2="1040" y2="884" class="rule"/>
+  <text x="96" y="906" class="tbold">LEGEND</text>
+  <rect x="100" y="935" width="60" height="14" rx="2" class="barI"/>
+  <text x="180" y="947" class="sub">RUNNING CONTINUOUSLY AT FULL CADENCE</text>
+  <line x1="130" y1="967" x2="130" y2="989" class="ink"/>
+  <text x="180" y="983" class="sub">A SINGLE GATED PASS</text>
+  <rect x="100" y="1005" width="60" height="18" class="band"/>
+  <text x="180" y="1019" class="sub">MOTION PRESENT IN THE SCENE</text>
+
+  <g>
+    <rect x="1104" y="884" width="460" height="160" class="rule"/>
+    <line x1="1104" y1="928" x2="1564" y2="928" class="rule"/>
+    <line x1="1104" y1="986" x2="1564" y2="986" class="rule"/>
+    <line x1="1104" y1="1015" x2="1564" y2="1015" class="rule"/>
+    <line x1="1360" y1="986" x2="1360" y2="1044" class="rule"/>
+    <text x="1120" y="915" class="tbold">ZEROBIONIC</text>
+    <text x="1548" y="915" class="sub" text-anchor="end">ASSISTIVE ROBOTICS</text>
+    <text x="1120" y="951" class="tiny">TITLE</text>
+    <text x="1120" y="974" class="lbl">PERCEPTION TIER CADENCE</text>
+    <text x="1120" y="1006" class="sub">DOC ZBR-AF1-SW-001</text>
+    <text x="1376" y="1006" class="sub">FIGURE 4</text>
+    <text x="1120" y="1035" class="sub">REV 0.1</text>
+    <text x="1376" y="1035" class="sub">SHEET 1 OF 1</text>
+  </g>
+</svg>

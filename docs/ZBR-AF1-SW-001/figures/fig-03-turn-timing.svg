@@ -1,0 +1,141 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1080" width="1600" height="1080">
+  <style>
+    .ink   { fill:none; stroke:#25231B; stroke-width:2;   stroke-linejoin:round; stroke-linecap:round; }
+    .thin  { fill:none; stroke:#25231B; stroke-width:1.2; stroke-linejoin:round; stroke-linecap:round; }
+    .hair  { fill:none; stroke:#8A8172; stroke-width:1;   stroke-linejoin:round; stroke-linecap:round; }
+    .dash  { fill:none; stroke:#8A8172; stroke-width:1.2; stroke-dasharray:6 6; }
+    .sheet { fill:none; stroke:#25231B; stroke-width:1.6; }
+    .rule  { fill:none; stroke:#17150E; stroke-width:1.2; }
+    .acc   { fill:none; stroke:#D6480C; stroke-width:2;   stroke-linecap:round; }
+    .accd  { fill:none; stroke:#D6480C; stroke-width:1.2; stroke-dasharray:5 5; }
+    .barI  { fill:#25231B; stroke:none; }
+    .barA  { fill:#D6480C; stroke:none; }
+    .barG  { fill:#C9C3B8; stroke:none; }
+    .barN  { fill:none; stroke:#8A8172; stroke-width:1.2; stroke-dasharray:5 4; }
+    .band  { fill:#EFEBE4; stroke:none; }
+    .lbl   { font-family:"Courier New",monospace; font-size:16px; letter-spacing:1.8px; fill:#25231B; }
+    .row   { font-family:"Courier New",monospace; font-size:12.5px; letter-spacing:1.1px; fill:#25231B; }
+    .sub   { font-family:"Courier New",monospace; font-size:12.5px; letter-spacing:1.2px; fill:#8A8172; }
+    .tiny  { font-family:"Courier New",monospace; font-size:11px;  letter-spacing:1.0px; fill:#8A8172; }
+    .acclb { font-family:"Courier New",monospace; font-size:12px;  letter-spacing:1.4px; fill:#D6480C; }
+    .tbold { font-family:"Courier New",monospace; font-size:14px;  letter-spacing:1.6px; fill:#17150E; font-weight:bold; }
+  </style>
+  <rect width="1600" height="1080" fill="#FFFFFF"/>
+  <rect x="36" y="36" width="1528" height="1008" class="sheet"/>
+
+  <g class="hair">
+    <line x1="36" y1="96" x2="76" y2="96"/><line x1="96" y1="36" x2="96" y2="76"/>
+    <line x1="1524" y1="96" x2="1564" y2="96"/><line x1="1504" y1="36" x2="1504" y2="76"/>
+    <line x1="36" y1="984" x2="76" y2="984"/><line x1="96" y1="1004" x2="96" y2="1044"/>
+    <line x1="1524" y1="984" x2="1564" y2="984"/><line x1="1504" y1="1004" x2="1504" y2="1044"/>
+  </g>
+
+<rect x="470.0" y="160" width="970.0" height="22" class="hair"/>
+  <text x="718.0" y="176" class="tiny" text-anchor="middle">LISTENING</text>
+  <line x1="966.0" y1="160" x2="966.0" y2="182" class="thin"/>
+  <text x="993.6" y="152" class="tiny" text-anchor="middle">THINKING</text>
+  <line x1="1021.1" y1="160" x2="1021.1" y2="182" class="thin"/>
+  <text x="1230.6" y="176" class="tiny" text-anchor="middle">SPEAKING</text>
+  <rect x="470.0" y="190" width="396.8" height="552" class="band"/>
+  <text x="668.4" y="736" class="tiny" text-anchor="middle">USER SPEAKING</text>
+  <rect x="470" y="190" width="970" height="552" class="hair"/>
+  <text x="452" y="221" class="row" text-anchor="end">MIC CAPTURE</text>
+  <line x1="470" y1="234" x2="1440" y2="234" class="hair" opacity="0.45"/>
+  <rect x="470.0" y="209" width="496.0" height="14" rx="2" class="barI"/>
+  <rect x="966.0" y="209" width="474.0" height="14" rx="2" class="barN"/>
+  <text x="976.0" y="220" class="tiny">PAUSED, ECHO GUARD</text>
+  <text x="452" y="258" class="row" text-anchor="end">CAMERASTREAM</text>
+  <line x1="470" y1="271" x2="1440" y2="271" class="hair" opacity="0.45"/>
+  <rect x="470.0" y="246" width="970.0" height="14" rx="2" class="barI"/>
+  <text x="452" y="295" class="row" text-anchor="end">EYES</text>
+  <line x1="470" y1="308" x2="1440" y2="308" class="hair" opacity="0.45"/>
+  <rect x="470.0" y="283" width="970.0" height="14" rx="2" class="barI"/>
+  <text x="452" y="332" class="row" text-anchor="end">ENDPOINTER</text>
+  <line x1="470" y1="345" x2="1440" y2="345" class="hair" opacity="0.45"/>
+  <rect x="470.0" y="320" width="496.0" height="14" rx="2" class="barI"/>
+  <text x="452" y="369" class="row" text-anchor="end">STT-SPEC</text>
+  <line x1="470" y1="382" x2="1440" y2="382" class="hair" opacity="0.45"/>
+  <rect x="767.6" y="357" width="132.3" height="14" rx="2" class="barA"/>
+  <text x="452" y="406" class="row" text-anchor="end">STT  FINAL</text>
+  <line x1="470" y1="419" x2="1440" y2="419" class="hair" opacity="0.45"/>
+  <rect x="966.0" y="394" width="187.4" height="14" rx="2" class="barN"/>
+  <text x="976.0" y="405" class="tiny">SKIPPED, SPECULATION REUSED</text>
+  <text x="452" y="443" class="row" text-anchor="end">IDENTITY</text>
+  <line x1="470" y1="456" x2="1440" y2="456" class="hair" opacity="0.45"/>
+  <rect x="966.0" y="431" width="55.1" height="14" rx="2" class="barI"/>
+  <text x="452" y="480" class="row" text-anchor="end">DIARIZE</text>
+  <line x1="470" y1="493" x2="1440" y2="493" class="hair" opacity="0.45"/>
+  <rect x="966.0" y="468" width="39.7" height="14" rx="2" class="barI"/>
+  <text x="452" y="517" class="row" text-anchor="end">AFFECT</text>
+  <line x1="470" y1="530" x2="1440" y2="530" class="hair" opacity="0.45"/>
+  <rect x="966.0" y="505" width="39.7" height="14" rx="2" class="barI"/>
+  <text x="452" y="554" class="row" text-anchor="end">RECALL</text>
+  <line x1="470" y1="567" x2="1440" y2="567" class="hair" opacity="0.45"/>
+  <rect x="966.0" y="542" width="66.1" height="14" rx="2" class="barA"/>
+  <text x="452" y="591" class="row" text-anchor="end">LLM-STREAM</text>
+  <line x1="470" y1="604" x2="1440" y2="604" class="hair" opacity="0.45"/>
+  <rect x="1010.1" y="579" width="381.4" height="14" rx="2" class="barI"/>
+  <text x="452" y="628" class="row" text-anchor="end">BARGEIN</text>
+  <line x1="470" y1="641" x2="1440" y2="641" class="hair" opacity="0.45"/>
+  <rect x="1021.1" y="616" width="418.9" height="14" rx="2" class="barI"/>
+  <text x="452" y="665" class="row" text-anchor="end">FILLER AUDIO</text>
+  <line x1="470" y1="678" x2="1440" y2="678" class="hair" opacity="0.45"/>
+  <rect x="1153.4" y="653" width="110.2" height="14" rx="2" class="barA"/>
+  <text x="452" y="702" class="row" text-anchor="end">TTS-PRODUCER</text>
+  <line x1="470" y1="715" x2="1440" y2="715" class="hair" opacity="0.45"/>
+  <rect x="1186.5" y="690" width="99.2" height="14" rx="2" class="barI"/>
+  <text x="452" y="739" class="row" text-anchor="end">REPLY AUDIO</text>
+  <line x1="470" y1="752" x2="1440" y2="752" class="hair" opacity="0.45"/>
+  <rect x="1268.0" y="727" width="172.0" height="14" rx="2" class="barA"/>
+  <line x1="470" y1="752" x2="1440" y2="752" class="thin"/>
+  <line x1="470.0" y1="752" x2="470.0" y2="760" class="hair"/>
+  <text x="470.0" y="778" class="tiny" text-anchor="middle">0.0s</text>
+  <line x1="580.2" y1="752" x2="580.2" y2="760" class="hair"/>
+  <text x="580.2" y="778" class="tiny" text-anchor="middle">0.5s</text>
+  <line x1="690.5" y1="752" x2="690.5" y2="760" class="hair"/>
+  <text x="690.5" y="778" class="tiny" text-anchor="middle">1.0s</text>
+  <line x1="800.7" y1="752" x2="800.7" y2="760" class="hair"/>
+  <text x="800.7" y="778" class="tiny" text-anchor="middle">1.5s</text>
+  <line x1="910.9" y1="752" x2="910.9" y2="760" class="hair"/>
+  <text x="910.9" y="778" class="tiny" text-anchor="middle">2.0s</text>
+  <line x1="1021.1" y1="752" x2="1021.1" y2="760" class="hair"/>
+  <text x="1021.1" y="778" class="tiny" text-anchor="middle">2.5s</text>
+  <line x1="1131.4" y1="752" x2="1131.4" y2="760" class="hair"/>
+  <text x="1131.4" y="778" class="tiny" text-anchor="middle">3.0s</text>
+  <line x1="1241.6" y1="752" x2="1241.6" y2="760" class="hair"/>
+  <text x="1241.6" y="778" class="tiny" text-anchor="middle">3.5s</text>
+  <line x1="1351.8" y1="752" x2="1351.8" y2="760" class="hair"/>
+  <text x="1351.8" y="778" class="tiny" text-anchor="middle">4.0s</text>
+  <line x1="866.8" y1="190" x2="866.8" y2="792" class="accd"/>
+  <text x="866.8" y="806" class="acclb" text-anchor="middle">SPEECH ENDS</text>
+  <line x1="966.0" y1="190" x2="966.0" y2="818" class="accd"/>
+  <text x="966.0" y="832" class="acclb" text-anchor="middle">ENDPOINT CONFIRMED</text>
+  <line x1="1032.2" y1="190" x2="1032.2" y2="844" class="accd"/>
+  <text x="1032.2" y="858" class="acclb" text-anchor="middle">RECALL BUDGET 300 ms</text>
+  <line x1="1268.0" y1="190" x2="1268.0" y2="792" class="accd"/>
+  <text x="1268.0" y="806" class="acclb" text-anchor="middle">FIRST REPLY AUDIO</text>
+  <line x1="96" y1="884" x2="1040" y2="884" class="rule"/>
+  <text x="96" y="906" class="tbold">LEGEND</text>
+  <rect x="100" y="935" width="60" height="14" rx="2" class="barI"/>
+  <text x="180" y="947" class="sub">THREAD ACTIVE</text>
+  <rect x="100" y="971" width="60" height="14" rx="2" class="barA"/>
+  <text x="180" y="983" class="sub">ON THE CRITICAL PATH TO FIRST AUDIO</text>
+  <rect x="100" y="1007" width="60" height="14" rx="2" class="barN"/>
+  <text x="180" y="1019" class="sub">THREAD NOT RUN THIS TURN</text>
+
+  <g>
+    <rect x="1104" y="884" width="460" height="160" class="rule"/>
+    <line x1="1104" y1="928" x2="1564" y2="928" class="rule"/>
+    <line x1="1104" y1="986" x2="1564" y2="986" class="rule"/>
+    <line x1="1104" y1="1015" x2="1564" y2="1015" class="rule"/>
+    <line x1="1360" y1="986" x2="1360" y2="1044" class="rule"/>
+    <text x="1120" y="915" class="tbold">ZEROBIONIC</text>
+    <text x="1548" y="915" class="sub" text-anchor="end">ASSISTIVE ROBOTICS</text>
+    <text x="1120" y="951" class="tiny">TITLE</text>
+    <text x="1120" y="974" class="lbl">TURN TIMING CHART</text>
+    <text x="1120" y="1006" class="sub">DOC ZBR-AF1-SW-001</text>
+    <text x="1376" y="1006" class="sub">FIGURE 3</text>
+    <text x="1120" y="1035" class="sub">REV 0.1</text>
+    <text x="1376" y="1035" class="sub">SHEET 1 OF 1</text>
+  </g>
+</svg>

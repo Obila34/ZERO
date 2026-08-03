@@ -1,0 +1,183 @@
+<svg viewBox="0 0 1200 700" xmlns="http://www.w3.org/2000/svg" fill="none">
+<defs>
+  <pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+    <line x1="0" y1="0" x2="0" y2="6" stroke="#DED6C4" stroke-width="1"/>
+  </pattern>
+  <pattern id="dot" width="8" height="8" patternUnits="userSpaceOnUse">
+    <circle cx="1" cy="1" r="0.6" fill="#8A8172"/>
+  </pattern>
+</defs>
+      <rect x="22" y="22" width="1156" height="656"
+            fill="none" stroke="#B9B1A1" stroke-width="0.6"/>
+      <path d="M 18 34 L 18 18 L 34 18" stroke="#25231B" stroke-width="0.9" fill="none"/>
+      <path d="M 1182 34 L 1182 18 L 1166 18" stroke="#25231B" stroke-width="0.9" fill="none"/>
+      <path d="M 18 666 L 18 682 L 34 682" stroke="#25231B" stroke-width="0.9" fill="none"/>
+      <path d="M 1182 666 L 1182 682 L 1166 682" stroke="#25231B" stroke-width="0.9" fill="none"/>
+    
+      <!-- crown -->
+      <rect x="218" y="241" width="44" height="24" fill="none" stroke="#25231B" stroke-width="1.6"/>
+      <rect x="224" y="235" width="32" height="8"  fill="none" stroke="#25231B" stroke-width="1.2"/>
+      <!-- sensor block -->
+      <path d="
+        M 154 265 L 326 265 L 340 279
+        L 340 401 L 326 415 L 154 415
+        L 140 401 L 140 279 Z
+      " fill="none" stroke="#25231B" stroke-width="2"/>
+      <!-- visor slot -->
+      <rect x="156" y="320" width="168" height="30" rx="6" fill="url(#hatch)" stroke="#25231B" stroke-width="1.4"/>
+      <circle cx="192" cy="335" r="8"  fill="none" stroke="#25231B" stroke-width="1.2"/>
+      <circle cx="192" cy="335" r="4"  fill="#25231B"/>
+      <circle cx="288" cy="335" r="8"  fill="none" stroke="#25231B" stroke-width="1.2"/>
+      <circle cx="288" cy="335" r="4"  fill="#25231B"/>
+      <!-- mic grille -->
+      <line x1="186" y1="370" x2="186" y2="392" stroke="#25231B" stroke-width="1.1"/><line x1="198" y1="370" x2="198" y2="392" stroke="#25231B" stroke-width="1.1"/><line x1="210" y1="370" x2="210" y2="392" stroke="#25231B" stroke-width="1.1"/><line x1="222" y1="370" x2="222" y2="392" stroke="#25231B" stroke-width="1.1"/><line x1="234" y1="370" x2="234" y2="392" stroke="#25231B" stroke-width="1.1"/><line x1="246" y1="370" x2="246" y2="392" stroke="#25231B" stroke-width="1.1"/><line x1="258" y1="370" x2="258" y2="392" stroke="#25231B" stroke-width="1.1"/><line x1="270" y1="370" x2="270" y2="392" stroke="#25231B" stroke-width="1.1"/><line x1="282" y1="370" x2="282" y2="392" stroke="#25231B" stroke-width="1.1"/><line x1="294" y1="370" x2="294" y2="392" stroke="#25231B" stroke-width="1.1"/>
+      <!-- neck stub -->
+      <rect x="200" y="415" width="80" height="18" fill="none" stroke="#25231B" stroke-width="1.6"/>
+      <text x="240" y="461" font-size="19" fill="#25231B"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="2" font-style="normal">AF-1 HEAD  ·  RASPBERRY PI 5</text>
+      <text x="240" y="479" font-size="16" fill="#8A8172"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="italic">real-time capture, wake, VAD, loop</text>
+    
+      <!-- rack shell -->
+      <rect x="870" y="250" width="180" height="220" fill="none" stroke="#25231B" stroke-width="1.6"/>
+      <!-- five slots for five servers -->
+      
+          <rect x="880" y="262" width="160" height="34" fill="none" stroke="#25231B" stroke-width="1"/>
+          <circle cx="888" cy="279" r="3" fill="#B85425"/>
+          <text x="898" y="282" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">Whisper</text>
+          <text x="1032" y="282" font-size="14" fill="#8A8172"
+        text-anchor="end" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">:9000</text>
+          <!-- fan slats -->
+          <line x1="970" y1="268" x2="970" y2="290" stroke="#8A8172" stroke-width="0.4"/><line x1="974" y1="268" x2="974" y2="290" stroke="#8A8172" stroke-width="0.4"/><line x1="978" y1="268" x2="978" y2="290" stroke="#8A8172" stroke-width="0.4"/><line x1="982" y1="268" x2="982" y2="290" stroke="#8A8172" stroke-width="0.4"/><line x1="986" y1="268" x2="986" y2="290" stroke="#8A8172" stroke-width="0.4"/><line x1="990" y1="268" x2="990" y2="290" stroke="#8A8172" stroke-width="0.4"/>
+        
+          <rect x="880" y="304" width="160" height="34" fill="none" stroke="#25231B" stroke-width="1"/>
+          <circle cx="888" cy="321" r="3" fill="#B85425"/>
+          <text x="898" y="324" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">Orpheus</text>
+          <text x="1032" y="324" font-size="14" fill="#8A8172"
+        text-anchor="end" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">:9100</text>
+          <!-- fan slats -->
+          <line x1="970" y1="310" x2="970" y2="332" stroke="#8A8172" stroke-width="0.4"/><line x1="974" y1="310" x2="974" y2="332" stroke="#8A8172" stroke-width="0.4"/><line x1="978" y1="310" x2="978" y2="332" stroke="#8A8172" stroke-width="0.4"/><line x1="982" y1="310" x2="982" y2="332" stroke="#8A8172" stroke-width="0.4"/><line x1="986" y1="310" x2="986" y2="332" stroke="#8A8172" stroke-width="0.4"/><line x1="990" y1="310" x2="990" y2="332" stroke="#8A8172" stroke-width="0.4"/>
+        
+          <rect x="880" y="346" width="160" height="34" fill="none" stroke="#25231B" stroke-width="1"/>
+          <circle cx="888" cy="363" r="3" fill="#B85425"/>
+          <text x="898" y="366" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">Vision</text>
+          <text x="1032" y="366" font-size="14" fill="#8A8172"
+        text-anchor="end" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">:8000</text>
+          <!-- fan slats -->
+          <line x1="970" y1="352" x2="970" y2="374" stroke="#8A8172" stroke-width="0.4"/><line x1="974" y1="352" x2="974" y2="374" stroke="#8A8172" stroke-width="0.4"/><line x1="978" y1="352" x2="978" y2="374" stroke="#8A8172" stroke-width="0.4"/><line x1="982" y1="352" x2="982" y2="374" stroke="#8A8172" stroke-width="0.4"/><line x1="986" y1="352" x2="986" y2="374" stroke="#8A8172" stroke-width="0.4"/><line x1="990" y1="352" x2="990" y2="374" stroke="#8A8172" stroke-width="0.4"/>
+        
+          <rect x="880" y="388" width="160" height="34" fill="none" stroke="#25231B" stroke-width="1"/>
+          <circle cx="888" cy="405" r="3" fill="#B85425"/>
+          <text x="898" y="408" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">Ollama</text>
+          <text x="1032" y="408" font-size="14" fill="#8A8172"
+        text-anchor="end" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">:11434</text>
+          <!-- fan slats -->
+          <line x1="970" y1="394" x2="970" y2="416" stroke="#8A8172" stroke-width="0.4"/><line x1="974" y1="394" x2="974" y2="416" stroke="#8A8172" stroke-width="0.4"/><line x1="978" y1="394" x2="978" y2="416" stroke="#8A8172" stroke-width="0.4"/><line x1="982" y1="394" x2="982" y2="416" stroke="#8A8172" stroke-width="0.4"/><line x1="986" y1="394" x2="986" y2="416" stroke="#8A8172" stroke-width="0.4"/><line x1="990" y1="394" x2="990" y2="416" stroke="#8A8172" stroke-width="0.4"/>
+        
+          <rect x="880" y="430" width="160" height="34" fill="none" stroke="#25231B" stroke-width="1"/>
+          <circle cx="888" cy="447" r="3" fill="#B85425"/>
+          <text x="898" y="450" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">SearXNG</text>
+          <text x="1032" y="450" font-size="14" fill="#8A8172"
+        text-anchor="end" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">:8080</text>
+          <!-- fan slats -->
+          <line x1="970" y1="436" x2="970" y2="458" stroke="#8A8172" stroke-width="0.4"/><line x1="974" y1="436" x2="974" y2="458" stroke="#8A8172" stroke-width="0.4"/><line x1="978" y1="436" x2="978" y2="458" stroke="#8A8172" stroke-width="0.4"/><line x1="982" y1="436" x2="982" y2="458" stroke="#8A8172" stroke-width="0.4"/><line x1="986" y1="436" x2="986" y2="458" stroke="#8A8172" stroke-width="0.4"/><line x1="990" y1="436" x2="990" y2="458" stroke="#8A8172" stroke-width="0.4"/>
+        
+      <text x="960" y="488" font-size="16" fill="#25231B"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">GPU NODE  ·  five model servers</text>
+      <text x="960" y="501" font-size="14" fill="#8A8172"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">each restartable on its own</text>
+    <path d="M 340 300 C 440 290, 770 310, 870 300"
+                fill="none" stroke="#25231B" stroke-width="1"/><text x="605" y="296" font-size="12" fill="#8A8172"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">:9000 whisper</text><path d="M 340 320 C 440 310, 770 330, 870 320"
+                fill="none" stroke="#25231B" stroke-width="1"/><text x="605" y="316" font-size="12" fill="#8A8172"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">:9100 orpheus</text><path d="M 340 340 C 440 330, 770 350, 870 340"
+                fill="none" stroke="#25231B" stroke-width="1"/><text x="605" y="336" font-size="12" fill="#8A8172"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">:8000 vision</text><path d="M 340 360 C 440 350, 770 370, 870 360"
+                fill="none" stroke="#25231B" stroke-width="1"/><text x="605" y="356" font-size="12" fill="#8A8172"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">:8080 searxng</text><path d="M 340 380 C 440 370, 770 390, 870 380"
+                fill="none" stroke="#B85425" stroke-width="1.6"/><text x="605" y="392" font-size="12" fill="#B85425"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="0" font-style="normal">:11435 → :11434 ollama</text>
+      <path d="M 334 294 C 450 284, 760 304, 876 294"
+            fill="none" stroke="#8A8172" stroke-width="0.6" stroke-dasharray="4 3"/>
+      <path d="M 334 386 C 450 376, 760 396, 876 386"
+            fill="none" stroke="#8A8172" stroke-width="0.6" stroke-dasharray="4 3"/>
+      <text x="605" y="278" font-size="14" fill="#8A8172"
+        text-anchor="middle" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">SSH TUNNEL (autossh) · single sheath, five conductors</text>
+    <polyline points="350,380 335,380 320,570"
+        stroke="#8A8172" stroke-width="0.9" fill="none"/><circle cx="350" cy="380" r="2" fill="#25231B"/><rect x="318.5" y="568.5" width="3" height="3" fill="#25231B"/><text x="326" y="579" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">nothing here is exposed to the internet;</text><text x="326" y="582" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">a stall is rebuilt inside ~45 s by autossh.</text><polyline points="860,380 590,380 320,600"
+        stroke="#8A8172" stroke-width="0.9" fill="none"/><circle cx="860" cy="380" r="2" fill="#B85425"/><rect x="318.5" y="598.5" width="3" height="3" fill="#B85425"/><text x="326" y="609" font-size="16" fill="#B85425"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">ollama alone shifts number in flight, so a</text><text x="326" y="612" font-size="16" fill="#B85425"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">local pi ollama can keep 11434 for itself.</text>
+    <g transform="translate(720,540)">
+      <rect x="0" y="0" width="460" height="130" fill="none" stroke="#25231B" stroke-width="1"/>
+      <line x1="0" y1="30" x2="460" y2="30" stroke="#25231B" stroke-width="0.7"/>
+      <line x1="0" y1="72" x2="460" y2="72" stroke="#25231B" stroke-width="0.7"/>
+      <line x1="260" y1="30" x2="260" y2="130" stroke="#25231B" stroke-width="0.7"/>
+      <text x="10" y="22" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="2" font-style="normal">ZEROBIONIC</text>
+      <text x="450" y="22" font-size="14" fill="#8A8172"
+        text-anchor="end" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">AF-1 ASSISTIVE ROBOTICS</text>
+      <text x="10" y="52" font-size="11" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">TITLE</text>
+      <text x="10" y="66" font-size="16" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="1" font-style="normal">TWO-MACHINE NERVOUS SYSTEM</text>
+      <text x="10" y="92" font-size="11" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">DOC</text>
+      <text x="10" y="106" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">ZBR-AF1-SW-001</text>
+      <text x="10" y="122" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">REV 0.1</text>
+      <text x="270" y="52" font-size="11" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">FIGURE</text>
+      <text x="270" y="66" font-size="21" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="bold"
+        letter-spacing="2" font-style="normal">2</text>
+      <text x="270" y="92" font-size="11" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="1" font-style="normal">SHEET</text>
+      <text x="270" y="106" font-size="14" fill="#25231B"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">1 OF 1</text>
+      <text x="270" y="122" font-size="12" fill="#8A8172"
+        text-anchor="start" font-family="Courier New, monospace" font-weight="normal"
+        letter-spacing="0" font-style="normal">SCALE N.T.S.</text>
+    </g></svg>

@@ -37,6 +37,43 @@ CUE_TO_CLIP = {
 # carries emotion in-band via cue tags, so mood is a no-op on that path.
 MOOD_RATE = {"down": 1.08, "calm": 1.03, "excited": 0.94, "frustrated": 0.97}
 
+# Moods that get the "smile voice": a smile shortens the vocal tract and
+# brightens 2-4 kHz — audible over a phone with no video. A gentle high-shelf
+# fakes the same physics on the synthesized waveform.
+_SMILE_MOODS = frozenset(("excited",))
+
+
+class _SmileShelf:
+    """RBJ high-shelf biquad (+`db` above `f0`), direct-form-II-transposed with
+    carried state so streamed chunks join without a seam. Pure numpy — this
+    must add ~zero latency and no dependencies to the synthesis path."""
+
+    def __init__(self, sample_rate: int, f0: float = 2800.0, db: float = 2.5):
+        import math
+
+        a = 10.0 ** (db / 40.0)
+        w0 = 2.0 * math.pi * f0 / sample_rate
+        cw, sw = math.cos(w0), math.sin(w0)
+        alpha = sw / 2.0 * math.sqrt((a + 1 / a) * (1 / 0.9 - 1) + 2)
+        b0 = a * ((a + 1) + (a - 1) * cw + 2 * math.sqrt(a) * alpha)
+        b1 = -2 * a * ((a - 1) + (a + 1) * cw)
+        b2 = a * ((a + 1) + (a - 1) * cw - 2 * math.sqrt(a) * alpha)
+        a0 = (a + 1) - (a - 1) * cw + 2 * math.sqrt(a) * alpha
+        a1 = 2 * ((a - 1) - (a + 1) * cw)
+        a2 = (a + 1) - (a - 1) * cw - 2 * math.sqrt(a) * alpha
+        self._b = np.array([b0, b1, b2], dtype=np.float64) / a0
+        self._a = np.array([1.0, a1 / a0, a2 / a0], dtype=np.float64)
+        self._zi = np.zeros(2, dtype=np.float64)
+
+    def process(self, x: np.ndarray) -> np.ndarray:
+        # scipy's C lfilter (already a dependency via mic resampling) — a pure
+        # Python loop here would cost more than the whole TTS chunk on a Pi.
+        from scipy.signal import lfilter
+
+        y, self._zi = lfilter(self._b, self._a, x.astype(np.float64),
+                              zi=self._zi)
+        return np.clip(y, -1.0, 1.0).astype(np.float32)
+
 _CUE_RE = re.compile(r"(\[[a-z]+\])")
 _SENTENCE_RE = re.compile(r"(.+?(?:[.!?…]+|\n|$))", re.S)
 
@@ -113,6 +150,18 @@ class VoiceOrchestrator:
         self-state narration (Phase 7) reads this to be honest about it."""
         return bool(getattr(self.tts, "degraded", False))
 
+    def _smile(self) -> "_SmileShelf | None":
+        """Fresh smile filter when the current mood calls for one. Fresh per
+        reply/sentence so filter state can never leak across utterances; the
+        try guards a missing scipy (then the voice just doesn't brighten)."""
+        if self._mood not in _SMILE_MOODS:
+            return None
+        try:
+            return _SmileShelf(self.sample_rate)
+        except Exception as e:
+            log.debug("smile shelf unavailable: %s", e)
+            return None
+
     # -- public API ---------------------------------------------------------
     def synthesize(self, text: str) -> np.ndarray:
         text = text.strip()
@@ -120,8 +169,13 @@ class VoiceOrchestrator:
             return np.zeros(0, dtype=np.float32)
         if self.engine_name in ("fish", "orpheus"):
             # These perform cues natively; the engine handles cue translation.
-            return self.tts.synthesize(text)
-        return self._synthesize_piper(text)
+            audio = self.tts.synthesize(text)
+        else:
+            audio = self._synthesize_piper(text)
+        shelf = self._smile()
+        if shelf is not None and getattr(audio, "size", 0):
+            audio = shelf.process(audio)
+        return audio
 
     def synthesize_stream(self, text: str):
         """Yield audio chunks as they're produced (real streaming for Orpheus;
@@ -129,12 +183,16 @@ class VoiceOrchestrator:
         text = text.strip()
         if not text:
             return
+        shelf = self._smile()
         if self.engine_name in ("fish", "orpheus"):
-            yield from self.tts.synthesize_stream(text)
+            for chunk in self.tts.synthesize_stream(text):
+                if shelf is not None and getattr(chunk, "size", 0):
+                    chunk = shelf.process(chunk)
+                yield chunk
         else:
             audio = self._synthesize_piper(text)
             if getattr(audio, "size", 0):
-                yield audio
+                yield shelf.process(audio) if shelf is not None else audio
 
     # -- Piper path: split on cues, synthesize words, splice clips -----------
     def _synthesize_piper(self, text: str) -> np.ndarray:
