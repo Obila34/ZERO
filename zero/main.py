@@ -26,8 +26,8 @@ from zero.events import EventBus
 from zero.factory import (
     build_corpus, build_endpointer, build_guests, build_identity,
     build_learning_loop, build_llm, build_memory, build_perception,
-    build_privacy, build_proactive, build_stt, build_tools, build_vision,
-    build_voice, build_voiceid, build_wake,
+    build_privacy, build_proactive, build_stt, build_tools,
+    build_turn_detector, build_vision, build_voice, build_voiceid, build_wake,
 )
 from zero.privacy.guard import parse_forget_command
 from zero.identity.service import parse_enroll_command, parse_enrollment
@@ -196,6 +196,9 @@ class Zero:
                 prebuffer_ms=self.cfg.get("tts.orpheus.prebuffer_ms", 0))
             self.wake = build_wake(self.cfg)
             self.endpointer = build_endpointer(self.cfg)
+            # Audio-first end-of-turn detector (Smart Turn v3); None = use the
+            # text-based ends_mid_thought heuristic. Read from audio at each pause.
+            self.turn = build_turn_detector(self.cfg)
             self.stt = build_stt(self.cfg)
             self.voice = build_voice(self.cfg)
             # Eyes: always-on camera + detection (or None if vision disabled /
@@ -626,11 +629,24 @@ class Zero:
                 t.start()
 
             def _hold() -> bool | None:
-                # Semantic endpointing, tri-state: the speculative transcript for
-                # THIS pause says finished (False), mid-thought (True) — or it's
-                # STILL IN FLIGHT (None), in which case the endpointer waits a
-                # bounded beat instead of racing the STT round trip. That race is
-                # why half-sentences ("...give me a bit of the") used to ship.
+                # Audio-first end-of-turn (Smart Turn v3): judge whether the turn
+                # is finished straight from the waveform at THIS pause — prosody,
+                # intonation, rhythm — no transcript needed. It's authoritative
+                # when it can decide; we fall through to the text heuristic only
+                # when it's off or undecided (too little audio / model error).
+                if self.turn is not None:
+                    audio = spec.get("audio")
+                    if audio is not None:
+                        done = self.turn.complete(
+                            audio.astype("float32") / 32768.0)
+                        if done is not None:
+                            # finished -> don't hold; mid-thought -> hold one more
+                            return not done
+                # Text fallback, tri-state: the speculative transcript for THIS
+                # pause says finished (False), mid-thought (True) — or it's STILL
+                # IN FLIGHT (None), in which case the endpointer waits a bounded
+                # beat instead of racing the STT round trip. That race is why
+                # half-sentences ("...give me a bit of the") used to ship.
                 res = spec.get("res") or {}
                 text = res.get("text")
                 if text is None:

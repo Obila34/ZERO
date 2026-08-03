@@ -248,6 +248,47 @@ class SileroEndpointer(_BaseEndpointer):
         return self._last_prob >= self._threshold
 
 
+class TenEndpointer(_BaseEndpointer):
+    """TEN VAD (frame-level) via its WebAssembly build — see zero/vad/ten_wasm.py
+    for why wasm (no glibc-ARM64 native build exists). TEN VAD needs exactly
+    256-sample hops at 16 kHz, but our frames are 480 (30 ms), so we buffer and
+    feed whole hops in order, carrying the model's recurrent state between them.
+    The wasm is smoke-tested at construction so a bad model/runtime raises here
+    and build_endpointer() falls back to webrtc rather than deafening the mic."""
+
+    _HOP = 256  # samples @ 16 kHz that TEN VAD demands per frame
+
+    def __init__(self, wasm_model: str | None = None, threshold: float = 0.5, **kw):
+        super().__init__(**kw)
+        from zero.vad.ten_wasm import TenVadWasm
+
+        self._threshold = float(threshold)
+        self._vad = TenVadWasm(wasm_model, hop_size=self._HOP,
+                               threshold=self._threshold)
+        self._buf = np.zeros(0, dtype=np.int16)
+        self._last_prob = 0.0
+        self._vad.process(np.zeros(self._HOP, dtype=np.int16))  # smoke test
+        self._on_capture_start()
+        log.info("TEN VAD endpointer ready (threshold=%.2f)", self._threshold)
+
+    def _on_capture_start(self) -> None:
+        self._vad.reset()  # clear recurrent state for a fresh utterance
+        self._buf = np.zeros(0, dtype=np.int16)
+        self._last_prob = 0.0
+
+    def _is_speech(self, frame: np.ndarray) -> bool:
+        f = frame.astype(np.int16, copy=False)
+        self._buf = np.concatenate([self._buf, f]) if self._buf.size else f
+        while self._buf.size >= self._HOP:
+            chunk = self._buf[:self._HOP]
+            self._buf = self._buf[self._HOP:]
+            try:
+                self._last_prob = self._vad.process(chunk)[0]
+            except Exception as e:  # a transient run error must not drop the turn
+                log.debug("ten vad run failed: %s", e)
+        return self._last_prob >= self._threshold
+
+
 class WebrtcEndpointer(_BaseEndpointer):
     def __init__(self, aggressiveness: int = 3, **kw):
         super().__init__(**kw)
@@ -265,10 +306,19 @@ class WebrtcEndpointer(_BaseEndpointer):
 
 def build_endpointer(engine: str, *, aggressiveness: int = 3,
                      silero_model: str | None = None,
-                     silero_threshold: float = 0.5, **kw) -> _BaseEndpointer:
-    """Build the configured endpointer. Silero falls back to webrtc if its
-    model/runtime isn't available, so a missing model never breaks the mic."""
-    if engine == "silero":
+                     silero_threshold: float = 0.5,
+                     ten_wasm_model: str | None = None,
+                     ten_threshold: float = 0.5, **kw) -> _BaseEndpointer:
+    """Build the configured endpointer. Neural engines (ten, silero) fall back to
+    webrtc if their model/runtime isn't available, so a missing model or a
+    platform without the wasm runtime never breaks the mic."""
+    if engine == "ten":
+        try:
+            return TenEndpointer(wasm_model=ten_wasm_model,
+                                 threshold=ten_threshold, **kw)
+        except Exception as e:
+            log.warning("TEN VAD unavailable (%s) — falling back to webrtc", e)
+    elif engine == "silero":
         try:
             return SileroEndpointer(model_path=silero_model,
                                     threshold=silero_threshold, **kw)

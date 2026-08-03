@@ -11,6 +11,11 @@ PyYAML>=6.0               # config.yaml
 openwakeword>=0.6.0       # always-on wake detection ("Hey Zero")
 
 # --- Voice activity / endpointing ---
+# TEN VAD (vad.engine: ten) runs from its WebAssembly build via wasmtime — the
+# pip `ten-vad` package has NO ARM64/Linux native build (see zero/vad/ten_wasm.py).
+# wasmtime hosts the .wasm; onnxruntime (below, from vision reqs) runs Smart Turn
+# v3 for end-of-turn. Both fall back to webrtc if their model/runtime is missing.
+wasmtime>=47                # host for TEN VAD's WebAssembly build
 # silero-vad is pulled at runtime via torch.hub OR the standalone package below.
 # webrtcvad is a lightweight fallback that needs no torch.
 webrtcvad>=2.0.10

@@ -43,7 +43,37 @@ def build_endpointer(cfg: Config):
         silero_model=str(cfg.resolve_path("vad.silero_model",
                                           "models/vad/silero_vad.onnx")),
         silero_threshold=cfg.get("vad.silero_threshold", 0.5),
+        ten_wasm_model=str(cfg.resolve_path("vad.ten_wasm_model",
+                                            "models/vad/ten_vad.wasm")),
+        ten_threshold=cfg.get("vad.ten_threshold", 0.5),
     )
+
+
+def build_turn_detector(cfg: Config):
+    """Optional audio-first end-of-turn detector (Pipecat Smart Turn v3). Returns
+    None when disabled or if the model/runtime is unavailable — the caller then
+    falls back to the text-based ends_mid_thought heuristic, so a missing model
+    never breaks turn-taking."""
+    engine = cfg.get("vad.turn_detector", "none")
+    if engine in (None, "none", "", False):
+        return None
+    if engine == "smart_turn":
+        try:
+            from zero.vad.smart_turn import SmartTurn
+
+            return SmartTurn(
+                model_path=str(cfg.resolve_path(
+                    "vad.smart_turn_model",
+                    "models/turn/smart-turn-v3.2-cpu.onnx")),
+                threshold=cfg.get("vad.smart_turn_threshold", 0.5),
+            )
+        except Exception as e:  # missing model / bad runtime — degrade, don't die
+            from zero.utils.logging import get_logger
+
+            get_logger("vad.smart_turn").warning(
+                "smart-turn unavailable (%s) — falling back to text end-of-turn", e)
+            return None
+    raise ValueError(f"unknown turn detector: {engine}")
 
 
 def _build_whispercpp(cfg: Config) -> STT:
