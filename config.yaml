@@ -331,13 +331,30 @@ wake:
 
 vad:
   engine:
-    webrtc # webrtc (energy-based, catches quiet mics) <- chosen |
-    # silero (ONNX, sharper on clean audio but STRICTER —
-    # can miss a quiet mic; lower silero_threshold if so).
+    ten # ten (TEN VAD, neural, via WebAssembly — sharpest, ~7% of one Pi
+    # core) <- chosen | webrtc (energy-based, catches quiet mics, no deps) |
+    # silero (ONNX, sharper than webrtc but can miss a quiet mic).
+    # All three fall back to webrtc if their model/runtime is missing.
+  # TEN VAD runs from its official WebAssembly build (there is NO native
+  # ARM64/Linux build — the pip package raises "Unsupported platform" on the
+  # Pi). wasm is byte-for-byte identical to native (validated). Needs wasmtime.
+  ten_wasm_model: models/vad/ten_vad.wasm
+  ten_threshold:
+    0.5 # P(speech) per 16 ms frame to count as voice. Raise to reject more
+    # background/noise; lower to catch quieter/softer speech.
   silero_model: models/vad/silero_vad.onnx # downloaded by setup_pi.sh
   silero_threshold:
     0.3 # speech-probability to accept (default silero is
     # 0.5; lower = more sensitive, for quiet mics)
+  # Audio-first end-of-turn detection (Pipecat Smart Turn v3, ONNX on the CPU).
+  # Decides "has the speaker actually finished?" from prosody/rhythm in the
+  # waveform at each pause — replacing the text-only ends_mid_thought heuristic,
+  # so the endpoint no longer waits on a transcript. none = text heuristic only.
+  turn_detector: smart_turn # smart_turn | none
+  smart_turn_model: models/turn/smart-turn-v3.2-cpu.onnx
+  smart_turn_threshold:
+    0.5 # P(turn complete) >= this -> commit; below -> hold as mid-thought.
+    # Raise to hold longer (fewer early cut-offs); lower to commit sooner.
   silence_ms: 450 # trailing silence that ends an utterance (adaptive: see below)
   semantic_hold:
     true # endpoint intelligence: the early (speculative) transcript of a
@@ -430,7 +447,7 @@ tts:
     # steady male voice. For BEST quality run the fp16 vLLM server
     # (server/orpheus_server.py) instead of the quantized cpp one — same
     # endpoints, higher fidelity, faster streaming (compute permitting).
-    url: http://127.0.0.1:9100/tts
+    url: http://127.0.0.1:9100/tts # Orpheus server on zerolabs1 via SSH tunnel (was S2 shim 100.95.210.94:9100 on zerolabs0)
     voice: leo
     timeout: 30
     # Jitter buffer: pre-accumulate this much audio before playback starts, so
