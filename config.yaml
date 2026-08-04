@@ -437,7 +437,17 @@ vad:
 stt:
   # GPU offload: send audio to large-v3-turbo on the GPU (Whisper server over the
   # SSH tunnel). Turbo-quality at ~1s, instead of 29s on the Pi CPU.
-  engine: remote # remote (GPU turbo) | whispercpp (local)
+  engine:
+    remote # remote (Whisper large-v3-turbo, multilingual incl. SWAHILI) |
+    # kyutai (streaming WebSocket, ~word-by-word, but EN/FR ONLY — the
+    #   deployed model is stt-1b-en_fr and has NO Swahili) |
+    # whispercpp (local CPU fallback)
+    # Switching to kyutai trades Swahili for latency. stt.fallback below is
+    # 'remote', so if Kyutai is down Whisper still answers.
+  kyutai:
+    url: ws://100.100.95.12:8090 # zerolabs2 over the tailnet (binds 0.0.0.0)
+    api_key: public_token
+    timeout: 30
   remote_url: http://127.0.0.1:9000/transcribe
   remote_timeout: 30
   language:
@@ -462,24 +472,22 @@ stt:
 
 llm:
   engine:
-    ollama # ollama (current: gemma4 over the GPU tunnel) | openai (any
-    # /v1/chat/completions server — the vLLM cutover target). When the GPU
-    # node's vLLM is validated, switch to:
-    #   engine: openai
-    #   host: http://127.0.0.1:8000   # (tunnel to the node's vLLM port)
-    #   model: <the served model name from vLLM>
-    # and everything else (tools, memory, vision, streaming) carries over.
+    openai # openai = vLLM on zerolabs0 (Gemma 4 12B QAT w4a16) <- CUT OVER.
+    # Measured 39.6ms to first token on a warm prefix, 80 tok/s.
+    # ROLLBACK: set `engine: ollama` and restore the host/model lines
+    # commented below — the old Ollama stack is still running untouched.
   # Speculative prefill: while the endpointer is still waiting out the silence,
   # the speculative transcript is sent ahead with num_predict=1 so the model
   # reads (and KV-caches) the whole prompt early. By the time the real request
   # lands, prefill is already done — first token starts almost immediately.
   # A wrong speculation costs one throwaway token on the GPU, nothing else.
   speculative_prefill: true
-  # GPU offload: host is the SSH tunnel to the GPU's Ollama (Pi:11435 -> node:11434).
-  # Gemma4 (8B) runs there at ~100 tok/s. Local fallback: host 127.0.0.1:11434 +
-  # model qwen2.5:3b-instruct (needs the Pi's own Ollama running).
-  host: http://127.0.0.1:11435
-  model: gemma4:latest # 8B on the GPU via tunnel
+  # vLLM on zerolabs0 over the tailnet (binds 0.0.0.0 — no tunnel needed).
+  host: http://100.95.210.94:8001
+  model: gemma4-12b # the id vLLM serves (NOT the HF path — /v1/models shows it)
+  # Previous Ollama stack, kept for rollback:
+  #   host: http://127.0.0.1:11435
+  #   model: gemma4:latest
   temperature:
     0.6 # a playful persona at 0.3 reads flat; the prompt's honesty
     # clauses do the factual guarding, not the temperature
@@ -497,7 +505,16 @@ llm:
   history_trim_at: 12 # let it grow to this many turns before trimming
 
 tts:
-  engine: orpheus # orpheus (GPU, natural) | piper (local fallback) | fish
+  engine:
+    orpheus # orpheus (GPU, natural, performs cue tags) | kyutai (streaming
+    # WebSocket, ~213ms to first audio, but does NOT perform [laughs]/[sighs]
+    # cues — they are stripped) | piper (local fallback) | fish
+  kyutai:
+    url: ws://100.100.95.12:8091 # zerolabs2 over the tailnet
+    # Voice from the kyutai/tts-voices repo, relative to its root.
+    voice: expresso/ex03-ex01_happy_001_channel1_334s.wav
+    api_key: public_token
+    timeout: 30
   # If the remote Orpheus fails (tunnel down), speak through local Piper instead of
   # going silently mute — the different voice IS the "degraded mode" signal. Built
   # lazily on first failure; the remote is retried every sentence. Needs the piper

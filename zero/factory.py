@@ -88,8 +88,38 @@ def _build_whispercpp(cfg: Config) -> STT:
     )
 
 
+def _build_remote_whisper(cfg: Config) -> STT:
+    from zero.stt.remote_engine import RemoteSTT
+
+    return RemoteSTT(
+        url=cfg.get("stt.remote_url", "http://127.0.0.1:9000/transcribe"),
+        timeout=cfg.get("stt.remote_timeout", 30),
+        language=cfg.get("stt.language"),
+    )
+
+
 def build_stt(cfg: Config) -> STT:
     engine = cfg.get("stt.engine", "whispercpp")
+    if engine == "kyutai":
+        # Streaming WebSocket STT. The deployed model is en/fr ONLY — no
+        # Swahili — so the fallback is Whisper by default rather than the local
+        # CPU engine: if Kyutai is down (or you want multilingual back), the
+        # bigger multilingual model answers instead of nothing.
+        from zero.stt.fallback import FallbackSTT
+        from zero.stt.kyutai_engine import KyutaiSTT
+
+        primary = KyutaiSTT(
+            url=cfg.get("stt.kyutai.url", "ws://127.0.0.1:8090"),
+            api_key=cfg.get("stt.kyutai.api_key", "public_token"),
+            timeout=cfg.get("stt.kyutai.timeout", 30),
+        )
+        fb = cfg.get("stt.fallback", "remote")
+        builder = None
+        if fb == "remote":
+            builder = lambda: _build_remote_whisper(cfg)  # noqa: E731
+        elif fb == "whispercpp":
+            builder = lambda: _build_whispercpp(cfg)  # noqa: E731
+        return FallbackSTT(primary, builder)
     if engine == "remote":
         from zero.stt.fallback import FallbackSTT
         from zero.stt.remote_engine import RemoteSTT
@@ -172,6 +202,24 @@ def _build_tts_engine(cfg: Config) -> tuple[str, TTS]:
 
             tts = FallbackTTS(tts, lambda: _build_piper(cfg))
         return "orpheus", tts
+    if engine == "kyutai":
+        from zero.tts.kyutai_engine import KyutaiTTS
+
+        tts = KyutaiTTS(
+            url=cfg.get("tts.kyutai.url", "ws://127.0.0.1:8091"),
+            voice=cfg.get("tts.kyutai.voice",
+                          "expresso/ex03-ex01_happy_001_channel1_334s.wav"),
+            api_key=cfg.get("tts.kyutai.api_key", "public_token"),
+            timeout=cfg.get("tts.kyutai.timeout", 30),
+        )
+        if cfg.get("tts.fallback") == "piper":
+            from zero.tts.fallback import FallbackTTS
+
+            tts = FallbackTTS(tts, lambda: _build_piper(cfg))
+        # Not "orpheus"/"fish": the orchestrator must NOT hand cue tags through
+        # (Kyutai can't perform them) — the engine strips them itself, and the
+        # piper branch would try to splice nonverbal clips at 22.05k.
+        return "kyutai", tts
     if engine == "piper":
         return "piper", _build_piper(cfg)
     if engine == "fish":

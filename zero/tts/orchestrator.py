@@ -167,7 +167,7 @@ class VoiceOrchestrator:
         text = text.strip()
         if not text:
             return np.zeros(0, dtype=np.float32)
-        if self.engine_name in ("fish", "orpheus"):
+        if self.engine_name in ("fish", "orpheus", "kyutai"):
             # These perform cues natively; the engine handles cue translation.
             audio = self.tts.synthesize(text)
         else:
@@ -184,7 +184,7 @@ class VoiceOrchestrator:
         if not text:
             return
         shelf = self._smile()
-        if self.engine_name in ("fish", "orpheus"):
+        if self.engine_name in ("fish", "orpheus", "kyutai"):
             for chunk in self.tts.synthesize_stream(text):
                 if shelf is not None and getattr(chunk, "size", 0):
                     chunk = shelf.process(chunk)
