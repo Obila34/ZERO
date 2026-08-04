@@ -578,6 +578,62 @@ class TestOpenAIMessageConvert:
             "data:image/jpeg;base64,QUJD")
 
 
+class TestSpeculationGate:
+    """The gate that decides whether a reply generated BEFORE the person
+    finished may be spoken. Wrong answers here mean ZERO confidently answers a
+    question that was never asked, so this is deliberately strict."""
+
+    def _spec(self, text):
+        import threading
+
+        from zero.speculate import Speculation
+
+        return Speculation(text, iter(()), threading.Event())
+
+    def test_exact_match_is_kept(self):
+        assert self._spec("what time is the meeting").matches(
+            "what time is the meeting")
+
+    def test_punctuation_and_case_do_not_matter(self):
+        assert self._spec("what time is the meeting").matches(
+            "What time is the meeting?")
+
+    def test_extra_words_invalidate_the_bet(self):
+        # The reversal case: a prefix match must NOT be accepted.
+        s = self._spec("book me a flight")
+        assert not s.matches("book me a flight actually no cancel that")
+
+    def test_different_sentence_rejected(self):
+        assert not self._spec("call mum").matches("call the plumber")
+
+    def test_empty_never_matches(self):
+        assert not self._spec("").matches("")
+
+    def test_abandon_sets_the_stop_event(self):
+        s = self._spec("hello there")
+        s.abandon()
+        assert s.stop.is_set()
+
+
+class TestWorthSpeculating:
+    def _w(self, t):
+        from zero.speculate import worth_speculating
+
+        return worth_speculating(t)
+
+    def test_complete_request_is_worth_it(self):
+        assert self._w("what is the weather tomorrow")
+
+    def test_mid_sentence_is_not(self):
+        assert not self._w("i was thinking that we should")
+        assert not self._w("can you get me the")
+        assert not self._w("book a table and")
+
+    def test_too_short_is_not(self):
+        assert not self._w("okay")
+        assert not self._w("")
+
+
 class TestStripStageDirections:
     def _run(self, *chunks):
         from zero.tts.orchestrator import strip_asides

@@ -27,6 +27,7 @@ select the remote Whisper engine when multilingual coverage matters.
 from __future__ import annotations
 
 import asyncio
+import queue
 import threading
 
 import numpy as np
@@ -48,6 +49,152 @@ def _resample(audio: np.ndarray, src_sr: int) -> np.ndarray:
     return np.interp(np.linspace(0.0, 1.0, n, endpoint=False),
                      np.linspace(0.0, 1.0, audio.size, endpoint=False),
                      audio).astype(np.float32)
+
+
+class KyutaiStreamSession:
+    """A LIVE recognition session: audio goes in while the person is still
+    talking, words come back as they are recognised.
+
+    This is the whole point of a streaming ASR model. The batch wrapper below
+    pays ~1.2 s per utterance because it feeds a finished clip and the model
+    can only advance one 80 ms step at a time. Here the stepping happens
+    *during* speech, where it is free — so when the person stops, the
+    transcript is already written except for the model's small lookahead.
+
+    Threading: ``push()`` is called from the capture loop and must never block
+    or raise. A worker thread owns the socket; audio crosses on a queue, words
+    come back under a lock. The model only advances when it is fed, so the
+    sender emits silence whenever the mic hasn't supplied anything — that
+    keeps the recogniser moving through its lookahead during pauses instead of
+    stalling right when we need the last word.
+    """
+
+    def __init__(self, url: str, api_key: str = "public_token",
+                 sample_rate: int = 16000, timeout: float = 20.0):
+        self.url = url if url.endswith("/api/asr-streaming") else \
+            f"{url.rstrip('/')}/api/asr-streaming"
+        self.api_key = api_key
+        self.sample_rate = int(sample_rate)
+        self.timeout = float(timeout)
+        self._q: "queue.Queue" = queue.Queue(maxsize=512)
+        self._words: list[str] = []
+        self._lock = threading.Lock()
+        self._thread: threading.Thread | None = None
+        self._stop = threading.Event()
+        self._marker = threading.Event()   # set when the server echoes our marker
+        self._closing = threading.Event()  # finalize() asked for the marker
+        self._failed: Exception | None = None
+        self._buf = np.zeros(0, dtype=np.float32)
+
+    # -- capture-side API (must never block or raise) -----------------------
+    def start(self) -> None:
+        if self._thread is not None:
+            return
+        self._thread = threading.Thread(target=self._run, name="kyutai-live",
+                                        daemon=True)
+        self._thread.start()
+
+    def push(self, frame) -> None:
+        """Feed one mic frame (int16 or float). Resamples and re-frames to the
+        24 kHz/1920-sample grid the server expects. Drops audio rather than
+        blocking the capture loop if the sender falls behind."""
+        try:
+            f = np.asarray(frame)
+            if f.dtype == np.int16:
+                f = f.astype(np.float32) / 32768.0
+            self._buf = np.concatenate([self._buf,
+                                        _resample(f.reshape(-1), self.sample_rate)])
+            while self._buf.size >= _FRAME:
+                chunk, self._buf = self._buf[:_FRAME], self._buf[_FRAME:]
+                try:
+                    self._q.put_nowait(chunk)
+                except queue.Full:
+                    pass  # sender is behind; losing a frame beats stalling the mic
+        except Exception as e:
+            log.debug("live STT push failed: %s", e)
+
+    def text(self) -> str:
+        """The transcript SO FAR — safe to read at any moment."""
+        with self._lock:
+            return " ".join(self._words).strip()
+
+    def finalize(self, timeout: float = 3.0) -> str:
+        """End of turn: ask for the marker and wait for the tail to flush.
+        Returns the complete transcript. Fast, because everything except the
+        model's lookahead was already transcribed while they were speaking."""
+        if self._thread is None:
+            return self.text()
+        self._closing.set()
+        self._marker.wait(timeout=timeout)
+        return self.text()
+
+    def close(self) -> None:
+        self._stop.set()
+        t, self._thread = self._thread, None
+        if t is not None:
+            t.join(timeout=2.0)
+
+    @property
+    def failed(self) -> Exception | None:
+        return self._failed
+
+    # -- worker -------------------------------------------------------------
+    def _run(self) -> None:
+        try:
+            asyncio.run(self._session())
+        except Exception as e:
+            self._failed = e
+            log.warning("live STT session ended: %s", e)
+        finally:
+            self._marker.set()  # never leave finalize() waiting on a dead socket
+
+    async def _session(self) -> None:
+        import msgpack
+        import websockets
+
+        async with websockets.connect(
+                self.url, additional_headers={"kyutai-api-key": self.api_key},
+                open_timeout=self.timeout, close_timeout=2.0) as ws:
+
+            async def send():
+                # A second of silence up front: the model needs it to settle.
+                for _ in range(int(_SR / _FRAME)):
+                    await ws.send(msgpack.packb(
+                        {"type": "Audio", "pcm": [0.0] * _FRAME},
+                        use_single_float=True))
+                sent_marker = False
+                while not self._stop.is_set():
+                    try:
+                        chunk = self._q.get_nowait()
+                    except queue.Empty:
+                        # Nothing from the mic: feed silence so the model keeps
+                        # advancing (it only moves when fed).
+                        chunk = _SILENCE
+                        await asyncio.sleep(0.005)
+                    await ws.send(msgpack.packb(
+                        {"type": "Audio", "pcm": [float(x) for x in chunk]},
+                        use_single_float=True))
+                    if self._closing.is_set() and not sent_marker and self._q.empty():
+                        await ws.send(msgpack.packb({"type": "Marker", "id": 0},
+                                                    use_single_float=True))
+                        sent_marker = True
+                    await asyncio.sleep(0)
+
+            send_task = asyncio.create_task(send())
+            try:
+                async for message in ws:
+                    data = msgpack.unpackb(message, raw=False)
+                    kind = data.get("type")
+                    if kind == "Word":
+                        with self._lock:
+                            self._words.append(data["text"])
+                    elif kind == "Marker":
+                        self._marker.set()
+                        break
+                    if self._stop.is_set():
+                        break
+            finally:
+                send_task.cancel()
 
 
 class KyutaiSTT(STT):
@@ -83,6 +230,12 @@ class KyutaiSTT(STT):
             return ""
         words = self._run(self._collect(pcm))
         return " ".join(words).strip()
+
+    def live_session(self, sample_rate: int) -> "KyutaiStreamSession":
+        """A live session bound to this engine's endpoint — the streaming path
+        used by the capture loop."""
+        return KyutaiStreamSession(self.url, self.api_key,
+                                   sample_rate=sample_rate, timeout=self.timeout)
 
     def stream_transcribe(self, frames, sample_rate: int):
         """Feed live mic frames (an iterable of int16/float arrays) and get

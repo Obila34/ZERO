@@ -444,6 +444,11 @@ stt:
     # whispercpp (local CPU fallback)
     # Switching to kyutai trades Swahili for latency. stt.fallback below is
     # 'remote', so if Kyutai is down Whisper still answers.
+  # Live streaming ASR: the mic feeds the recogniser WHILE you talk, so the
+  # transcript is written by the time you stop instead of starting then.
+  # Needs a streaming engine (kyutai); ignored by Whisper/whispercpp.
+  streaming: true
+  finalize_timeout: 3.0 # max wait for the tail of the transcript to flush
   kyutai:
     url: ws://100.100.95.12:8090 # zerolabs2 over the tailnet (binds 0.0.0.0)
     api_key: public_token
@@ -482,6 +487,14 @@ llm:
   # lands, prefill is already done — first token starts almost immediately.
   # A wrong speculation costs one throwaway token on the GPU, nothing else.
   speculative_prefill: true
+  # Speculative REPLY: when the turn model is confident you've finished and the
+  # live transcript already reads like a complete request, start generating the
+  # answer before you actually stop. On commit the bet is kept ONLY if what you
+  # said matches it word for word — otherwise it is thrown away and the reply is
+  # generated normally. Strict on purpose: answering a question that changed
+  # mid-sentence is worse than waiting.
+  speculative_reply: true
+  speculative_reply_threshold: 0.8 # P(turn complete) needed to place a bet
   # vLLM on zerolabs0 over the tailnet (binds 0.0.0.0 — no tunnel needed).
   host: http://100.95.210.94:8001
   model: gemma4-12b # the id vLLM serves (NOT the HF path — /v1/models shows it)

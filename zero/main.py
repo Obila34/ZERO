@@ -21,6 +21,7 @@ import threading
 import time
 
 from zero.audio.interrupt import InterruptKind, classify_interrupt
+from zero.speculate import Speculation, worth_speculating
 from zero.config import load_config
 from zero.conversation import Conversation
 from zero.events import EventBus
@@ -263,6 +264,8 @@ class Zero:
         self._last_backchannel = 0.0   # cooldown clock for "mm-hmm" while user speaks
         self._t_utterance_end = 0.0    # end-of-speech marker for the latency budget
         self._bg_monitor = None        # live duplex monitor (stop_event, thread)
+        self._speculation = None       # in-flight bet on an unfinished sentence
+        self._live_stt = None          # live ASR session for the current turn
         self._afterthoughts: list = [] # transcribed gap remarks awaiting merge
         self._overheard: list = []     # backchannels heard mid-reply -> next context
         # Speculative prefill needs the RAW engine (the tool router doesn't
@@ -659,6 +662,14 @@ class Zero:
                                        and getattr(self.privacy, "mode", "")
                                        == "strict"))
 
+                # Live streaming ASR: the mic feeds the recogniser WHILE the
+                # person talks, so the transcript is essentially written by the
+                # time they stop — instead of a ~0.5-1.2s transcription that
+                # only starts once they've finished.
+                live = self._open_live_stt(sr)
+                if live is not None:
+                    frames_src = self._tee_to_live(frames_src, live)
+
                 def _on_pause(audio_i16):
                     # Always record the pause audio + the turn-model verdict —
                     # Smart Turn must keep working even when speculative STT is
@@ -670,6 +681,13 @@ class Zero:
                             audio_i16.astype("float32") / 32768.0)
                     spec["turn_p"] = p
                     self._maybe_backchannel(audio_i16, p)
+                    if live is not None:
+                        # The live transcript is already here — no STT round
+                        # trip to wait on. Use it for the endpoint decision AND
+                        # to start guessing at a reply before they finish.
+                        spec["live_text"] = live.text()
+                        self._maybe_speculate(spec.get("live_text"), p)
+                        return
                     if not allow_spec:
                         return
                     res: dict = {}
@@ -708,8 +726,14 @@ class Zero:
                     # verdict was computed once at the pause hook; reuse it.
                     p = spec.get("turn_p")
                     if p is not None:
-                        # finished -> don't hold; mid-thought -> hold one more
-                        return not (p >= self.turn.threshold)
+                        done = p >= self.turn.threshold
+                        # Cross-check the audio verdict against the live words:
+                        # prosody can read "finished" on a trailing "...and",
+                        # and the transcript is free here (already streamed).
+                        lt = spec.get("live_text")
+                        if done and lt and ends_mid_thought(lt):
+                            return True   # hold — the words say otherwise
+                        return not done
                     # Text fallback, tri-state: the speculative transcript for
                     # THIS pause says finished (False), mid-thought (True) — or
                     # it's STILL IN FLIGHT (None), in which case the endpointer
@@ -753,6 +777,7 @@ class Zero:
 
                 self.mic.pause()
                 self._to(State.THINKING)
+            self._close_live_stt()  # transcript is in; release the socket
 
             # Duplex from the moment the turn commits: the monitor runs through
             # THINKING as well as SPEAKING, so the old deaf window (identity +
@@ -785,6 +810,20 @@ class Zero:
                               + self.cfg.get("vad.speech_pad_ms", 200) + 400) / 1000)
             if pre_text:
                 stt_result = {"text": pre_text}  # transcribed at interrupt time
+            elif live is not None:
+                # Streamed while they spoke — only the model's lookahead tail
+                # is left to flush, so this returns almost immediately.
+                _t_fin = time.monotonic()
+                stt_result = {"text": live.finalize(
+                    timeout=self.cfg.get("stt.finalize_timeout", 3.0))}
+                log.info("live transcript settled in %.0f ms",
+                         (time.monotonic() - _t_fin) * 1000)
+                if live.failed is not None and not stt_result["text"]:
+                    # The socket died mid-turn: fall back to transcribing the
+                    # captured clip so the turn is not silently lost.
+                    log.warning("live STT failed (%s) — batch fallback",
+                                live.failed)
+                    stt_result = {}
             elif (spec_a is not None and spec.get("thread") is not None
                     and 0 <= utterance.size - spec_a.size <= slack
                     and bool((utterance[:spec_a.size]
@@ -1045,14 +1084,22 @@ class Zero:
             # Kick the LLM off in the BACKGROUND so its prefill overlaps the spoken
             # filler — the model is already generating while the filler plays, so the
             # real answer flows in with little or no added delay.
-            chunks, llm_stop = self._stream_in_background(messages)
+            # A bet placed before they finished only survives if the finished
+            # sentence is word-for-word what it was placed on — otherwise it is
+            # discarded and we generate normally. Nothing half-relevant is ever
+            # allowed to reach the speaker.
+            taken = self._take_speculation(text)
+            if taken is not None:
+                chunks, llm_stop = taken
+            else:
+                chunks, llm_stop = self._stream_in_background(messages)
             # Afterthought merge, round 2: a remark that landed while the
             # vision/recall context was being built. The in-flight stream is
             # abandoned and restarted with the completed thought — the warm
             # prefix makes the restart cost roughly one first-token.
             extra = self._pop_afterthoughts()
             if extra:
-                llm_stop.set()
+                llm_stop.set()   # covers a speculative stream too
                 log.info("afterthought merged, reply restarted: %r", extra)
                 text = f"{text} {extra}"
                 self.convo.amend_last_user(extra)
@@ -1792,6 +1839,10 @@ class Zero:
         self._last_backchannel = 0.0
         self._afterthoughts = []
         self._overheard = []
+        if self._speculation is not None:
+            self._speculation.abandon()
+            self._speculation = None
+        self._close_live_stt()
         if not self.text_mode:
             self.speaker.unduck()
 
@@ -1824,6 +1875,90 @@ class Zero:
                 self._afterthoughts.append(text)
         except Exception as e:  # a lost afterthought must never break playback
             log.debug("afterthought stt failed: %s", e)
+
+    def _close_live_stt(self) -> None:
+        live, self._live_stt = self._live_stt, None
+        if live is not None:
+            try:
+                live.close()
+            except Exception as e:
+                log.debug("live STT close failed: %s", e)
+
+    def _open_live_stt(self, sr: int):
+        """A live ASR session for this turn, or None when streaming is off /
+        the engine can't do it / it fails to open. Never raises — a failure
+        here just means the old record-then-transcribe path."""
+        if not self.cfg.get("stt.streaming", True):
+            return None
+        engine = self.stt
+        maker = getattr(engine, "live_session", None)
+        if maker is None:  # unwrap FallbackSTT to reach the primary
+            maker = getattr(getattr(engine, "_primary", None),
+                            "live_session", None)
+        if maker is None:
+            return None
+        try:
+            self._close_live_stt()   # never leak a previous turn's socket
+            session = maker(sr)
+            session.start()
+            self._live_stt = session
+            return session
+        except Exception as e:
+            log.warning("live STT unavailable (%s) — using batch path", e)
+            return None
+
+    @staticmethod
+    def _tee_to_live(frames, live):
+        """Pass mic frames through to the endpointer while also feeding the
+        live recogniser. push() never blocks or raises, so the capture loop's
+        timing is unaffected."""
+        for frame in frames:
+            live.push(frame)
+            yield frame
+
+    def _maybe_speculate(self, partial: str, turn_p) -> None:
+        """Start generating a reply BEFORE the person finishes, when the turn
+        model is confident they're done and the words already read like a
+        complete request. Nothing is spoken from this — commit_speculation()
+        decides whether it survives."""
+        if not self.cfg.get("llm.speculative_reply", True):
+            return
+        if turn_p is None or turn_p < self.cfg.get(
+                "llm.speculative_reply_threshold", 0.8):
+            return
+        if not worth_speculating(partial):
+            return
+        if self._speculation is not None:
+            if self._speculation.matches(partial):
+                return  # already betting on exactly this
+            self._speculation.abandon()  # they said more — the old bet is void
+            self._speculation = None
+        try:
+            messages = self._attach_vision(
+                [*self.convo.messages(), {"role": "user", "content": partial}],
+                partial)
+            chunks, stop = self._stream_in_background(messages)
+            self._speculation = Speculation(partial, chunks, stop)
+            log.info("speculating on %r (p=%.2f)", partial, turn_p)
+        except Exception as e:  # a failed bet must never break the turn
+            log.debug("speculation failed to start: %s", e)
+            self._speculation = None
+
+    def _take_speculation(self, final_text: str):
+        """The gate. Returns (chunks, stop) only when the finished sentence is
+        word-for-word what we bet on; otherwise the bet is killed and None is
+        returned so the caller generates normally. Closed by default — a reply
+        to a question that changed is worse than any delay."""
+        spec, self._speculation = self._speculation, None
+        if spec is None:
+            return None
+        if spec.matches(final_text):
+            log.info("speculation HIT — reply already generating")
+            return spec.chunks, spec.stop
+        log.info("speculation miss (bet on %r, heard %r) — discarded",
+                 spec.text, final_text)
+        spec.abandon()
+        return None
 
     def _maybe_backchannel(self, audio_i16, turn_p) -> None:
         """Active listening: at a brief pause deep inside a LONG user turn that
