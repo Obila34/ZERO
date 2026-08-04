@@ -84,6 +84,7 @@ class KyutaiStreamSession:
         self._stop = threading.Event()
         self._marker = threading.Event()   # set when the server echoes our marker
         self._closing = threading.Event()  # finalize() asked for the marker
+        self._started = threading.Event()   # real audio has been offered
         self._failed: Exception | None = None
         self._buf = np.zeros(0, dtype=np.float32)
 
@@ -109,6 +110,7 @@ class KyutaiStreamSession:
                 chunk, self._buf = self._buf[:_FRAME], self._buf[_FRAME:]
                 try:
                     self._q.put_nowait(chunk)
+                    self._started.set()   # the wire opens on real audio only
                 except queue.Full:
                     pass  # sender is behind; losing a frame beats stalling the mic
         except Exception as e:
@@ -126,6 +128,8 @@ class KyutaiStreamSession:
         if self._thread is None:
             return self.text()
         self._closing.set()
+        if not self._started.is_set():
+            return ""   # nothing was ever sent; no marker will come back
         self._marker.wait(timeout=timeout)
         return self.text()
 
@@ -168,6 +172,18 @@ class KyutaiStreamSession:
                 open_timeout=self.timeout, close_timeout=2.0) as ws:
 
             async def send():
+                # BANDWIDTH: stay silent on the wire until there is real audio.
+                # Each frame is ~9.6KB, so idling at 12.5 frames/s costs
+                # ~960 kbps sustained — 7MB per minute of merely WAITING for
+                # someone to speak. On venue wifi to a host already showing
+                # 33ms jitter that is the difference between working and
+                # stuttering. Nothing is lost: an ASR model that is not fed
+                # simply does not advance, which is correct while the room is
+                # quiet.
+                while not self._stop.is_set() and not self._started.is_set():
+                    if self._closing.is_set():
+                        return          # turn ended before anyone spoke
+                    await asyncio.sleep(0.02)
                 # A second of silence up front: the model needs it to settle.
                 for _ in range(int(_SR / _FRAME)):
                     await ws.send(msgpack.packb(

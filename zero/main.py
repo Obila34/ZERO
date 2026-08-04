@@ -2047,13 +2047,31 @@ class Zero:
             log.warning("live STT unavailable (%s) — using batch path", e)
             return None
 
-    @staticmethod
-    def _tee_to_live(frames, live):
+    def _tee_to_live(self, frames, live):
         """Pass mic frames through to the endpointer while also feeding the
         live recogniser. push() never blocks or raises, so the capture loop's
-        timing is unaffected."""
+        timing is unaffected.
+
+        Room tone is held back rather than streamed: frames go into a short
+        ring until speech actually starts, then the ring is flushed so the
+        first word still has its lead-in. Waiting silently for someone to
+        speak used to cost ~960 kbps to a machine across the internet."""
+        pre: list = []
+        speaking = False
+        pad = max(1, self.cfg.get("vad.speech_pad_ms", 200)
+                  // max(1, self.cfg.get("audio.block_ms", 30)))
         for frame in frames:
-            live.push(frame)
+            if speaking:
+                live.push(frame)
+            else:
+                pre.append(frame)
+                if len(pre) > pad + 1:
+                    pre.pop(0)
+                if self.endpointer.is_speech_frame(frame):
+                    speaking = True
+                    for f in pre:      # flush the lead-in, keep the first word
+                        live.push(f)
+                    pre = []
             yield frame
 
     def _maybe_speculate(self, partial: str, turn_p) -> None:
