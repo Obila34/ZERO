@@ -2452,7 +2452,7 @@ class Zero:
             thread.join(timeout=1.5)
             if thread.is_alive():
                 log.warning("barge-in monitor did not exit in time — mic contention")
-        self.speaker.unduck()   # playback is over; a duck must never persist
+        self._restore_level()   # back to asked-for x room, never a bare 1.0
         self.mic.pause()
 
     def _speak_one(self, text: str) -> None:

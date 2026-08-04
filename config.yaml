@@ -112,12 +112,15 @@ conversation:
     # trigger. Raise toward 1.0 if real interruptions get eaten; lower if
     # echo still self-triggers.
   barge_in_duck:
-    0.75 # COURTESY dip while a confirmed interruption is assessed. Raised
-    # from 0.35, which collapsed the voice and read as a glitch. This is
-    # only reached once the audio is confirmed speech (see
-    # barge_in_voiced_ratio) — noise never dips it. 1.0 = no dip at all.
-    # Volume asked for out loud ("talk quietly", "speak up") is separate,
-    # persists across turns, and multiplies with the room's own level.
+    1.0 # NO dip while an interruption is assessed. Tried 0.35 (collapsed the
+    # voice, read as a glitch) and 0.75 (still audible) — both made the
+    # sentence ZERO is finishing trail off quieter, which is exactly the
+    # moment it should sound normal, because a queued interruption means
+    # "I will answer you after this thought". A person does not fade out
+    # mid-sentence when someone starts talking. Volume that MEANS something
+    # is handled separately: "talk quietly" / "speak up" set a level that
+    # persists and multiplies with the room. Set below 1.0 to bring the dip
+    # back if you disagree once you have heard it.
   afterthought_ms:
     350 # a remark this long, finishing in the gap BEFORE the reply's first
     # audio ("...oh and make it two"), is merged into the pending turn —

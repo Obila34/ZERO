@@ -78,10 +78,54 @@ _CUE_RE = re.compile(r"(\[[a-z]+\])")
 _SENTENCE_RE = re.compile(r"(.+?(?:[.!?…]+|\n|$))", re.S)
 
 
-def split_sentences(text: str) -> list[str]:
-    """Coarse sentence split for streaming TTS. Cheap and good enough for speech."""
+# Clause boundaries inside a long sentence. Speech is chunked here as well as
+# at full stops for two reasons that turned out to be the same problem:
+#
+#   * Playback cannot start until the FIRST chunk is complete. A model that
+#     opens with a 40-word sentence made the listener wait for all of it —
+#     `llm+tts` was measured at 1.8-2.5s, the largest remaining block.
+#   * A queued barge-in yields "at the sentence end". With one enormous
+#     sentence that meant an 11-second wait after someone had already started
+#     talking, which reads as being ignored.
+#
+# Splitting at commas/dashes/colons fixes both: audio starts sooner, and there
+# is a natural place to hand over much sooner. The minimum length stops it
+# chopping "Yes, sure." into fragments that sound clipped.
+_CLAUSE_RE = re.compile(r"(.+?(?:[,;:—–]|\s-\s)\s*)", re.S)
+_CLAUSE_MIN_CHARS = 28
+_LONG_SENTENCE_CHARS = 90
+
+
+def split_sentences(text: str, clause_split: bool = True) -> list[str]:
+    """Coarse sentence split for streaming TTS. Cheap and good enough for
+    speech. Long sentences are further broken at clause boundaries so playback
+    can start — and can hand over — without waiting for a full stop."""
     out = [m.group(1).strip() for m in _SENTENCE_RE.finditer(text)]
-    return [s for s in out if s]
+    out = [s for s in out if s]
+    if not clause_split:
+        return out
+    split: list[str] = []
+    for sentence in out:
+        if len(sentence) <= _LONG_SENTENCE_CHARS:
+            split.append(sentence)
+            continue
+        buf = ""
+        end = 0                      # how much of the sentence is consumed
+        for m in _CLAUSE_RE.finditer(sentence):
+            buf += m.group(1)
+            end = m.end()
+            if len(buf.strip()) >= _CLAUSE_MIN_CHARS:
+                split.append(buf.strip())
+                buf = ""
+        # Whatever follows the last clause marker was never matched — without
+        # this the end of every long sentence would be silently dropped.
+        tail = (buf + sentence[end:]).strip()
+        if tail:
+            if len(tail) < _CLAUSE_MIN_CHARS and split:
+                split[-1] = f"{split[-1]} {tail}"   # don't leave a stub
+            else:
+                split.append(tail)
+    return [s for s in split if s] or out
 
 
 def strip_asides(chunks):
