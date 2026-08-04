@@ -33,7 +33,8 @@ from zero.factory import (
 )
 from zero.privacy.guard import parse_forget_command
 from zero.identity.service import parse_enroll_command, parse_enrollment
-from zero.memory.preferences import apply_rate_delta, parse_preference
+from zero.memory.preferences import (apply_rate_delta, parse_preference,
+                                     parse_volume)
 from zero.perception.affect import MoodTracker
 from zero.tools.base import ToolContext
 from zero.vision.learned import parse_object_teach
@@ -276,6 +277,11 @@ class Zero:
         self._speculation = None       # in-flight bet on an unfinished sentence
         self._live_stt = None          # live ASR session for the current turn
         self._llm_unreachable = False  # last turn failed to reach the model
+        self._degenerate = False       # last reply collapsed into repetition
+        # Voice level ASKED FOR ("talk quietly", "speak up"). Persists across
+        # turns and multiplies with the room's own Lombard gain, so "quietly"
+        # still means quietly in a loud hall — just not inaudibly.
+        self._voice_level = 1.0
         self._stage_marks: list = []   # per-turn latency breakdown
         self._stage_t = None
         self._afterthoughts: list = [] # transcribed gap remarks awaiting merge
@@ -649,6 +655,8 @@ class Zero:
 
         while True:
             self._stop_monitor()  # whatever path got us here, one mic consumer
+            self._stage_marks = []   # a turn that never replied must not leak
+            self._stage_t = None     # its stages into the next turn's report
             self._drain_events()  # timers/reminders land at turn boundaries
             self._maybe_compact()  # fold trimmed turns into a rolling summary
 
@@ -980,6 +988,14 @@ class Zero:
             else:
                 text = self.stt.transcribe(utterance, sr).strip()
             if not text:
+                # A turn that produces nothing used to vanish in silence — a
+                # visitor spoke and got no answer, with no trace of why.
+                log.info("no transcript for a %.1fs utterance (rms %.0f) — "
+                         "nothing said, or the recogniser missed it",
+                         getattr(utterance, "size", 0) / max(1, sr),
+                         float(np.sqrt(np.mean(np.square(
+                             utterance.astype("float64")))) * 32768.0)
+                         if getattr(utterance, "size", 0) else 0.0)
                 continue  # misfire / noise — keep listening, stay in conversation
 
             # Provisional guest — only now that the turn has PROVEN itself real:
@@ -1080,6 +1096,26 @@ class Zero:
 
             # Behavioural corrections: "speak slower", "keep it short" — stored
             # as standing preferences and applied to engine knobs where one exists.
+            vol = parse_volume(text)
+            if vol is not None:
+                pref_text, level = vol
+                self._voice_level = level
+                if self.memory is not None and self.cfg.get(
+                        "preferences.enabled", True):
+                    self.memory.set_preference(
+                        pref_text,
+                        person_id=(self._person.person_id
+                                   if self._person is not None else None))
+                log.info("voice level -> x%.2f (%s)", level, pref_text)
+                line = ("Okay, I'll keep it down." if level < 1.0
+                        else "Sure, I'll speak up." if level > 1.0
+                        else "Okay, back to normal.")
+                self._to(State.SPEAKING)
+                self._speak_one(line)
+                self.convo.add_user(text)
+                self.convo.add_assistant(line)
+                continue
+
             if self.memory is not None and self.cfg.get("preferences.enabled", True):
                 pref = parse_preference(text)
                 if pref is not None:
@@ -1152,6 +1188,11 @@ class Zero:
                 chunks, llm_stop = taken
             else:
                 chunks, llm_stop = self._stream_in_background(messages)
+            # Degeneracy guard on the FINAL stream. The engine-level guard only
+            # sees its own socket; the tool router re-prompts through a
+            # separate path, which is exactly where "thought thought thought"
+            # reached the speaker. Everything spoken passes through here.
+            chunks = self._guard_degenerate(chunks, llm_stop)
             # Afterthought merge, round 2: a remark that landed while the
             # vision/recall context was being built. The in-flight stream is
             # abandoned and restarted with the completed thought — the warm
@@ -1168,10 +1209,12 @@ class Zero:
                 messages = self._attach_vision(self.convo.messages(), text)
                 chunks, llm_stop = self._stream_in_background(messages)
             _room = getattr(self, "room", None)
-            if _room is not None:
-                # Lombard: match the room's loudness so ZERO is neither lost
-                # in a crowd nor startling in a quiet space.
-                self.speaker.gain = _room.speech_gain()
+            # Level = what they ASKED for x what the ROOM needs. A request to
+            # be quiet still holds in a noisy hall; it just isn't taken to the
+            # point of being inaudible.
+            _lvl = getattr(self, "_voice_level", 1.0)
+            self.speaker.gain = (_lvl * _room.speech_gain()
+                                 if _room is not None else _lvl)
             self._to(State.SPEAKING)
             # The monitor has been live since the turn committed; it covers the
             # filler AND the reply, so speech or the wake word can cut ZERO off
@@ -1193,6 +1236,11 @@ class Zero:
             # was unreachable, the stream died, or the reply was cut for
             # degeneracy. In a room with people, dead air reads as broken —
             # say something human and stay in the conversation.
+            if self._degenerate:
+                self._degenerate = False
+                self._say_recovery("lost")
+                log.warning("reply was degenerate — spoke a recovery line")
+                continue
             if not reply and not self._interrupt and not self._soft_stop:
                 spoke = self._say_recovery("slow" if self._llm_unreachable
                                            else "lost")
@@ -1944,6 +1992,25 @@ class Zero:
             log.debug("recovery playback failed: %s", e)
             return False
 
+    def _guard_degenerate(self, chunks, llm_stop):
+        """Wrap a reply stream and cut it if it collapses into repetition.
+        Sits at the last point before sentence-splitting, so it covers the
+        plain engine AND the tool router. Trips the recovery line rather than
+        letting a broken reply reach the room."""
+        from zero.llm.openai_engine import _DegenerateGuard
+
+        guard = _DegenerateGuard()
+        for chunk in chunks:
+            for tok in chunk.split(" "):
+                if tok and guard.feed(tok):
+                    self._degenerate = True
+                    try:
+                        llm_stop.set()
+                    except Exception:
+                        pass
+                    return
+            yield chunk
+
     def _stage(self, name: str) -> None:
         """Record a stage boundary for the per-turn latency breakdown. The
         end-to-end number told us WHAT the latency was but never WHERE it
@@ -1979,12 +2046,23 @@ class Zero:
         self._last_backchannel = 0.0
         self._afterthoughts = []
         self._overheard = []
+        self._degenerate = False
         if self._speculation is not None:
             self._speculation.abandon()
             self._speculation = None
         self._close_live_stt()
         if not self.text_mode:
             self.speaker.unduck()
+
+    def _restore_level(self) -> None:
+        """Undo the courtesy dip, back to asked-for x room level."""
+        try:
+            room = getattr(self, "room", None)
+            lvl = getattr(self, "_voice_level", 1.0)
+            self.speaker.gain = (lvl * room.speech_gain()
+                                 if room is not None else lvl)
+        except Exception as e:
+            log.debug("level restore failed: %s", e)
 
     def _stop_monitor(self) -> None:
         """Idempotently stop the duplex monitor (if one is running). Safe from
@@ -2056,6 +2134,15 @@ class Zero:
         ring until speech actually starts, then the ring is flushed so the
         first word still has its lead-in. Waiting silently for someone to
         speak used to cost ~960 kbps to a machine across the internet."""
+        import numpy as _np
+
+        def _rms(f):
+            return float(_np.sqrt(_np.mean(_np.asarray(f, dtype=_np.float32) ** 2)))
+
+        # Well below the VAD's own start gate: this only decides when the wire
+        # opens, so erring open costs a little bandwidth, while erring closed
+        # would clip the start of a sentence.
+        gate = max(40.0, self.cfg.get("vad.energy_threshold", 150) * 0.4)
         pre: list = []
         speaking = False
         pad = max(1, self.cfg.get("vad.speech_pad_ms", 200)
@@ -2067,7 +2154,12 @@ class Zero:
                 pre.append(frame)
                 if len(pre) > pad + 1:
                     pre.pop(0)
-                if self.endpointer.is_speech_frame(frame):
+                # STATELESS level check on purpose. Calling the endpointer's
+                # VAD here double-fed it: capture() runs the same frames
+                # through the same stateful TEN VAD, so each frame was
+                # consumed twice and the model's hop buffer desynchronised —
+                # which silently broke both utterance detection and barge-in.
+                if _rms(frame) >= gate:
                     speaking = True
                     for f in pre:      # flush the lead-in, keep the first word
                         live.push(f)
@@ -2207,10 +2299,13 @@ class Zero:
             log.debug("barge-in ignored: only %.0f%% voiced (need %.0f%%) — "
                       "noise, not speech", voiced_ratio * 100, min_ratio * 100)
             return False         # the reply carries on untouched
-        # NOTE: no ducking. People do not drop their volume when talked over —
-        # they finish the thought and answer afterwards. Dropping to 35% was a
-        # machine gesture that read as a glitch. The voice stays level; what
-        # they said is transcribed underneath and folded into the next answer.
+        # A COURTESY dip, not a reflex. Only reached once the audio is
+        # confirmed speech (noise never gets here), and gentle — 0.75, the
+        # "go ahead, I'm listening" a person does, not the 0.35 collapse that
+        # read as a glitch. Restored the moment the turn resolves.
+        _dip = self.cfg.get("conversation.barge_in_duck", 0.75)
+        if _dip < 1.0:
+            self.speaker.gain = self.speaker.gain * _dip
         import numpy as np
 
         sr = self.cfg.get("audio.sample_rate", 16000)
@@ -2229,6 +2324,7 @@ class Zero:
             # next turn's context knows they were engaged (humans calibrate on
             # exactly this). The reply itself flows on.
             self._overheard.append(text)   # they were agreeing — carry on
+            self._restore_level()
             return False
         if kind is InterruptKind.NOISE:
             if stt_failed:
@@ -2241,6 +2337,7 @@ class Zero:
                     "— ask them to repeat it briefly.)")
                 self._soft_stop = True
                 return True
+            self._restore_level()
             return False   # a transcribed nothing — hallucinated blip
         self._queued_turn = {"text": text, "frames": frames, "kind": kind.value}
         if kind is InterruptKind.CORRECTION:
@@ -2271,7 +2368,6 @@ class Zero:
             return None, None
         self.mic.resume()
         self.mic.drain()   # drop the tail of our own audio captured a moment ago
-        self.wake.reset()
         _bi_room = getattr(self, "room", None)
         speech = None
         if self.cfg.get("conversation.barge_in_on_speech", True):
@@ -2306,6 +2402,15 @@ class Zero:
         stop = threading.Event()
 
         def monitor():
+            # wake.reset() measured 521ms — openWakeWord rebuilds its state.
+            # Called inline it was 31% of end-to-end latency, sitting in front
+            # of every reply for no benefit (the wake word is not needed to
+            # continue a conversation). Doing it here moves the cost onto this
+            # thread, where it overlaps the reply instead of delaying it.
+            try:
+                self.wake.reset()
+            except Exception as e:
+                log.debug("wake reset failed: %s", e)
             for frame in self.mic.frames():
                 if stop.is_set():
                     return

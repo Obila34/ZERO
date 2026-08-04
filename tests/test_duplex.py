@@ -634,6 +634,35 @@ class TestWorthSpeculating:
         assert not self._w("")
 
 
+class TestSpokenVolume:
+    def _v(self, t):
+        from zero.memory.preferences import parse_volume
+
+        return parse_volume(t)
+
+    def test_quieter_requests(self):
+        for t in ("talk quietly", "lower your voice", "keep it down",
+                  "not so loud"):
+            pref, lvl = self._v(t)
+            assert lvl < 1.0 and "quiet" in pref
+
+    def test_louder_requests(self):
+        for t in ("speak up", "talk louder", "I can't hear you"):
+            pref, lvl = self._v(t)
+            assert lvl > 1.0 and "louder" in pref
+
+    def test_whisper_is_quietest(self):
+        assert self._v("whisper")[1] < self._v("talk quietly")[1]
+
+    def test_reset_to_normal(self):
+        assert self._v("normal volume")[1] == 1.0
+
+    def test_a_story_is_not_an_instruction(self):
+        # Long sentences that merely MENTION volume must not change it.
+        assert self._v("she whispered a long story to me about that yesterday ok") is None
+        assert self._v("what time is it") is None
+
+
 class TestRoomSense:
     def _room(self, level, n=30, **kw):
         from zero.audio.room import RoomSense

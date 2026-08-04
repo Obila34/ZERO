@@ -112,8 +112,12 @@ conversation:
     # trigger. Raise toward 1.0 if real interruptions get eaten; lower if
     # echo still self-triggers.
   barge_in_duck:
-    0.35 # output gain while an interruption is being assessed — the audible
-    # "I noticed you" yield gesture. 1.0 = no ducking.
+    0.75 # COURTESY dip while a confirmed interruption is assessed. Raised
+    # from 0.35, which collapsed the voice and read as a glitch. This is
+    # only reached once the audio is confirmed speech (see
+    # barge_in_voiced_ratio) — noise never dips it. 1.0 = no dip at all.
+    # Volume asked for out loud ("talk quietly", "speak up") is separate,
+    # persists across turns, and multiplies with the room's own level.
   afterthought_ms:
     350 # a remark this long, finishing in the gap BEFORE the reply's first
     # audio ("...oh and make it two"), is merged into the pending turn —

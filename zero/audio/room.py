@@ -98,6 +98,8 @@ class RoomSense:
     def maybe_log(self, now: float, every_s: float = 30.0) -> None:
         if now - self._logged >= every_s:
             self._logged = now
+            # gate() returns a THRESHOLD, not a multiplier — the old line
+            # printed it as "x216.50", which reads as a 216x scale factor.
             log.info("room: %s (ambient rms %.0f) -> voice x%.2f, "
-                     "interrupt gate x%.2f", self.note(), self._floor,
-                     self.speech_gain(), self.gate(1.0))
+                     "interrupt gate %.0f rms", self.note(), self._floor,
+                     self.speech_gain(), self.gate(250.0))
