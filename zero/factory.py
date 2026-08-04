@@ -212,10 +212,24 @@ def _build_tts_engine(cfg: Config) -> tuple[str, TTS]:
             api_key=cfg.get("tts.kyutai.api_key", "public_token"),
             timeout=cfg.get("tts.kyutai.timeout", 30),
         )
-        if cfg.get("tts.fallback") == "piper":
+        fb = cfg.get("tts.fallback")
+        if fb in ("piper", "orpheus"):
             from zero.tts.fallback import FallbackTTS
 
-            tts = FallbackTTS(tts, lambda: _build_piper(cfg))
+            if fb == "orpheus":
+                # Orpheus is the better fallback than Piper here: it's already
+                # running, it's a real voice, and it performs the cue tags
+                # Kyutai drops. Piper needs a binary that isn't installed, so
+                # a Piper "fallback" would leave ZERO mute.
+                from zero.tts.remote_engine import RemoteTTS
+
+                builder = lambda: RemoteTTS(  # noqa: E731
+                    url=cfg.get("tts.orpheus.url", "http://127.0.0.1:9100/tts"),
+                    voice=cfg.get("tts.orpheus.voice", "tara"),
+                    timeout=cfg.get("tts.orpheus.timeout", 30))
+            else:
+                builder = lambda: _build_piper(cfg)  # noqa: E731
+            tts = FallbackTTS(tts, builder)
         # Not "orpheus"/"fish": the orchestrator must NOT hand cue tags through
         # (Kyutai can't perform them) — the engine strips them itself, and the
         # piper branch would try to splice nonverbal clips at 22.05k.

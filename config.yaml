@@ -506,7 +506,12 @@ llm:
 
 tts:
   engine:
-    orpheus # orpheus (GPU, natural, performs cue tags) | kyutai (streaming
+    kyutai # <- CUT OVER. Measured on the Pi: Kyutai 215ms to first audio vs
+    # Orpheus 1699ms, and 2.9x realtime vs 0.8x. Orpheus was THE latency
+    # bottleneck — 1.7s of every reply. Tradeoff: Kyutai does not perform
+    # the [laughs]/[sighs] cue tags (they are stripped, never spoken).
+    # ROLLBACK: set `engine: orpheus`.
+    # orpheus (GPU, natural, performs cue tags) | kyutai (streaming
     # WebSocket, ~213ms to first audio, but does NOT perform [laughs]/[sighs]
     # cues — they are stripped) | piper (local fallback) | fish
   kyutai:
@@ -519,7 +524,10 @@ tts:
   # going silently mute — the different voice IS the "degraded mode" signal. Built
   # lazily on first failure; the remote is retried every sentence. Needs the piper
   # binary + voice below. Blank = no fallback.
-  fallback: piper
+  fallback:
+    orpheus # Kyutai primary, Orpheus as failover — it is already running and
+    # performs cue tags. NOT piper: the piper binary is missing on the Pi,
+    # so a piper fallback would leave ZERO mute if the primary died.
   orpheus:
     # Orpheus TTS server on the GPU node, over an SSH tunnel. Male voices:
     # leo dan zac; female: tara leah jess mia zoe. leo = the most natural,
