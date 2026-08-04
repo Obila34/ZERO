@@ -27,6 +27,17 @@ audio:
     pipewire # routes to PipeWire's default sink = the BT speaker
     # (needs the pipewire-alsa package). Use Headphones for 3.5mm jack.
 
+  # Room sense: the ambient noise floor is measured continuously from idle mic
+  # frames, and drives three things that were previously fixed constants tuned
+  # in one quiet room — how loud ZERO speaks (people get louder in noise
+  # without noticing; a machine that doesn't sounds meek), how loud you must be
+  # to interrupt it, and how loud a frame must be to count as speech.
+  room:
+    quiet_rms: 120 # at/below this the room is quiet -> nominal (or softer) voice
+    loud_rms: 900 # at this the room is a busy hall -> max_boost voice
+    max_boost: 1.6 # loudest ZERO gets in a noisy room
+    min_boost: 0.75 # softest it gets in a silent one
+
   # Acoustic echo cancellation (speex): subtract ZERO's own playback from the
   # mic so barge-in hears YOU, not its echo. Needs `pip install speexdsp`
   # (apt install libspeexdsp-dev first). Works with WIRED output (stable
@@ -164,7 +175,13 @@ memory:
   # relevance needs embeddings; the GPU Ollama provides them over the existing
   # tunnel, with an offline hashing fallback so recall degrades, never breaks.
   embeddings:
-    backend: auto # auto (ollama if llm.host set, else hash) | ollama | hash | off
+    backend: auto # auto (ollama if a host is set, else hash) | ollama | hash | off
+    ollama_host:
+      http://127.0.0.1:11435 # MUST point at Ollama, not the chat model. When
+      # llm.host moved to vLLM the embedder followed it and started asking
+      # vLLM for /api/embeddings, which it does not serve — semantic recall
+      # silently fell back to hash matching every session. This is the
+      # tunnel to Ollama on zerolabs1, which still holds nomic-embed-text.
     # A DEDICATED embedding model — a chat model (gemma) can't serve
     # /api/embeddings, which silently degraded recall to hash-matching.
     # One-time setup on the GPU node:  ollama pull nomic-embed-text

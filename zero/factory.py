@@ -291,9 +291,14 @@ def build_memory(cfg: Config):
     from zero.memory.embeddings import build_embedder
     from zero.memory.sqlite_memory import SqliteMemory
 
+    # The embedder needs an OLLAMA host, which is no longer the same machine
+    # as the chat model. Once llm.host was cut over to vLLM this silently
+    # started asking vLLM for /api/embeddings — an endpoint it does not serve —
+    # so every session degraded to hash matching. Explicit key first, llm.host
+    # only as a legacy fallback for the all-Ollama setup.
     embedder = build_embedder(
         cfg.get("memory.embeddings.backend", "auto"),
-        host=cfg.get("llm.host", ""),
+        host=cfg.get("memory.embeddings.ollama_host") or cfg.get("llm.host", ""),
         model=cfg.get("memory.embeddings.ollama_model",
                       cfg.get("llm.model", "")),
         hash_dim=cfg.get("memory.embeddings.hash_dim", 256),

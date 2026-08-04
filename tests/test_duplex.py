@@ -634,6 +634,44 @@ class TestWorthSpeculating:
         assert not self._w("")
 
 
+class TestRoomSense:
+    def _room(self, level, n=30, **kw):
+        from zero.audio.room import RoomSense
+
+        r = RoomSense(**kw)
+        for _ in range(n):
+            r.observe(np.full(BLOCK, level, dtype=np.int16))
+        return r
+
+    def test_louder_room_means_louder_voice(self):
+        quiet = self._room(80).speech_gain()
+        hall = self._room(900).speech_gain()
+        assert hall > quiet and hall > 1.0 and quiet < 1.0
+
+    def test_voice_boost_is_capped(self):
+        # A very loud room must not drive the output into clipping.
+        assert self._room(5000).speech_gain() <= 1.6 + 1e-6
+
+    def test_interrupt_gate_rises_with_noise(self):
+        # In a hall the crowd itself must not clear the barge-in gate.
+        assert self._room(900).gate(250) > self._room(80).gate(250)
+
+    def test_quiet_room_keeps_the_configured_gate(self):
+        assert self._room(40).gate(250) == 250
+
+    def test_observe_never_raises_on_junk(self):
+        from zero.audio.room import RoomSense
+
+        r = RoomSense()
+        r.observe(None)
+        r.observe(np.zeros(0, dtype=np.int16))
+        assert r.floor >= 0
+
+    def test_room_label_tracks_level(self):
+        assert self._room(60).note() == "quiet"
+        assert self._room(1200).note() == "loud"
+
+
 class TestStripStageDirections:
     def _run(self, *chunks):
         from zero.tts.orchestrator import strip_asides

@@ -196,6 +196,14 @@ class Zero:
                 device=self.cfg.get("audio.output_device"),
                 echo_ref=echo_ref,
                 prebuffer_ms=self.cfg.get("tts.orpheus.prebuffer_ms", 0))
+            from zero.audio.room import RoomSense
+
+            self.room = RoomSense(
+                block_ms=self.cfg.get("audio.block_ms", 30),
+                quiet_ref=self.cfg.get("audio.room.quiet_rms", 120),
+                loud_ref=self.cfg.get("audio.room.loud_rms", 900),
+                max_boost=self.cfg.get("audio.room.max_boost", 1.6),
+                min_boost=self.cfg.get("audio.room.min_boost", 0.75))
             self.wake = build_wake(self.cfg)
             self.endpointer = build_endpointer(self.cfg)
             # Audio-first end-of-turn detector (Smart Turn v3); None = use the
@@ -220,6 +228,7 @@ class Zero:
                 type(self.wake).__name__)
         else:
             self.eyes = None
+            self.room = None
 
         tool_block = (self.tool_registry.spec_block()
                       if self.tool_registry is not None else "")
@@ -597,6 +606,10 @@ class Zero:
                 self.wake.reset()
                 self.mic.resume()
                 self.mic.drain()               # drop our own announcement audio
+            _room = getattr(self, "room", None)
+            if _room is not None:
+                _room.observe(frame)   # idle mic = the room itself
+                _room.maybe_log(time.monotonic())
             if self.wake.process(frame):
                 log.info("wake word! let's talk.")
                 return
@@ -1154,6 +1167,11 @@ class Zero:
                         lg[-1] = (lg[-1][0], "user", text)
                 messages = self._attach_vision(self.convo.messages(), text)
                 chunks, llm_stop = self._stream_in_background(messages)
+            _room = getattr(self, "room", None)
+            if _room is not None:
+                # Lombard: match the room's loudness so ZERO is neither lost
+                # in a crowd nor startling in a quiet space.
+                self.speaker.gain = _room.speech_gain()
             self._to(State.SPEAKING)
             # The monitor has been live since the turn committed; it covers the
             # filler AND the reply, so speech or the wake word can cut ZERO off
@@ -2133,7 +2151,6 @@ class Zero:
         quiet = 0
         for frame in self.mic.frames():
             if stop.is_set():
-                self.speaker.unduck()
                 return None
             frames.append(frame)
             is_voice = self.endpointer.is_speech_frame(frame)
@@ -2171,8 +2188,11 @@ class Zero:
         if voiced_ratio < min_ratio:
             log.debug("barge-in ignored: only %.0f%% voiced (need %.0f%%) — "
                       "noise, not speech", voiced_ratio * 100, min_ratio * 100)
-            return False         # never ducked; the reply carries on untouched
-        self.speaker.duck(self.cfg.get("conversation.barge_in_duck", 0.35))
+            return False         # the reply carries on untouched
+        # NOTE: no ducking. People do not drop their volume when talked over —
+        # they finish the thought and answer afterwards. Dropping to 35% was a
+        # machine gesture that read as a glitch. The voice stays level; what
+        # they said is transcribed underneath and folded into the next answer.
         import numpy as np
 
         sr = self.cfg.get("audio.sample_rate", 16000)
@@ -2190,8 +2210,7 @@ class Zero:
             # Not an interruption — but not nothing either: record it so the
             # next turn's context knows they were engaged (humans calibrate on
             # exactly this). The reply itself flows on.
-            self._overheard.append(text)
-            self.speaker.unduck()   # they were agreeing — carry on at volume
+            self._overheard.append(text)   # they were agreeing — carry on
             return False
         if kind is InterruptKind.NOISE:
             if stt_failed:
@@ -2204,8 +2223,7 @@ class Zero:
                     "— ask them to repeat it briefly.)")
                 self._soft_stop = True
                 return True
-            self.speaker.unduck()   # a transcribed nothing — hallucinated blip
-            return False
+            return False   # a transcribed nothing — hallucinated blip
         self._queued_turn = {"text": text, "frames": frames, "kind": kind.value}
         if kind is InterruptKind.CORRECTION:
             self._interrupt_note = (
@@ -2236,6 +2254,7 @@ class Zero:
         self.mic.resume()
         self.mic.drain()   # drop the tail of our own audio captured a moment ago
         self.wake.reset()
+        _bi_room = getattr(self, "room", None)
         speech = None
         if self.cfg.get("conversation.barge_in_on_speech", True):
             from zero.audio.bargein import SpeechBargeIn
@@ -2246,7 +2265,12 @@ class Zero:
                 learn_ms=self.cfg.get("conversation.barge_in_learn_ms", 900),
                 trigger_ms=self.cfg.get("conversation.barge_in_speech_ms", 300),
                 ratio=self.cfg.get("conversation.barge_in_ratio", 1.6),
-                min_rms=self.cfg.get("conversation.barge_in_min_rms", 250),
+                # Scaled to the room: in a hall the crowd itself would clear
+                # a fixed gate, so the bar rises with the ambient floor.
+                min_rms=(_bi_room.gate(
+                    self.cfg.get("conversation.barge_in_min_rms", 250))
+                    if _bi_room is not None
+                    else self.cfg.get("conversation.barge_in_min_rms", 250)),
                 # Keep only the interrupting words (trigger window + lead-in),
                 # NOT 1.5s of ring — the ring's prefix is ZERO's own reply
                 # echo, which garbled the post-interrupt turn.
