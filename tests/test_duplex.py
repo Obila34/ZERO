@@ -434,16 +434,22 @@ class TestBargeInEnvelopeCorrelation:
         d = SpeechBargeIn(is_speech=lambda f: True, block_ms=BLOCK_MS,
                           learn_ms=90, trigger_ms=90, ratio=2.0, min_rms=250,
                           played_env=env, env_corr_max=0.65)
-        rng = np.random.default_rng(7)
-        for _ in range(40):
-            level = int(rng.uniform(300, 500))
-            played.append((_t.monotonic(), float(level)))
-            d.update(_frame(level))
-        # Playback stays quiet; the mic jumps loud independently (a person).
+        # Playback is held CONSTANT so the reference has no variance and no
+        # correlation can be computed against it — that is what "uncorrelated"
+        # means here, and it makes the test deterministic. Randomising both
+        # signals (the earlier version) let them correlate by chance on a short
+        # window, so the test passed or failed depending on machine timing.
+        step = BLOCK_MS / 1000.0
+        for _ in range(12):
+            played.append((_t.monotonic(), 400.0))
+            d.update(_frame(400))
+            _t.sleep(step)
+        # Playback unchanged; the mic jumps loud on its own (a person).
         fired = []
         for _ in range(6):
-            played.append((_t.monotonic(), float(rng.uniform(300, 500))))
+            played.append((_t.monotonic(), 400.0))
             fired.append(d.update(_frame(4000)))
+            _t.sleep(step)
         assert any(fired)
 
 

@@ -117,13 +117,24 @@ class SpeechBargeIn:
             pt = np.array([t for t, _ in played], dtype=np.float64)
             pr = np.array([r for _, r in played], dtype=np.float64)
             best = 0.0
+            lo, hi = float(pt[0]), float(pt[-1])
             for lag_blocks in range(0, int(0.4 / step) + 1):
-                ref = np.interp(grid - lag_blocks * step, pt, pr,
-                                left=0.0, right=0.0)
-                ms, rs = mic.std(), ref.std()
-                if ms < 1e-6 or rs < 1e-6:
+                at = grid - lag_blocks * step
+                # Correlate ONLY where the played envelope actually has data.
+                # Zero-padding outside its range (np.interp's left/right) built
+                # a synthetic step from 0 up to the playback level, and that
+                # step correlates beautifully with a real speech onset — so a
+                # genuine interruption got vetoed as "echo" whenever playback
+                # had started recently and the envelope did not yet span the
+                # window. Missing reference is not evidence of echo.
+                mask = (at >= lo) & (at <= hi)
+                if int(mask.sum()) < 8:
                     continue
-                c = float(np.corrcoef(mic, ref)[0, 1])
+                ref = np.interp(at[mask], pt, pr)
+                m = mic[mask]
+                if m.std() < 1e-6 or ref.std() < 1e-6:
+                    continue
+                c = float(np.corrcoef(m, ref)[0, 1])
                 best = max(best, c)
             return best >= self._env_corr_max
         except Exception as e:  # a correlation hiccup must never break the mic
