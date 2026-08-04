@@ -48,7 +48,8 @@ class SpeechBargeIn:
                  played_env: Callable[[], list] | None = None,
                  env_corr_max: float = 0.65,
                  floor_percentile: float = 80.0,
-                 carry_ms: int = 150):
+                 carry_ms: int = 150,
+                 afterthought_ms: int = 350):
         self._is_speech = is_speech
         self._block_ms = max(1, int(block_ms))
         self._learn_blocks = max(1, learn_ms // self._block_ms)
@@ -70,12 +71,18 @@ class SpeechBargeIn:
         self._ring: deque = deque(maxlen=max(1, keep_ms // self._block_ms))
         # Thinking-gap speech (before any reply audio): collected but NEVER a
         # trigger by itself — the user's own trailing speech lands here and
-        # must not cut off a reply that hasn't made a sound yet. It only
-        # matters if the speech CONTINUES into playback (then it can't be echo).
+        # must not cut off a reply that hasn't made a sound yet. Two things CAN
+        # come of it: speech continuing into playback becomes a carry trigger,
+        # and a remark that starts AND ends in the gap becomes an AFTERTHOUGHT
+        # ("...oh, and make it two") the owner can merge into the pending turn.
+        # The afterthought is also the safety net for aggressive early-commit
+        # endpointing: a turn cut early grows back together here.
         self._gap_run = 0
         self._gap_misses = 0
         self._gap_frames: list = []
         self._gap_cap = max(1, 4000 // self._block_ms)  # keep <=4 s of gap speech
+        self._after_blocks = max(1, afterthought_ms // self._block_ms)
+        self._afterthought: list | None = None  # finished gap remark, one-shot
         # Carry is a short window after playback starts (not a permanent state):
         # past it, gap speech has ended and normal echo discipline resumes.
         self._carry_deadline = 0.0
@@ -128,6 +135,13 @@ class SpeechBargeIn:
         self._run = 0
         self._misses = 0
 
+    def take_afterthought(self) -> list | None:
+        """Frames of a remark that started AND ended in the gap before any
+        reply audio played ("...oh, one more thing"), or None. One-shot: the
+        caller owns the frames after taking them."""
+        frames, self._afterthought = self._afterthought, None
+        return frames
+
     def update(self, frame: np.ndarray, active: bool = True) -> bool:
         """Feed one mic frame; True the moment sustained foreground speech is
         detected. ``active`` = audio is REALLY coming out of the speaker right
@@ -142,7 +156,7 @@ class SpeechBargeIn:
         if not active:
             self._was_active = False
             self._run = 0
-            # Pre-roll: track speech in the thinking gap. Collected, not acted on.
+            # Pre-roll: track speech in the thinking gap. Never a trigger here.
             try:
                 voiced = rms >= self._min_rms and self._is_speech(frame)
             except Exception:
@@ -151,13 +165,19 @@ class SpeechBargeIn:
                 self._gap_run += 1
                 self._gap_misses = 0
                 self._gap_frames.append(frame)
-                if len(self._gap_frames) > self._gap_cap:
-                    self._gap_frames.pop(0)
-            else:
+            elif self._gap_run:
                 self._gap_misses += 1
-                if self._gap_misses > 8:  # ~250 ms of quiet: the gap speech ended
+                # Bridge frames keep the audio contiguous for STT — a remark
+                # made of choppy voiced-only frames transcribes badly.
+                self._gap_frames.append(frame)
+                if self._gap_misses > 8:  # ~250 ms of quiet: the remark ended
+                    if self._gap_run >= self._after_blocks:
+                        self._afterthought = list(self._gap_frames)
                     self._gap_run = 0
+                    self._gap_misses = 0
                     self._gap_frames = []
+            if len(self._gap_frames) > self._gap_cap:
+                self._gap_frames.pop(0)
             return False
 
         if not self._was_active:

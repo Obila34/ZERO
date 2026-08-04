@@ -61,6 +61,19 @@ class Conversation:
         self._history.append({"role": "assistant", "content": text})
         self._maybe_trim()
 
+    def amend_last_user(self, extra: str) -> None:
+        """Append text to the LAST user message — the afterthought merge: the
+        user added to their turn after the endpoint had already committed.
+        Growing the message in place keeps the prefix cache-friendly (nothing
+        before it moves). No-op when there's no user turn yet."""
+        extra = (extra or "").strip()
+        if not extra:
+            return
+        for m in reversed(self._history):
+            if m["role"] == "user":
+                m["content"] = f"{m['content']} {extra}"
+                return
+
     def messages(self) -> list[Message]:
         system = self.system_prompt
         if self._memory_block:

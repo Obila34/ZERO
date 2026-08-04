@@ -500,6 +500,84 @@ class TestSmileShelf:
         assert np.allclose(whole, parts, atol=1e-6)
 
 
+class TestAfterthought:
+    def _d(self, **kw):
+        defaults = dict(is_speech=lambda f: True, block_ms=BLOCK_MS,
+                        learn_ms=90, trigger_ms=90, ratio=2.0, min_rms=250,
+                        afterthought_ms=120)
+        defaults.update(kw)
+        return SpeechBargeIn(**defaults)
+
+    def test_gap_remark_becomes_an_afterthought(self):
+        d = self._d()
+        for _ in range(6):                      # 180ms of gap speech
+            d.update(_frame(2000), active=False)
+        for _ in range(12):                     # then quiet: the remark ended
+            d.update(_frame(10), active=False)
+        frames = d.take_afterthought()
+        assert frames is not None and len(frames) >= 6
+        assert d.take_afterthought() is None    # one-shot
+
+    def test_too_short_gap_speech_is_not_an_afterthought(self):
+        d = self._d(afterthought_ms=300)        # needs 10 blocks
+        for _ in range(4):                      # only 4 voiced blocks
+            d.update(_frame(2000), active=False)
+        for _ in range(12):
+            d.update(_frame(10), active=False)
+        assert d.take_afterthought() is None
+
+    def test_quiet_gap_speech_below_min_rms_ignored(self):
+        d = self._d()
+        for _ in range(10):                     # loud enough VAD, too quiet RMS
+            d.update(_frame(100), active=False)
+        for _ in range(12):
+            d.update(_frame(10), active=False)
+        assert d.take_afterthought() is None
+
+
+class TestAmendLastUser:
+    def _convo(self):
+        from zero.conversation import Conversation
+
+        return Conversation("sys")
+
+    def test_appends_to_last_user_turn(self):
+        c = self._convo()
+        c.add_user("set a timer for five minutes")
+        c.add_assistant("Sure.")
+        c.add_user("make me tea")
+        c.amend_last_user("oh and make it two")
+        msgs = c.messages()
+        assert msgs[-1]["content"] == "make me tea oh and make it two"
+        assert msgs[-3]["content"] == "set a timer for five minutes"  # untouched
+
+    def test_noop_without_user_turn_or_text(self):
+        c = self._convo()
+        c.amend_last_user("stray")              # empty history: no crash
+        c.add_user("hello")
+        c.amend_last_user("")                   # empty extra: no change
+        assert c.messages()[-1]["content"] == "hello"
+
+
+class TestOpenAIMessageConvert:
+    def test_plain_messages_pass_through(self):
+        from zero.llm.openai_engine import _convert
+
+        msgs = [{"role": "system", "content": "be brief"},
+                {"role": "user", "content": "hi"}]
+        assert _convert(msgs) == msgs
+
+    def test_images_become_data_uri_parts(self):
+        from zero.llm.openai_engine import _convert
+
+        out = _convert([{"role": "user", "content": "what is this?",
+                         "images": ["QUJD"]}])
+        parts = out[0]["content"]
+        assert parts[0] == {"type": "text", "text": "what is this?"}
+        assert parts[1]["image_url"]["url"].startswith(
+            "data:image/jpeg;base64,QUJD")
+
+
 class TestStripStageDirections:
     def _run(self, *chunks):
         from zero.tts.orchestrator import strip_asides

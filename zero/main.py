@@ -262,6 +262,9 @@ class Zero:
         self._was_interrupted = False  # tell the LLM it got cut off, once
         self._last_backchannel = 0.0   # cooldown clock for "mm-hmm" while user speaks
         self._t_utterance_end = 0.0    # end-of-speech marker for the latency budget
+        self._bg_monitor = None        # live duplex monitor (stop_event, thread)
+        self._afterthoughts: list = [] # transcribed gap remarks awaiting merge
+        self._overheard: list = []     # backchannels heard mid-reply -> next context
         # Speculative prefill needs the RAW engine (the tool router doesn't
         # proxy it) — None simply means the old first-token latency.
         self._llm_prefill = (getattr(base_llm, "prefill", None)
@@ -611,6 +614,7 @@ class Zero:
         log.info("conversation open — just talk (say 'goodbye' to stop)")
 
         while True:
+            self._stop_monitor()  # whatever path got us here, one mic consumer
             self._drain_events()  # timers/reminders land at turn boundaries
             self._maybe_compact()  # fold trimmed turns into a rolling summary
 
@@ -747,10 +751,17 @@ class Zero:
                     self._end_conversation()
                     return
 
-                # Mute the mic for the whole think+speak phase so ZERO can't
-                # transcribe its own voice off the BT speaker (echo).
                 self.mic.pause()
                 self._to(State.THINKING)
+
+            # Duplex from the moment the turn commits: the monitor runs through
+            # THINKING as well as SPEAKING, so the old deaf window (identity +
+            # STT + prefill, ~0.5-1.5s) is gone. Gap remarks become
+            # afterthoughts (merged below, before a word is spoken); speech
+            # continuing into playback becomes a carry barge-in. When speech
+            # barge-in is config-disabled, _start_bargein leaves the mic paused
+            # and only the wake word interrupts — the old behavior.
+            self._bg_monitor = self._start_bargein()
 
             # "Only my voice": skip anything that isn't the enrolled owner — before
             # STT, so we don't even transcribe other people / background voices.
@@ -802,6 +813,14 @@ class Zero:
                     "(You were interrupted mid-sentence a moment ago — don't "
                     "restart the old answer; just respond to what they say now.)"))
                 self._interrupt_note = None
+            heard, self._overheard = self._overheard[-3:], []
+            if heard:
+                murmurs = "; ".join(f"'{h}'" for h in heard)
+                self._turn_notes.append(
+                    f"(While you were speaking they murmured: {murmurs} — "
+                    "active listening, not an interruption. Let it shape you: "
+                    "engagement means you can go a level deeper; don't comment "
+                    "on the murmur itself.)")
             self._turn_durable_pid = None  # only a CONFIDENT voice credits memory
             self._turn_speaker = None      # who to tag this turn's training data
             if self.identity is not None:
@@ -1007,6 +1026,17 @@ class Zero:
                     # gate as the logs — an unstorable turn tags nothing.
                     self.reward.on_user(text)
             self._t_reply_start = time.monotonic()  # end-of-STT marker for timing
+            # Afterthought merge, round 1: a remark finished during the STT/
+            # identity work ("...oh and make it two") joins the turn BEFORE the
+            # LLM ever sees it — the cheapest conversation-turn there is.
+            extra = self._pop_afterthoughts()
+            if extra:
+                log.info("afterthought merged pre-LLM: %r", extra)
+                text = f"{text} {extra}"
+                self.convo.amend_last_user(extra)
+                for lg in (self._session_log, self._corpus_log):
+                    if lg and lg[-1][1] == "user":
+                        lg[-1] = (lg[-1][0], "user", text)
             # Fold in what ZERO currently sees as an EPHEMERAL note on THIS turn
             # only — the note + keyframes are attached to the outgoing copy of the
             # messages, never saved to history, so the cached prefix and future
@@ -1016,10 +1046,25 @@ class Zero:
             # filler — the model is already generating while the filler plays, so the
             # real answer flows in with little or no added delay.
             chunks, llm_stop = self._stream_in_background(messages)
+            # Afterthought merge, round 2: a remark that landed while the
+            # vision/recall context was being built. The in-flight stream is
+            # abandoned and restarted with the completed thought — the warm
+            # prefix makes the restart cost roughly one first-token.
+            extra = self._pop_afterthoughts()
+            if extra:
+                llm_stop.set()
+                log.info("afterthought merged, reply restarted: %r", extra)
+                text = f"{text} {extra}"
+                self.convo.amend_last_user(extra)
+                for lg in (self._session_log, self._corpus_log):
+                    if lg and lg[-1][1] == "user":
+                        lg[-1] = (lg[-1][0], "user", text)
+                messages = self._attach_vision(self.convo.messages(), text)
+                chunks, llm_stop = self._stream_in_background(messages)
             self._to(State.SPEAKING)
-            # Barge-in covers the filler AND the reply, so speech or the wake
-            # word can cut ZERO off at any point while it's making sound.
-            monitor = self._start_bargein()
+            # The monitor has been live since the turn committed; it covers the
+            # filler AND the reply, so speech or the wake word can cut ZERO off
+            # at any point while it's making sound.
             try:
                 # The filler RACES the real reply: it only plays if no reply
                 # audio arrived within the grace window, so a fast answer is
@@ -1027,7 +1072,7 @@ class Zero:
                 reply = self._speak_streaming(chunks, llm_stop,
                                               filler_audio=self._pick_filler(text))
             finally:
-                self._stop_bargein(monitor)
+                self._stop_monitor()
             if self._interrupt or self._soft_stop:
                 llm_stop.set()  # stop generating a reply nobody is listening to
                 self._was_interrupted = True
@@ -1353,6 +1398,7 @@ class Zero:
         word immediately instead of being deaf for seconds. The speaker log is
         snapshotted first — the next conversation may reset it while the save is
         still running."""
+        self._stop_monitor()  # a stop-phrase exit arrives with the monitor live
         if self.reward is not None:
             # A proactive nudge nobody answered scores against its kind, and
             # per-session tagging state resets.
@@ -1744,8 +1790,40 @@ class Zero:
         self._interrupt_note = None
         self._was_interrupted = False
         self._last_backchannel = 0.0
+        self._afterthoughts = []
+        self._overheard = []
         if not self.text_mode:
             self.speaker.unduck()
+
+    def _stop_monitor(self) -> None:
+        """Idempotently stop the duplex monitor (if one is running). Safe from
+        every path — loop top, post-reply, conversation end — so no early
+        `continue` can leave two consumers fighting over the mic queue."""
+        m, self._bg_monitor = self._bg_monitor, None
+        if m is not None:
+            self._stop_bargein(m)
+
+    def _pop_afterthoughts(self) -> str:
+        """Everything transcribed from gap remarks since the turn committed,
+        joined — '' when there were none. One-shot."""
+        parts, self._afterthoughts = self._afterthoughts, []
+        return " ".join(p for p in parts if p).strip()
+
+    def _transcribe_afterthought(self, frames) -> None:
+        """Monitor thread: transcribe a finished gap remark right away, so the
+        merge point (just before speaking) finds text, not raw audio."""
+        import numpy as np
+
+        try:
+            audio = np.concatenate(frames).astype("float32") / 32768.0
+            with self._stt_lock:
+                text = (self.stt.transcribe(
+                    audio, self.cfg.get("audio.sample_rate", 16000)) or "").strip()
+            if text:
+                log.info("afterthought heard: %r", text)
+                self._afterthoughts.append(text)
+        except Exception as e:  # a lost afterthought must never break playback
+            log.debug("afterthought stt failed: %s", e)
 
     def _maybe_backchannel(self, audio_i16, turn_p) -> None:
         """Active listening: at a brief pause deep inside a LONG user turn that
@@ -1826,6 +1904,10 @@ class Zero:
         kind = classify_interrupt(text)
         log.info("interruption %r -> %s", text, kind.value)
         if kind is InterruptKind.BACKCHANNEL:
+            # Not an interruption — but not nothing either: record it so the
+            # next turn's context knows they were engaged (humans calibrate on
+            # exactly this). The reply itself flows on.
+            self._overheard.append(text)
             self.speaker.unduck()   # they were agreeing — carry on at volume
             return False
         if kind is InterruptKind.NOISE:
@@ -1851,8 +1933,9 @@ class Zero:
         else:  # QUEUE — the polite path
             self._interrupt_note = (
                 "(They said this while you were finishing your last sentence; "
-                "you stopped at the end of it. Respond to this new input now — "
-                "don't mention the overlap.)")
+                "you stopped at the end of it. If it supports what you were "
+                "saying, weave it in and continue your thought; if it changes "
+                "direction, follow them. Don't mention the overlap.)")
             self._soft_stop = True    # finish the sentence, then yield
         return True
 
@@ -1892,6 +1975,8 @@ class Zero:
                 env_corr_max=self.cfg.get("conversation.barge_in_env_corr", 0.65),
                 floor_percentile=self.cfg.get(
                     "conversation.barge_in_floor_percentile", 80),
+                afterthought_ms=self.cfg.get(
+                    "conversation.afterthought_ms", 350),
             )
         stop = threading.Event()
 
@@ -1903,12 +1988,18 @@ class Zero:
                     if self.wake.process(frame):
                         self._interrupt = True   # wake word: always a hard stop
                         return
-                    if (speech is not None
-                            and speech.update(frame,
-                                              active=self.speaker.playing)):
+                    if speech is None:
+                        continue
+                    if speech.update(frame, active=self.speaker.playing):
                         if self._assess_interruption(speech, stop):
                             return
                         speech.rearm()   # backchannel/noise: keep watching
+                        continue
+                    # A remark that finished in the think-gap (before any reply
+                    # audio): transcribe it now so the merge points find text.
+                    frames_af = speech.take_afterthought()
+                    if frames_af:
+                        self._transcribe_afterthought(frames_af)
                 except Exception as e:  # never let the monitor crash playback
                     log.debug("barge-in monitor error: %s", e)
                     return

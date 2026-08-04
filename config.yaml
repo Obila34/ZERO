@@ -87,6 +87,15 @@ conversation:
   barge_in_duck:
     0.35 # output gain while an interruption is being assessed — the audible
     # "I noticed you" yield gesture. 1.0 = no ducking.
+  afterthought_ms:
+    350 # a remark this long, finishing in the gap BEFORE the reply's first
+    # audio ("...oh and make it two"), is merged into the pending turn —
+    # the reply restarts with the completed thought. Also the safety net
+    # for early_commit cutting a turn short.
+  # CLOSE-MIC PROFILE (handheld/headset mic): speaker bleed sits far below
+  # your voice, so interruption can be much more sensitive. Suggested:
+  #   barge_in_speech_ms: 200, barge_in_ratio: 1.2, barge_in_min_rms: 200
+  # The envelope-correlation guard stays on as the safety net either way.
 
   # What an interruption MEANS (zero/audio/interrupt.py): corrections ("no,
   # I meant—", "wait, stop") cut the reply mid-word; backchannels ("yeah",
@@ -452,7 +461,14 @@ stt:
   initial_prompt: "A natural spoken conversation with a voice assistant named Zero."
 
 llm:
-  engine: ollama
+  engine:
+    ollama # ollama (current: gemma4 over the GPU tunnel) | openai (any
+    # /v1/chat/completions server — the vLLM cutover target). When the GPU
+    # node's vLLM is validated, switch to:
+    #   engine: openai
+    #   host: http://127.0.0.1:8000   # (tunnel to the node's vLLM port)
+    #   model: <the served model name from vLLM>
+    # and everything else (tools, memory, vision, streaming) carries over.
   # Speculative prefill: while the endpointer is still waiting out the silence,
   # the speculative transcript is sent ahead with num_predict=1 so the model
   # reads (and KV-caches) the whole prompt early. By the time the real request

@@ -122,6 +122,19 @@ def build_llm(cfg: Config) -> LLM:
             max_tokens=cfg.get("llm.max_tokens", 160),
             num_ctx=cfg.get("llm.num_ctx", 8192),
         )
+    if engine in ("openai", "vllm"):
+        # Any /v1/chat/completions server (vLLM on the GPU node, llama.cpp
+        # server, ...). Same streaming/warmup/prefill surface as Ollama, so
+        # the cutover is a config flip, not a code change.
+        from zero.llm.openai_engine import OpenAICompatLLM
+
+        return OpenAICompatLLM(
+            host=cfg.get("llm.host", "http://127.0.0.1:8000"),
+            model=cfg.get("llm.model", ""),
+            api_key=cfg.get("llm.api_key"),
+            temperature=cfg.get("llm.temperature", 0.7),
+            max_tokens=cfg.get("llm.max_tokens", 160),
+        )
     raise ValueError(f"unknown llm engine: {engine}")
 
 
