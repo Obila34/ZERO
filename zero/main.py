@@ -266,6 +266,7 @@ class Zero:
         self._bg_monitor = None        # live duplex monitor (stop_event, thread)
         self._speculation = None       # in-flight bet on an unfinished sentence
         self._live_stt = None          # live ASR session for the current turn
+        self._llm_unreachable = False  # last turn failed to reach the model
         self._afterthoughts: list = [] # transcribed gap remarks awaiting merge
         self._overheard: list = []     # backchannels heard mid-reply -> next context
         # Speculative prefill needs the RAW engine (the tool router doesn't
@@ -316,8 +317,10 @@ class Zero:
                 is_idle=lambda: self.state == State.IDLE,
             )
             self._fillers = self._presynth_fillers()
+            self._recovery = self._presynth_recovery()
         else:
             self.voiceid, self._voiceprint = None, None
+            self._recovery = {}
             self.identity = None
             self.guests = None
             self.privacy, self.indicator = None, None
@@ -390,6 +393,19 @@ class Zero:
                 log.warning("announcement failed: %s", e)
             self._to(prev if prev != State.SPEAKING else State.IDLE)
         return open_conversation
+
+    # Spoken when a turn produces nothing — a dropped network, an unreachable
+    # model, a reply cut for degeneracy. Synthesised at startup while the
+    # network is known good and held in RAM, so they still play when every
+    # remote service is down. Silence in front of an audience reads as "it's
+    # broken"; a short human line reads as "it's thinking".
+    _RECOVERY_LINES = {
+        "retry": ["Give me one second.", "Hang on, let me try that again."],
+        "lost": ["Sorry, I lost my train of thought there. Say that again?",
+                 "I didn't quite catch that — one more time?"],
+        "slow": ["My connection is being slow right now — bear with me.",
+                 "Give me a moment, I'm having a slow moment."],
+    }
 
     _DEFAULT_FILLERS = {
         "question": ["Good question, let me think.", "Hmm, let me think about that.",
@@ -867,49 +883,68 @@ class Zero:
                     "on the murmur itself.)")
             self._turn_durable_pid = None  # only a CONFIDENT voice credits memory
             self._turn_speaker = None      # who to tag this turn's training data
-            if self.identity is not None:
-                # Sessions are owned by VOICE — the speaker's voice decides whose
-                # memories this turn belongs to; the face is perception only.
-                # (voice_only: false restores the legacy face+voice fusion.)
-                if self.cfg.get("identity.session.voice_only", True):
-                    ident, face_name = self.identity.identify_speaker(
-                        audio=utterance, frame_rgb=frame)
-                else:
-                    ident = self.identity.identify(audio=utterance, frame_rgb=frame)
-                    face_name = (ident.name if ident.is_known
-                                 and "face" in ident.via else None)
-                self._person = ident if ident.is_known else None
-                self._face_name = face_name
-                # One voiceprint for this utterance, reused by diarization AND
-                # guest clustering (embedding is not free).
-                voice_emb = self.identity.voice_embedding(utterance)
-                if ident.is_known:
-                    self._turn_speaker = ident.person_id
-                    # Persist this turn under the speaker ONLY when the voice is
-                    # confident enough: a borderline match still talks (live), but
-                    # must not write into someone else's permanent memory. This is
-                    # what keeps a multi-speaker session from cross-contaminating.
-                    write_min = self.cfg.get("identity.session.write_min_score", 0.55)
-                    if ident.score >= write_min:
-                        self._turn_durable_pid = ident.person_id
-                    welcome = self._welcome_back_note(ident)
-                    if welcome:
-                        self._turn_notes.append(welcome)
-                elif self.guests is not None:
-                    # An unfamiliar voice: remember the voiceprint, but DON'T
-                    # mint a guest yet — the transcript isn't in, and noise /
-                    # STT hallucinations were creating phantom guests. The
-                    # quality-gated assignment happens after the text check.
-                    self._turn_voice_emb = voice_emb
-                # Diarization: notice when a DIFFERENT person takes over.
-                if self.speaker_tracker is not None:
-                    change_note = self.speaker_tracker.update(
-                        person_id=ident.person_id if ident.is_known else None,
-                        name=ident.name if ident.is_known else None,
-                        voice_emb=voice_emb,
-                    )
-                    if change_note:
-                        self._turn_notes.append(change_note)
+            # Identity runs under a HARD TIME BUDGET. Voice embedding +
+            # diarization + registry lookup measured ~0.5-1.0s and sat
+            # squarely on the reply path — a third of the latency budget
+            # spent deciding who is talking, which the ANSWER does not need.
+            # It runs on a thread; if it misses the budget the turn proceeds
+            # with the identity already known (it rarely changes mid-chat)
+            # and the result lands for the next turn. Correctness is
+            # unchanged, the wait is not.
+            def _identity_work():
+                if self.identity is not None:
+                    # Sessions are owned by VOICE — the speaker's voice decides whose
+                    # memories this turn belongs to; the face is perception only.
+                    # (voice_only: false restores the legacy face+voice fusion.)
+                    if self.cfg.get("identity.session.voice_only", True):
+                        ident, face_name = self.identity.identify_speaker(
+                            audio=utterance, frame_rgb=frame)
+                    else:
+                        ident = self.identity.identify(audio=utterance, frame_rgb=frame)
+                        face_name = (ident.name if ident.is_known
+                                     and "face" in ident.via else None)
+                    self._person = ident if ident.is_known else None
+                    self._face_name = face_name
+                    # One voiceprint for this utterance, reused by diarization AND
+                    # guest clustering (embedding is not free).
+                    voice_emb = self.identity.voice_embedding(utterance)
+                    if ident.is_known:
+                        self._turn_speaker = ident.person_id
+                        # Persist this turn under the speaker ONLY when the voice is
+                        # confident enough: a borderline match still talks (live), but
+                        # must not write into someone else's permanent memory. This is
+                        # what keeps a multi-speaker session from cross-contaminating.
+                        write_min = self.cfg.get("identity.session.write_min_score", 0.55)
+                        if ident.score >= write_min:
+                            self._turn_durable_pid = ident.person_id
+                        welcome = self._welcome_back_note(ident)
+                        if welcome:
+                            self._turn_notes.append(welcome)
+                    elif self.guests is not None:
+                        # An unfamiliar voice: remember the voiceprint, but DON'T
+                        # mint a guest yet — the transcript isn't in, and noise /
+                        # STT hallucinations were creating phantom guests. The
+                        # quality-gated assignment happens after the text check.
+                        self._turn_voice_emb = voice_emb
+                    # Diarization: notice when a DIFFERENT person takes over.
+                    if self.speaker_tracker is not None:
+                        change_note = self.speaker_tracker.update(
+                            person_id=ident.person_id if ident.is_known else None,
+                            name=ident.name if ident.is_known else None,
+                            voice_emb=voice_emb,
+                        )
+                        if change_note:
+                            self._turn_notes.append(change_note)
+
+
+            _id_t = threading.Thread(target=_identity_work, name="identity",
+                                     daemon=True)
+            _id_t.start()
+            _id_budget = self.cfg.get("identity.budget_ms", 150) / 1000.0
+            _id_t.join(timeout=_id_budget)
+            if _id_t.is_alive():
+                log.debug("identity over budget (%dms) — replying now, the "
+                          "result lands for the next turn", int(_id_budget * 1000))
 
             # Bystander gate BEFORE transcription: in strict mode an unknown
             # voice isn't even transcribed — nothing to act on, nothing kept.
@@ -1130,6 +1165,18 @@ class Zero:
                 self._was_interrupted = True
                 log.info("barge-in: %s", "hard stop (correction/wake)"
                          if self._interrupt else "yielded at the sentence end")
+            # NEVER GO SILENT. A turn that produced no audio means the model
+            # was unreachable, the stream died, or the reply was cut for
+            # degeneracy. In a room with people, dead air reads as broken —
+            # say something human and stay in the conversation.
+            if not reply and not self._interrupt and not self._soft_stop:
+                spoke = self._say_recovery("slow" if self._llm_unreachable
+                                           else "lost")
+                log.warning("empty reply — spoke a recovery line (%s)",
+                            "ok" if spoke else "NO CLIP AVAILABLE")
+                self._llm_unreachable = False
+                continue
+
             # Store only what was actually SPOKEN — after a barge-in the model must
             # not "remember" saying sentences the user never heard.
             if reply:
@@ -1830,6 +1877,44 @@ class Zero:
         """Barge-in hook: True stops playback the instant the wake word fires."""
         return self._interrupt
 
+    def _presynth_recovery(self) -> dict:
+        """Render the recovery lines once, at startup, and keep the WAVEFORMS.
+        This is the whole point: when the exhibition wifi drops, TTS is gone
+        too, so anything synthesised on demand would also fail. These are
+        already audio."""
+        out: dict[str, list] = {}
+        for kind, lines in self._RECOVERY_LINES.items():
+            clips = []
+            for line in lines:
+                try:
+                    audio = self.voice.synthesize(line)
+                except Exception as e:
+                    audio = None
+                    log.debug("recovery synth failed for %r: %s", line, e)
+                if getattr(audio, "size", 0):
+                    clips.append(audio)
+            out[kind] = clips
+        total = sum(len(v) for v in out.values())
+        if total:
+            log.info("pre-synthesized %d recovery lines (offline-safe)", total)
+        else:
+            log.warning("NO recovery lines cached — a failed turn will be "
+                        "SILENT. Check the TTS service before going live.")
+        return out
+
+    def _say_recovery(self, kind: str = "retry") -> bool:
+        """Speak a cached recovery line. Never raises, never synthesises."""
+        clips = (self._recovery.get(kind) or self._recovery.get("retry") or [])
+        if not clips:
+            return False
+        try:
+            self.speaker.play(random.choice(clips), self.voice.sample_rate,
+                              should_stop=lambda: False)
+            return True
+        except Exception as e:
+            log.debug("recovery playback failed: %s", e)
+            return False
+
     def _reset_turn_state(self) -> None:
         """Clear every cross-turn interrupt artefact — a stale queued turn, a
         leftover duck, a half-set flag. Called at conversation boundaries so
@@ -2001,6 +2086,32 @@ class Zero:
         finally:
             self.mic.resume()
 
+    def _confirm_voice(self, speech, stop):
+        """Collect the rest of the interruption and report how much of it was
+        actually speech. Returns (frames, voiced_ratio), or None if playback
+        ended while we were listening. This runs BEFORE any ducking, so a
+        noise burst never touches the reply volume."""
+        frames = list(speech.frames)
+        block_ms = self.cfg.get("audio.block_ms", 30)
+        need_quiet = max(1, int(350 / block_ms))
+        cap = max(1, int(4000 / block_ms))
+        # Judge only the frames from the trigger onward — the ring's lead-in is
+        # room tone and would drag the ratio down.
+        judged = voiced = 0
+        quiet = 0
+        for frame in self.mic.frames():
+            if stop.is_set():
+                self.speaker.unduck()
+                return None
+            frames.append(frame)
+            is_voice = self.endpointer.is_speech_frame(frame)
+            judged += 1
+            voiced += 1 if is_voice else 0
+            quiet = 0 if is_voice else quiet + 1
+            if quiet >= need_quiet or len(frames) >= cap:
+                break
+        return frames, (voiced / judged if judged else 0.0)
+
     def _assess_interruption(self, speech, stop) -> bool:
         """Sustained speech over the reply. React like a person, in order:
         DUCK (drop the reply's volume — the audible "I noticed you"), collect
@@ -2012,24 +2123,24 @@ class Zero:
         * noise       -> un-duck and keep talking
 
         Returns True when playback is being stopped (the monitor exits) —
-        False re-arms the detector and keeps watching."""
+        False re-arms the detector and keeps watching.
+
+        VOICE-GATED, not energy-gated. In a quiet room a loudness+VAD trigger
+        is fine; in an exhibition hall a cough, a chair or a passing group
+        clears it constantly, and every one of those audibly ducked the reply
+        (the log showed `interruption '' -> noise`). So before touching the
+        volume we hold a short confirmation window and require the frames to
+        be genuinely speech-shaped. Non-speech never reaches the duck."""
+        confirm = self._confirm_voice(speech, stop)
+        if confirm is None:
+            return True          # playback ended under us
+        frames, voiced_ratio = confirm
+        min_ratio = self.cfg.get("conversation.barge_in_voiced_ratio", 0.55)
+        if voiced_ratio < min_ratio:
+            log.debug("barge-in ignored: only %.0f%% voiced (need %.0f%%) — "
+                      "noise, not speech", voiced_ratio * 100, min_ratio * 100)
+            return False         # never ducked; the reply carries on untouched
         self.speaker.duck(self.cfg.get("conversation.barge_in_duck", 0.35))
-        frames = list(speech.frames)
-        block_ms = self.cfg.get("audio.block_ms", 30)
-        need_quiet = max(1, int(350 / block_ms))
-        cap = max(1, int(4000 / block_ms))
-        quiet = 0
-        for frame in self.mic.frames():
-            if stop.is_set():        # reply ended under us — let the normal
-                self.speaker.unduck()  # turn flow capture whatever this was
-                return True
-            frames.append(frame)
-            if self.endpointer.is_speech_frame(frame):
-                quiet = 0
-            else:
-                quiet += 1
-            if quiet >= need_quiet or len(frames) >= cap:
-                break
         import numpy as np
 
         sr = self.cfg.get("audio.sample_rate", 16000)

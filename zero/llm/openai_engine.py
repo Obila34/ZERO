@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from typing import Iterator
 
 import requests
@@ -45,6 +46,58 @@ def _strip_reasoning_prefix(chunk: str) -> str:
     return cleaned
 
 
+class _DegenerateGuard:
+    """Cuts a reply that has collapsed into repetition.
+
+    A live session produced `thought thought thought thought ...` eleven times
+    and SPOKE it. Stripping a leading marker doesn't help once the model is
+    looping. This watches the token stream and stops it the moment the same
+    short token repeats, or a short phrase cycles — the reply is already
+    ruined at that point, and saying nothing is far better than saying that in
+    front of an audience.
+
+    Deliberately narrow so ordinary speech survives: real replies repeat words
+    ("very very"), but not 4 times in a row, and legitimate long words are
+    excluded by the length cap.
+    """
+
+    def __init__(self, max_repeats: int = 4, window: int = 24):
+        self.max_repeats = max_repeats
+        self._last = None
+        self._run = 0
+        self._recent: list[str] = []
+        self._window = window
+        self.tripped = False
+
+    def feed(self, chunk: str) -> bool:
+        """True = the stream has gone degenerate; stop consuming it."""
+        tok = chunk.strip().lower()
+        if not tok or len(tok) > 14:
+            self._last, self._run = None, 0
+            return False
+        if tok == self._last:
+            self._run += 1
+            if self._run >= self.max_repeats:
+                self.tripped = True
+                log.error("degenerate reply detected (%r x%d) — cutting the "
+                          "stream so it is never spoken", tok, self._run + 1)
+                return True
+        else:
+            self._last, self._run = tok, 0
+        # Also catch a two-token cycle ("a b a b a b ...").
+        self._recent.append(tok)
+        if len(self._recent) > self._window:
+            self._recent.pop(0)
+        if len(self._recent) >= 8:
+            tail = self._recent[-8:]
+            if len(set(tail)) <= 2 and tail[0] != tail[1]:
+                self.tripped = True
+                log.error("degenerate reply detected (cycling %s) — cutting",
+                          sorted(set(tail)))
+                return True
+        return False
+
+
 def _convert(messages: list[Message]) -> list[dict]:
     """Ollama-shaped messages -> OpenAI-shaped (images become data-URI parts)."""
     out: list[dict] = []
@@ -63,11 +116,16 @@ def _convert(messages: list[Message]) -> list[dict]:
 
 class OpenAICompatLLM(LLM):
     def __init__(self, host: str, model: str, api_key: str | None = None,
-                 temperature: float = 0.7, max_tokens: int = 160):
+                 temperature: float = 0.7, max_tokens: int = 160,
+                 connect_retries: int = 3, connect_timeout: float = 5.0,
+                 read_timeout: float = 60.0):
         self.host = host.rstrip("/")
         self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
+        self.connect_retries = max(1, int(connect_retries))
+        self.connect_timeout = float(connect_timeout)
+        self.read_timeout = float(read_timeout)
         self._headers = {"Content-Type": "application/json"}
         if api_key:
             self._headers["Authorization"] = f"Bearer {api_key}"
@@ -118,17 +176,36 @@ class OpenAICompatLLM(LLM):
             log.debug("speculative prefill failed (harmless): %s", e)
 
     def stream(self, messages: list[Message]) -> Iterator[str]:
-        try:
-            resp = self._session.post(
-                f"{self.host}/v1/chat/completions", headers=self._headers,
-                json=self._payload(messages, stream=True,
-                                   max_tokens=self.max_tokens),
-                stream=True, timeout=120)
-            resp.raise_for_status()
-        except requests.RequestException as e:
-            log.error("LLM request failed: %s", e)
+        # Connect with bounded retries. On exhibition wifi the first attempt
+        # can fail on a transient drop; retrying costs a few hundred ms and
+        # saves the turn. Only the CONNECT is retried — once tokens are
+        # flowing a mid-stream failure is handled by the caller, because
+        # replaying a half-spoken reply would repeat words aloud.
+        resp = None
+        last_err = None
+        for attempt in range(1, self.connect_retries + 1):
+            try:
+                resp = self._session.post(
+                    f"{self.host}/v1/chat/completions", headers=self._headers,
+                    json=self._payload(messages, stream=True,
+                                       max_tokens=self.max_tokens),
+                    stream=True, timeout=(self.connect_timeout, self.read_timeout))
+                resp.raise_for_status()
+                break
+            except requests.RequestException as e:
+                last_err = e
+                resp = None
+                if attempt < self.connect_retries:
+                    delay = 0.4 * attempt
+                    log.warning("LLM connect failed (%s) — retry %d/%d in %.1fs",
+                                e, attempt, self.connect_retries - 1, delay)
+                    time.sleep(delay)
+        if resp is None:
+            log.error("LLM unreachable after %d attempts: %s",
+                      self.connect_retries, last_err)
             return
         first = True
+        guard = _DegenerateGuard()
         try:
             for line in resp.iter_lines():
                 if not line:
@@ -154,7 +231,13 @@ class OpenAICompatLLM(LLM):
                         chunk = _strip_reasoning_prefix(chunk)
                         if not chunk:
                             continue
+                    if guard.feed(chunk):
+                        return   # degenerate: stop before it reaches the voice
                     yield chunk
+        except requests.RequestException as e:
+            # Network died mid-reply. Yield nothing further; the caller speaks
+            # a holding line rather than trailing off into silence.
+            log.warning("LLM stream dropped mid-reply: %s", e)
         finally:
             # Runs on normal exit AND when the consumer abandons the generator
             # (barge-in) — closing the response makes the server stop generating.

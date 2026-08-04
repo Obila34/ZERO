@@ -79,11 +79,12 @@ class KyutaiTTS(TTS):
             return
         q: "queue.Queue" = queue.Queue(maxsize=256)
         stop = threading.Event()
+        emitted = {"n": 0}
 
         def worker():
             import asyncio
 
-            async def run():
+            async def _run_once():
                 import msgpack
                 import websockets
 
@@ -107,9 +108,25 @@ class KyutaiTTS(TTS):
                                 break
                             msg = msgpack.unpackb(message, raw=False)
                             if msg.get("type") == "Audio":
+                                emitted["n"] += 1
                                 q.put(np.asarray(msg["pcm"], dtype=np.float32))
                     finally:
                         send_task.cancel()
+
+            async def run():
+                # One reconnect attempt on a CONNECT failure. Exhibition wifi
+                # drops sockets; a single retry turns a mute reply into a
+                # slightly late one. Only retry when nothing was emitted yet —
+                # reconnecting mid-sentence would repeat words aloud.
+                try:
+                    await _run_once()
+                    return
+                except Exception as e:
+                    if emitted["n"]:
+                        raise
+                    log.warning("Kyutai TTS connect failed (%s) — one retry", e)
+                await asyncio.sleep(0.3)
+                await _run_once()
 
             try:
                 asyncio.run(run())

@@ -86,6 +86,12 @@ conversation:
     # "barge-in armed: ... speech gate" log line: your voice must beat
     # the gate. Self-triggers = raise; never triggers = lower.
   barge_in_min_rms: 250 # absolute int16 RMS floor for foreground speech
+  barge_in_voiced_ratio:
+    0.55 # fraction of the interruption that must be SPEECH-shaped before the
+    # reply is ducked at all. Loudness alone is not enough in a crowded
+    # room: a cough or a passing group cleared the old gate and audibly
+    # ducked the reply (`interruption '' -> noise` in the logs). Raise
+    # toward 0.7 in a noisier hall; lower if real interruptions are missed.
   barge_in_floor_percentile:
     80 # echo floor = this percentile of recent echo RMS (was: max of the
     # learn window — one loud syllable early in the reply wedged the gate
@@ -325,7 +331,16 @@ identity:
   # guest-2, ...). Different strangers — and their training data — stay separate;
   # a guest who later gives a name is enrolled as a real person from then on.
   guests:
-    enabled: true
+    enabled:
+      false # EXHIBITION: OFF. Guest clustering mints a provisional identity
+      # per unfamiliar voice, but match_threshold (0.55) is stricter than a
+      # real person's own turn-to-turn variation — Sam scored 0.46-0.60
+      # against his OWN enrolled profile — so a new guest was created on
+      # nearly every turn (guest-69..74 in one short session). With hundreds
+      # of visitors that churns the DB and slows every identity lookup for
+      # no benefit: nothing downstream needs a stranger to have a stable id.
+      # Enrolled people (Sam) are recognised by the person registry below,
+      # which is a SEPARATE path and is unaffected by this.
     db_path: zero_guests.sqlite
     match_threshold: 0.55 # voice cosine to treat two utterances as the same guest
     max_guests: 50
@@ -335,6 +350,13 @@ identity:
     min_words: 2 # transcript must have at least this many words
     min_ms: 1200 # utterance must be at least this long
     min_rms: 150 # ...and at least this loud (int16 RMS)
+  budget_ms:
+    150 # HARD cap on identity work in the reply path. Voice embedding +
+    # diarization + registry lookup measured ~0.5-1.0s and were a third of
+    # the end-to-end latency. Past this the turn replies anyway using the
+    # identity already known (it rarely changes mid-conversation) and the
+    # result lands for the next turn — the work still completes, it just
+    # stops being something you wait for.
   session:
     voice_only: true
     # Durable memory (facts + the per-person last-conversation) is written for a
