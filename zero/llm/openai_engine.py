@@ -20,6 +20,7 @@ so the rest of the pipeline can keep the Ollama shape everywhere.
 from __future__ import annotations
 
 import json
+import re
 from typing import Iterator
 
 import requests
@@ -28,6 +29,20 @@ from zero.llm.base import LLM, Message
 from zero.utils.logging import get_logger
 
 log = get_logger("llm.openai")
+
+
+# A reasoning pass that leaks into `content` shows up welded to the first real
+# word ("thoughtIt's looking warm..."), which then gets SPOKEN. Narrow on
+# purpose: only a bare marker immediately followed by a capital letter, so
+# ordinary words ("thoughtful", "thinking about it") are untouched.
+_REASON_PREFIX_RE = re.compile(r"^\s*(?:thought|thinking|reasoning)(?=[A-Z])")
+
+
+def _strip_reasoning_prefix(chunk: str) -> str:
+    cleaned = _REASON_PREFIX_RE.sub("", chunk)
+    if cleaned != chunk:
+        log.warning("stripped a leaked reasoning prefix from the reply")
+    return cleaned
 
 
 def _convert(messages: list[Message]) -> list[dict]:
@@ -66,6 +81,11 @@ class OpenAICompatLLM(LLM):
             "stream": stream,
             "temperature": self.temperature,
             "max_tokens": max_tokens,
+            # Gemma's chat template can emit a reasoning pass; spoken aloud it
+            # comes out as a "thought" prefix glued to the answer. The Ollama
+            # engine sent "think": false — this is the OpenAI-dialect
+            # equivalent. Servers that don't know the key ignore it.
+            "chat_template_kwargs": {"enable_thinking": False},
         }
 
     def warmup(self, messages: list[Message] | None = None) -> None:
@@ -108,6 +128,7 @@ class OpenAICompatLLM(LLM):
         except requests.RequestException as e:
             log.error("LLM request failed: %s", e)
             return
+        first = True
         try:
             for line in resp.iter_lines():
                 if not line:
@@ -123,8 +144,16 @@ class OpenAICompatLLM(LLM):
                 choices = obj.get("choices") or []
                 if not choices:
                     continue
+                # Only ever take `content`. Servers with a reasoning parser put
+                # the model's private thinking in `reasoning_content`, and that
+                # must never reach the speaker.
                 chunk = (choices[0].get("delta") or {}).get("content", "")
                 if chunk:
+                    if first:
+                        first = False
+                        chunk = _strip_reasoning_prefix(chunk)
+                        if not chunk:
+                            continue
                     yield chunk
         finally:
             # Runs on normal exit AND when the consumer abandons the generator

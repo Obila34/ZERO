@@ -777,7 +777,6 @@ class Zero:
 
                 self.mic.pause()
                 self._to(State.THINKING)
-            self._close_live_stt()  # transcript is in; release the socket
 
             # Duplex from the moment the turn commits: the monitor runs through
             # THINKING as well as SPEAKING, so the old deaf window (identity +
@@ -813,11 +812,17 @@ class Zero:
             elif live is not None:
                 # Streamed while they spoke — only the model's lookahead tail
                 # is left to flush, so this returns almost immediately.
+                # MUST run before the session is closed: closing first kills
+                # the sender, so the end-of-turn marker never goes out, the
+                # tail never flushes (the last word of every turn is lost) and
+                # finalize() returns instantly on a dead session — which is
+                # what "settled in 0 ms" on every turn meant.
                 _t_fin = time.monotonic()
                 stt_result = {"text": live.finalize(
                     timeout=self.cfg.get("stt.finalize_timeout", 3.0))}
                 log.info("live transcript settled in %.0f ms",
                          (time.monotonic() - _t_fin) * 1000)
+                self._close_live_stt()   # tail is in — now release the socket
                 if live.failed is not None and not stt_result["text"]:
                     # The socket died mid-turn: fall back to transcribing the
                     # captured clip so the turn is not silently lost.

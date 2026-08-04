@@ -8,11 +8,21 @@ audio:
     # 0 input channels until the mic is unmuted at
     # the ALSA layer (alsamixer -c 3, F4=capture).
   input_gain:
-    6.0 # MIDDLE ground. 16.0 clipped this card-3 mic (peak
-    # 32767); 1.0 was too quiet for the wake word / VAD to
-    # fire. 6.0 lifts normal speech to a healthy level
-    # without clipping. Tune from the "utterance: rms="
-    # logs: aim rms ~2000-6000, peak well under 32767.
+    15.0 # RAISED from 6.0. At 6.0 a real session measured utterance
+    # rms 119-553 (median ~260) with peaks 1682-9429 — about 10x too
+    # quiet. Consequences were concrete: vad.energy_threshold (150)
+    # sat right at speaking level so quiet sentence-openings were
+    # missed, the wake word logged NEAR MISS at peak rms 138-259, and
+    # barge_in_min_rms (250) was ABOVE typical speech, which is why
+    # interrupting was unreliable.
+    # 15.0 = 2.5x, chosen against the PEAKS not the rms: the loudest
+    # observed peak (9429) lands at ~23.6k, still clear of 32767. A
+    # bigger jump would hit rms 2000+ but clip every loud syllable,
+    # and clipping breaks the VAD far worse than quiet audio does.
+    # Tune from the "utterance: rms=" logs: aim rms ~1000-3000 at this
+    # distance, peak well under 32767. If it still feels quiet, move
+    # the mic closer before raising this again — distance costs
+    # signal-to-noise that gain cannot buy back.
   output_device:
     pipewire # routes to PipeWire's default sink = the BT speaker
     # (needs the pipewire-alsa package). Use Headphones for 3.5mm jack.

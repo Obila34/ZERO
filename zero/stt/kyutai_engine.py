@@ -130,10 +130,12 @@ class KyutaiStreamSession:
         return self.text()
 
     def close(self) -> None:
+        """Release the session. Deliberately does NOT join the worker: this is
+        called on the reply path, and waiting up to 2s for a socket teardown
+        put that stall in front of every single answer. The worker is a daemon
+        that exits on the stop flag; nothing downstream depends on it."""
         self._stop.set()
-        t, self._thread = self._thread, None
-        if t is not None:
-            t.join(timeout=2.0)
+        self._thread = None
 
     @property
     def failed(self) -> Exception | None:
@@ -144,8 +146,16 @@ class KyutaiStreamSession:
         try:
             asyncio.run(self._session())
         except Exception as e:
-            self._failed = e
-            log.warning("live STT session ended: %s", e)
+            # Tearing the socket down without a close handshake is the NORMAL
+            # end of a turn (we stop feeding and walk away), so that specific
+            # error is noise, not a failure. Anything else is real and must
+            # surface, because it means the turn was not transcribed.
+            msg = str(e)
+            if "close frame" in msg or isinstance(e, asyncio.CancelledError):
+                log.debug("live STT socket closed without handshake (expected)")
+            else:
+                self._failed = e
+                log.warning("live STT session ended: %s", e)
         finally:
             self._marker.set()  # never leave finalize() waiting on a dead socket
 
