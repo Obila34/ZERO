@@ -438,7 +438,15 @@ stt:
   # GPU offload: send audio to large-v3-turbo on the GPU (Whisper server over the
   # SSH tunnel). Turbo-quality at ~1s, instead of 29s on the Pi CPU.
   engine:
-    remote # remote (Whisper large-v3-turbo, multilingual incl. SWAHILI) |
+    kyutai # <- CUT OVER for STREAMING. In batch mode Whisper won (472ms vs
+    # 1173ms), but that comparison fed Kyutai a finished clip — the job it is
+    # worst at. Streaming, the recognition happens WHILE you talk, so only the
+    # lookahead tail is left at the end. Whisper cannot do that: it needs the
+    # complete clip before it can start.
+    # NOTE: Kyutai is EN/FR only — this drops Swahili (accepted).
+    # ROLLBACK: `engine: remote`. fallback below is remote Whisper, so a dead
+    # Kyutai still gets transcribed rather than dropping the turn.
+    # remote (Whisper large-v3-turbo, multilingual incl. SWAHILI) |
     # kyutai (streaming WebSocket, ~word-by-word, but EN/FR ONLY — the
     #   deployed model is stt-1b-en_fr and has NO Swahili) |
     # whispercpp (local CPU fallback)
