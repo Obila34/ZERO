@@ -38,6 +38,7 @@ log = get_logger("stt.kyutai")
 
 _SR = 24000        # Kyutai's native rate — audio is resampled to this
 _FRAME = 1920      # samples per Audio message (80 ms at 24 kHz)
+_SILENCE = np.zeros(_FRAME, dtype=np.float32)
 
 
 def _resample(audio: np.ndarray, src_sr: int) -> np.ndarray:
@@ -52,7 +53,7 @@ def _resample(audio: np.ndarray, src_sr: int) -> np.ndarray:
 class KyutaiSTT(STT):
     def __init__(self, url: str, api_key: str = "public_token",
                  timeout: float = 30.0, lead_silence_s: float = 1.0,
-                 tail_silence_s: float = 2.0):
+                 tail_silence_s: float = 0.5, flush_silence_s: float = 35.0):
         self.url = url.rstrip("/")
         if not self.url.endswith("/api/asr-streaming"):
             self.url = f"{self.url}/api/asr-streaming"
@@ -60,6 +61,9 @@ class KyutaiSTT(STT):
         self.timeout = float(timeout)
         self._lead = float(lead_silence_s)
         self._tail = float(tail_silence_s)
+        # Upper bound on post-marker silence. The send loop is cancelled the
+        # moment the marker returns, so this is only a runaway guard.
+        self._flush = float(flush_silence_s)
         # Fail fast at build time if the deps are missing, so the factory can
         # fall back instead of dying mid-conversation.
         import msgpack  # noqa: F401
@@ -142,17 +146,28 @@ class KyutaiSTT(STT):
                 self.url, additional_headers={"kyutai-api-key": self.api_key},
                 open_timeout=self.timeout, close_timeout=2.0) as ws:
 
+            async def send_audio(chunk):
+                await ws.send(msgpack.packb(
+                    {"type": "Audio", "pcm": [float(x) for x in chunk]},
+                    use_single_float=True))
+
             async def send():
                 for chunk in chunk_iter:
-                    await ws.send(msgpack.packb(
-                        {"type": "Audio", "pcm": [float(x) for x in chunk]},
-                        use_single_float=True))
+                    await send_audio(chunk)
                     # Yield to the event loop so received words are processed
                     # while we're still sending (that's what makes the
                     # streaming path deliver text before the audio ends).
                     await asyncio.sleep(0)
                 await ws.send(msgpack.packb({"type": "Marker", "id": 0},
                                             use_single_float=True))
+                # The model only advances when it is fed audio, so the marker
+                # does not come back until enough further audio has been
+                # pushed through its lookahead delay. Keep pumping silence
+                # until the receive loop sees the marker and cancels us —
+                # bounded so a dead server can't spin here forever.
+                for _ in range(int(_SR * self._flush / _FRAME)):
+                    await send_audio(_SILENCE)
+                    await asyncio.sleep(0.001)
 
             send_task = asyncio.create_task(send())
             try:
