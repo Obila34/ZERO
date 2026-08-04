@@ -267,6 +267,8 @@ class Zero:
         self._speculation = None       # in-flight bet on an unfinished sentence
         self._live_stt = None          # live ASR session for the current turn
         self._llm_unreachable = False  # last turn failed to reach the model
+        self._stage_marks: list = []   # per-turn latency breakdown
+        self._stage_t = None
         self._afterthoughts: list = [] # transcribed gap remarks awaiting merge
         self._overheard: list = []     # backchannels heard mid-reply -> next context
         # Speculative prefill needs the RAW engine (the tool router doesn't
@@ -793,6 +795,7 @@ class Zero:
 
                 self.mic.pause()
                 self._to(State.THINKING)
+            self._stage("capture->pause")
 
             # Duplex from the moment the turn commits: the monitor runs through
             # THINKING as well as SPEAKING, so the old deaf window (identity +
@@ -802,6 +805,7 @@ class Zero:
             # barge-in is config-disabled, _start_bargein leaves the mic paused
             # and only the wake word interrupts — the old behavior.
             self._bg_monitor = self._start_bargein()
+            self._stage("arm-bargein")
 
             # "Only my voice": skip anything that isn't the enrolled owner — before
             # STT, so we don't even transcribe other people / background voices.
@@ -836,8 +840,7 @@ class Zero:
                 _t_fin = time.monotonic()
                 stt_result = {"text": live.finalize(
                     timeout=self.cfg.get("stt.finalize_timeout", 3.0))}
-                log.info("live transcript settled in %.0f ms",
-                         (time.monotonic() - _t_fin) * 1000)
+                self._stage("transcript")
                 self._close_live_stt()   # tail is in — now release the socket
                 if live.failed is not None and not stt_result["text"]:
                     # The socket died mid-turn: fall back to transcribing the
@@ -942,6 +945,7 @@ class Zero:
             _id_t.start()
             _id_budget = self.cfg.get("identity.budget_ms", 150) / 1000.0
             _id_t.join(timeout=_id_budget)
+            self._stage("identity")
             if _id_t.is_alive():
                 log.debug("identity over budget (%dms) — replying now, the "
                           "result lands for the next turn", int(_id_budget * 1000))
@@ -1104,6 +1108,7 @@ class Zero:
                     # (and resolve a pending proactive outcome). Same privacy
                     # gate as the logs — an unstorable turn tags nothing.
                     self.reward.on_user(text)
+            self._stage("stt-total")
             self._t_reply_start = time.monotonic()  # end-of-STT marker for timing
             # Afterthought merge, round 1: a remark finished during the STT/
             # identity work ("...oh and make it two") joins the turn BEFORE the
@@ -1121,6 +1126,7 @@ class Zero:
             # messages, never saved to history, so the cached prefix and future
             # turns stay clean and image-free.
             messages = self._attach_vision(self.convo.messages(), text)
+            self._stage("vision+recall")
             # Kick the LLM off in the BACKGROUND so its prefill overlaps the spoken
             # filler — the model is already generating while the filler plays, so the
             # real answer flows in with little or no added delay.
@@ -1840,6 +1846,11 @@ class Zero:
                     log.info("first audio out: %.2fs after STT, %.2fs after "
                              "end of speech",
                              now - self._t_reply_start, gap)
+                    # Where did that time actually go? Printed once per turn,
+                    # right when the first sound leaves the speaker.
+                    if self._t_utterance_end:
+                        self._stage("llm+tts")
+                        self._stage_report((now - self._t_utterance_end) * 1000.0)
                     spoke_any = True
                 played = idx
                 yield piece
@@ -1914,6 +1925,27 @@ class Zero:
         except Exception as e:
             log.debug("recovery playback failed: %s", e)
             return False
+
+    def _stage(self, name: str) -> None:
+        """Record a stage boundary for the per-turn latency breakdown. The
+        end-to-end number told us WHAT the latency was but never WHERE it
+        went, which is how ~570ms stayed invisible behind two stages that
+        looked individually reasonable."""
+        now = time.monotonic()
+        prev = getattr(self, "_stage_t", None) or self._t_utterance_end or now
+        self._stage_marks.append((name, (now - prev) * 1000.0))
+        self._stage_t = now
+
+    def _stage_report(self, first_audio_ms: float) -> None:
+        if not self._stage_marks:
+            return
+        parts = " ".join(f"{n}={ms:.0f}" for n, ms in self._stage_marks)
+        total = sum(ms for _, ms in self._stage_marks)
+        log.info("LATENCY ms: %s | accounted=%.0f first-audio=%.0f "
+                 "UNACCOUNTED=%.0f", parts, total, first_audio_ms,
+                 first_audio_ms - total)
+        self._stage_marks = []
+        self._stage_t = None
 
     def _reset_turn_state(self) -> None:
         """Clear every cross-turn interrupt artefact — a stale queued turn, a
