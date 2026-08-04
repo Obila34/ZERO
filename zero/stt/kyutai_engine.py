@@ -29,6 +29,7 @@ from __future__ import annotations
 import asyncio
 import queue
 import threading
+import time
 
 import numpy as np
 
@@ -163,20 +164,35 @@ class KyutaiStreamSession:
                         {"type": "Audio", "pcm": [0.0] * _FRAME},
                         use_single_float=True))
                 sent_marker = False
+                period = _FRAME / _SR            # 80 ms of audio per frame
+                next_at = time.monotonic()
                 while not self._stop.is_set():
+                    # REALTIME PACING while listening. Each frame is 80 ms of
+                    # audio, so emitting one every 5 ms would push ~16x
+                    # realtime and bury the speech in a flood of padding —
+                    # which is exactly what produced an empty transcript. Send
+                    # at most one frame per 80 ms of wall clock, using mic
+                    # audio when it's there and silence when it isn't (the
+                    # model only advances when fed).
+                    if not sent_marker:
+                        now = time.monotonic()
+                        if now < next_at:
+                            await asyncio.sleep(min(0.005, next_at - now))
+                            continue
+                        next_at = max(next_at + period, now - period)
                     try:
                         chunk = self._q.get_nowait()
                     except queue.Empty:
-                        # Nothing from the mic: feed silence so the model keeps
-                        # advancing (it only moves when fed).
                         chunk = _SILENCE
-                        await asyncio.sleep(0.005)
                     await ws.send(msgpack.packb(
                         {"type": "Audio", "pcm": [float(x) for x in chunk]},
                         use_single_float=True))
                     if self._closing.is_set() and not sent_marker and self._q.empty():
                         await ws.send(msgpack.packb({"type": "Marker", "id": 0},
                                                     use_single_float=True))
+                        # Past the marker, drop the pacing: pumping silence as
+                        # fast as the socket takes it is what makes the tail
+                        # short instead of realtime-long.
                         sent_marker = True
                     await asyncio.sleep(0)
 

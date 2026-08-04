@@ -471,7 +471,10 @@ stt:
   # — built lazily on first failure; the remote is retried every turn so quality
   # comes back the moment the tunnel does. Needs the whispercpp model + pywhispercpp
   # installed. Blank = no fallback (failures are logged and the utterance dropped).
-  fallback: whispercpp
+  fallback:
+    remote # GPU Whisper — if the Kyutai socket dies mid-turn this still
+    # transcribes fast. NOT whispercpp: that is the Pi's CPU engine at ~29s
+    # per utterance, which is a broken robot rather than a fallback.
 
   # --- local fallback (engine: whispercpp) ---
   # base.en is the CPU sweet spot (~1.5s). large-v3-turbo on the Pi CPU = 29s/clip.
