@@ -2299,13 +2299,12 @@ class Zero:
             log.debug("barge-in ignored: only %.0f%% voiced (need %.0f%%) — "
                       "noise, not speech", voiced_ratio * 100, min_ratio * 100)
             return False         # the reply carries on untouched
-        # A COURTESY dip, not a reflex. Only reached once the audio is
-        # confirmed speech (noise never gets here), and gentle — 0.75, the
-        # "go ahead, I'm listening" a person does, not the 0.35 collapse that
-        # read as a glitch. Restored the moment the turn resolves.
-        _dip = self.cfg.get("conversation.barge_in_duck", 0.75)
-        if _dip < 1.0:
-            self.speaker.gain = self.speaker.gain * _dip
+        # NO dip, at all. Tried 0.35 and 0.75; both made the sentence ZERO is
+        # finishing trail off quieter at exactly the moment it should sound
+        # normal — a queued interruption means "I will answer you after this
+        # thought", and people do not fade out when someone starts talking.
+        # Volume that MEANS something ("talk quietly") is handled separately
+        # and is unaffected.
         import numpy as np
 
         sr = self.cfg.get("audio.sample_rate", 16000)
@@ -2398,6 +2397,8 @@ class Zero:
                     "conversation.barge_in_floor_percentile", 80),
                 afterthought_ms=self.cfg.get(
                     "conversation.afterthought_ms", 350),
+                gate_ceiling=self.cfg.get(
+                    "conversation.barge_in_gate_ceiling", 1200),
             )
         stop = threading.Event()
 

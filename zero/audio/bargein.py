@@ -49,7 +49,8 @@ class SpeechBargeIn:
                  env_corr_max: float = 0.65,
                  floor_percentile: float = 80.0,
                  carry_ms: int = 150,
-                 afterthought_ms: int = 350):
+                 afterthought_ms: int = 350,
+                 gate_ceiling: float = 0.0):
         self._is_speech = is_speech
         self._block_ms = max(1, int(block_ms))
         self._learn_blocks = max(1, learn_ms // self._block_ms)
@@ -61,6 +62,7 @@ class SpeechBargeIn:
         self._played_env = played_env
         self._env_corr_max = float(env_corr_max)
         self._pct = float(floor_percentile)
+        self._gate_ceiling = float(gate_ceiling)
         self._carry_blocks = max(1, carry_ms // self._block_ms)
         self._seen = 0
         # Rolling window of echo-candidate RMS (~2 s); floor = its percentile.
@@ -196,8 +198,17 @@ class SpeechBargeIn:
         carrying = now < self._carry_deadline
         self._seen += 1
         if self._seen <= self._learn_blocks and not carrying:
-            # Learning window (first frames of REAL playback): all echo.
-            self._floor_win.append(rms)
+            # Learning window — but "the first frames of playback are all echo"
+            # is an assumption, and it fails exactly when it matters: if the
+            # person is ALREADY talking as the reply starts, their voice gets
+            # learned as the echo floor. A real session logged floor 1099
+            # (normally 61-226), putting the gate at 1758 — above the speaker's
+            # own voice — so barge-in could not fire for the rest of the reply.
+            # Only frames that actually correlate with what the speaker is
+            # playing are echo; anything else is a person and must not raise
+            # the bar against them.
+            if self._played_env is None or self._echo_correlated(now):
+                self._floor_win.append(rms)
             if self._seen == self._learn_blocks and not self._armed_logged:
                 self._armed_logged = True
                 floor = self._floor()
@@ -210,6 +221,13 @@ class SpeechBargeIn:
 
         floor = self._floor()
         gate = max(self._min_rms, self._ratio * floor)
+        # Hard ceiling. Even with correlation filtering, a floor estimate that
+        # runs away would silently make interruption impossible — the failure
+        # mode is invisible, because nothing errors, the person just cannot get
+        # a word in. Better to accept a rare echo false-trigger than to be
+        # deaf to a real one.
+        if self._gate_ceiling and gate > self._gate_ceiling:
+            gate = self._gate_ceiling
         if carrying:
             # Speech began BEFORE any audio played — it cannot be our echo.
             # Only the absolute level + VAD gate it, and the trigger shortens:

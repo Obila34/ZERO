@@ -103,6 +103,14 @@ conversation:
     # room: a cough or a passing group cleared the old gate and audibly
     # ducked the reply (`interruption '' -> noise` in the logs). Raise
     # toward 0.7 in a noisier hall; lower if real interruptions are missed.
+  barge_in_gate_ceiling:
+    1200 # HARD ceiling on the interrupt gate. The echo floor is learned from
+    # the first 900ms of playback on the assumption that it is all echo — and
+    # that fails exactly when it matters: someone already talking as the reply
+    # starts gets learned AS the floor. A real session logged floor 1099
+    # (normally 61-226) and a gate of 1758, above the speaker's own voice, so
+    # barge-in was impossible for the rest of that reply and nothing errored.
+    # Correlation filtering now excludes non-echo frames; this is the backstop.
   barge_in_floor_percentile:
     80 # echo floor = this percentile of recent echo RMS (was: max of the
     # learn window — one loud syllable early in the reply wedged the gate

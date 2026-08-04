@@ -388,6 +388,13 @@ class TestBargeInEnvelopeCorrelation:
         # The "played" envelope reports exactly what the mic hears (perfect
         # echo, zero lag): correlation must veto the trigger even though the
         # level beats the gate.
+        #
+        # The played timestamps must be spaced like REAL playback (one chunk
+        # per block). An earlier version appended them in a tight loop, so
+        # every entry landed microseconds apart while the correlator compares
+        # against a block-spaced grid — no overlap, no correlation, and the
+        # test only passed because the learned floor happened to suppress the
+        # trigger instead. It was not testing correlation at all.
         played = []
 
         def env():
@@ -397,16 +404,23 @@ class TestBargeInEnvelopeCorrelation:
                           learn_ms=90, trigger_ms=90, ratio=2.0, min_rms=250,
                           played_env=env, env_corr_max=0.65)
         rng = np.random.default_rng(7)
-        for _ in range(40):  # learn + echo phase: mic == played (varying level)
-            level = int(rng.uniform(300, 3000))
+        step = BLOCK_MS / 1000.0
+
+        def feed(level):
+            # Backdate the played entry onto the same grid the mic frame will
+            # land on, then advance real time by one block.
             played.append((_t.monotonic(), float(level)))
             d.update(_frame(level))
-        # Louder echo, still perfectly tracking playback -> suppressed.
+            _t.sleep(step)
+
+        for _ in range(12):          # echo phase: mic == played, varying level
+            feed(int(rng.uniform(300, 3000)))
         fired = []
-        for _ in range(20):
+        for _ in range(8):           # louder, still tracking playback exactly
             level = int(rng.uniform(2000, 6000))
             played.append((_t.monotonic(), float(level)))
             fired.append(d.update(_frame(level)))
+            _t.sleep(step)
         assert not any(fired)
 
     def test_uncorrelated_speech_still_triggers(self):

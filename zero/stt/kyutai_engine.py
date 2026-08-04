@@ -87,6 +87,9 @@ class KyutaiStreamSession:
         self._started = threading.Event()   # real audio has been offered
         self._failed: Exception | None = None
         self._buf = np.zeros(0, dtype=np.float32)
+        self._pushed = 0   # frames offered by the mic
+        self._sent = 0     # frames actually put on the wire
+        self._steps = 0    # Step messages back from the model
 
     # -- capture-side API (must never block or raise) -----------------------
     def start(self) -> None:
@@ -110,6 +113,7 @@ class KyutaiStreamSession:
                 chunk, self._buf = self._buf[:_FRAME], self._buf[_FRAME:]
                 try:
                     self._q.put_nowait(chunk)
+                    self._pushed += 1
                     self._started.set()   # the wire opens on real audio only
                 except queue.Full:
                     pass  # sender is behind; losing a frame beats stalling the mic
@@ -130,8 +134,16 @@ class KyutaiStreamSession:
         self._closing.set()
         if not self._started.is_set():
             return ""   # nothing was ever sent; no marker will come back
-        self._marker.wait(timeout=timeout)
-        return self.text()
+        got = self._marker.wait(timeout=timeout)
+        out = self.text()
+        if not out:
+            # An empty transcript is indistinguishable from silence unless we
+            # say which stage came up short.
+            log.warning("live STT returned NOTHING: pushed=%d sent=%d steps=%d "
+                        "marker=%s queued=%d failed=%s", self._pushed,
+                        self._sent, self._steps, got, self._q.qsize(),
+                        type(self._failed).__name__ if self._failed else None)
+        return out
 
     def close(self) -> None:
         """Release the session. Deliberately does NOT join the worker: this is
@@ -200,7 +212,13 @@ class KyutaiStreamSession:
                     # at most one frame per 80 ms of wall clock, using mic
                     # audio when it's there and silence when it isn't (the
                     # model only advances when fed).
-                    if not sent_marker:
+                    # Pace at realtime WHILE LISTENING only. Once the turn is
+                    # over, any audio still queued is already in the past and
+                    # must be dumped at full speed — pacing it out at realtime
+                    # delayed the marker by however much backlog remained, and
+                    # finalize() timed out at 3s returning an EMPTY transcript
+                    # on exactly the utterances that had a backlog.
+                    if not sent_marker and not self._closing.is_set():
                         now = time.monotonic()
                         if now < next_at:
                             await asyncio.sleep(min(0.005, next_at - now))
@@ -213,6 +231,7 @@ class KyutaiStreamSession:
                     await ws.send(msgpack.packb(
                         {"type": "Audio", "pcm": [float(x) for x in chunk]},
                         use_single_float=True))
+                    self._sent += 1
                     if self._closing.is_set() and not sent_marker and self._q.empty():
                         await ws.send(msgpack.packb({"type": "Marker", "id": 0},
                                                     use_single_float=True))
@@ -230,6 +249,8 @@ class KyutaiStreamSession:
                     if kind == "Word":
                         with self._lock:
                             self._words.append(data["text"])
+                    elif kind == "Step":
+                        self._steps += 1
                     elif kind == "Marker":
                         self._marker.set()
                         break
