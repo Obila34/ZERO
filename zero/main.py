@@ -193,10 +193,18 @@ class Zero:
                 except Exception as e:  # missing speexdsp — run without AEC
                     echo_ref = None
                     log.warning("AEC unavailable (pip install speexdsp): %s", e)
+            # Jitter prebuffer sized to the ACTIVE engine. The Orpheus value
+            # (300ms) was applied to every engine — Kyutai streams at 2.9x
+            # realtime and never underruns, so those 300ms were pure added
+            # latency on every reply's first sound.
+            _tts_engine = self.cfg.get("tts.engine", "piper")
+            _prebuffer = (self.cfg.get("tts.kyutai.prebuffer_ms", 100)
+                          if _tts_engine == "kyutai"
+                          else self.cfg.get("tts.orpheus.prebuffer_ms", 0))
             self.speaker = Speaker(
                 device=self.cfg.get("audio.output_device"),
                 echo_ref=echo_ref,
-                prebuffer_ms=self.cfg.get("tts.orpheus.prebuffer_ms", 0),
+                prebuffer_ms=_prebuffer,
                 output_gain=self.cfg.get("audio.output_gain", 1.0))
             from zero.audio.room import RoomSense
 
@@ -872,6 +880,7 @@ class Zero:
             # verbatim prefix of the final utterance and only silence follows).
             stt_result: dict = {}
             stt_thread = None
+            stt_rescue = False   # live path already failed on this audio
             spec_a = spec.get("audio")
             # Tail bound: more than ~2x the silence window after the spec pause
             # means speech resumed / max-cap fired — the spec text is a prefix.
@@ -892,12 +901,17 @@ class Zero:
                     timeout=self.cfg.get("stt.finalize_timeout", 3.0))}
                 self._stage("transcript")
                 self._close_live_stt()   # tail is in — now release the socket
-                if live.failed is not None and not stt_result["text"]:
-                    # The socket died mid-turn: fall back to transcribing the
-                    # captured clip so the turn is not silently lost.
-                    log.warning("live STT failed (%s) — batch fallback",
-                                live.failed)
+                if not stt_result["text"]:
+                    # Socket died mid-turn OR the model finalized with zero
+                    # words on real speech (Kyutai's venue failure mode).
+                    # Either way the live path has already failed on THIS
+                    # audio — route to the batch rescue below, which goes
+                    # fallback-first instead of paying the primary again.
+                    if live.failed is not None:
+                        log.warning("live STT failed (%s) — batch rescue",
+                                    live.failed)
                     stt_result = {}
+                    stt_rescue = True
             elif (spec_a is not None and spec.get("thread") is not None
                     and 0 <= utterance.size - spec_a.size <= slack
                     and bool((utterance[:spec_a.size]
@@ -1015,7 +1029,14 @@ class Zero:
             elif stt_result.get("text"):
                 text = stt_result["text"].strip()  # queued turn: already transcribed
             else:
-                text = self.stt.transcribe(utterance, sr).strip()
+                rescue = getattr(self.stt, "rescue_transcribe", None)
+                if stt_rescue and callable(rescue):
+                    # The streaming session already came up empty on this very
+                    # audio — go straight to the engine that can hear it
+                    # (Whisper) instead of paying the primary a second time.
+                    text = rescue(utterance, sr).strip()
+                else:
+                    text = self.stt.transcribe(utterance, sr).strip()
             if not text:
                 # A turn that produces nothing used to vanish in silence — a
                 # visitor spoke and got no answer, with no trace of why.
@@ -1199,6 +1220,13 @@ class Zero:
                 for lg in (self._session_log, self._corpus_log):
                     if lg and lg[-1][1] == "user":
                         lg[-1] = (lg[-1][0], "user", text)
+            # Pre-open the first sentence's TTS socket NOW, so its connect
+            # (~300-700ms to the Kyutai server over the tailnet) runs under
+            # the vision/recall build and the LLM's first token instead of
+            # after them. Non-blocking; a no-op for engines without prewarm.
+            _pw = getattr(self.voice, "prewarm", None)
+            if callable(_pw):
+                _pw()
             # Fold in what ZERO currently sees as an EPHEMERAL note on THIS turn
             # only — the note + keyframes are attached to the outgoing copy of the
             # messages, never saved to history, so the cached prefix and future
@@ -2337,8 +2365,11 @@ class Zero:
         frames, voiced_ratio = confirm
         min_ratio = self.cfg.get("conversation.barge_in_voiced_ratio", 0.55)
         if voiced_ratio < min_ratio:
-            log.debug("barge-in ignored: only %.0f%% voiced (need %.0f%%) — "
-                      "noise, not speech", voiced_ratio * 100, min_ratio * 100)
+            # INFO, not debug: a venue session where "none of my interruptions
+            # worked" had no way to show WHERE they died. Every vetoed trigger
+            # must leave a visible trace.
+            log.info("barge-in ignored: only %.0f%% voiced (need %.0f%%) — "
+                     "noise, not speech", voiced_ratio * 100, min_ratio * 100)
             return False         # the reply carries on untouched
         # NO dip, at all. Tried 0.35 and 0.75; both made the sentence ZERO is
         # finishing trail off quieter at exactly the moment it should sound
@@ -2378,6 +2409,11 @@ class Zero:
                 self._soft_stop = True
                 return True
             self._restore_level()
+            # By here BOTH engines came up empty (FallbackSTT escalates an
+            # empty primary on clear speech) — this really is a blip now, not
+            # the old single-engine miss that ate real interruptions.
+            log.info("barge-in dismissed: %.0f%% voiced but both STT engines "
+                     "heard nothing", voiced_ratio * 100)
             return False   # a transcribed nothing — hallucinated blip
         self._queued_turn = {"text": text, "frames": frames, "kind": kind.value}
         if kind is InterruptKind.CORRECTION:
@@ -2453,39 +2489,55 @@ class Zero:
                 self.wake.reset()
             except Exception as e:
                 log.debug("wake reset failed: %s", e)
+            # ASYMMETRIC wake threshold while a reply is playing. A live
+            # session logged wake scores 0.33 and 0.41 against 0.50 — someone
+            # said the wake word to cut ZERO off and was ignored. During a
+            # reply a false wake merely stops ZERO talking (cheap), while a
+            # miss reads as being ignored (expensive) — so the bar drops here
+            # and only here. Restored before the monitor exits; the monitor is
+            # joined before the idle loop ever runs wake.process again.
+            base_thr = getattr(self.wake, "threshold", None)
+            if base_thr is not None:
+                self.wake.threshold = min(base_thr, self.cfg.get(
+                    "conversation.barge_in_wake_threshold", 0.35))
             # stop-aware frames(): the monitor must exit even when the mic is
             # paused (empty queue) — a plain frames() blocked forever there,
             # outlived the join in _stop_bargein, and then fought the next
             # turn's endpointer for the one shared frame queue.
-            for frame in self.mic.frames(stop=stop):
-                if stop.is_set():
-                    return
-                try:
-                    if self.wake.process(frame):
-                        self._interrupt = True   # wake word: always a hard stop
+            try:
+                for frame in self.mic.frames(stop=stop):
+                    if stop.is_set():
                         return
-                    if speech is None:
-                        continue
-                    if speech.update(frame, active=self.speaker.playing):
-                        if self._assess_interruption(speech, stop):
+                    try:
+                        if self.wake.process(frame):
+                            self._interrupt = True  # wake word: always a hard stop
                             return
-                        speech.rearm()   # backchannel/noise: keep watching
-                        continue
-                    # A remark that finished in the think-gap (before any reply
-                    # audio): transcribe it now so the merge points find text.
-                    # On a WORKER thread — transcription is a network call that
-                    # can block for seconds, and a monitor stuck inside it
-                    # can't see stop and misses its exit window ("barge-in
-                    # monitor did not exit in time").
-                    frames_af = speech.take_afterthought()
-                    if frames_af:
-                        threading.Thread(
-                            target=self._transcribe_afterthought,
-                            args=(frames_af,), name="afterthought-stt",
-                            daemon=True).start()
-                except Exception as e:  # never let the monitor crash playback
-                    log.debug("barge-in monitor error: %s", e)
-                    return
+                        if speech is None:
+                            continue
+                        if speech.update(frame, active=self.speaker.playing):
+                            if self._assess_interruption(speech, stop):
+                                return
+                            speech.rearm()   # backchannel/noise: keep watching
+                            continue
+                        # A remark that finished in the think-gap (before any
+                        # reply audio): transcribe it now so the merge points
+                        # find text. On a WORKER thread — transcription is a
+                        # network call that can block for seconds, and a
+                        # monitor stuck inside it can't see stop and misses
+                        # its exit window ("barge-in monitor did not exit in
+                        # time").
+                        frames_af = speech.take_afterthought()
+                        if frames_af:
+                            threading.Thread(
+                                target=self._transcribe_afterthought,
+                                args=(frames_af,), name="afterthought-stt",
+                                daemon=True).start()
+                    except Exception as e:  # never let the monitor crash playback
+                        log.debug("barge-in monitor error: %s", e)
+                        return
+            finally:
+                if base_thr is not None:
+                    self.wake.threshold = base_thr
 
         thread = threading.Thread(target=monitor, name="bargein", daemon=True)
         thread.start()

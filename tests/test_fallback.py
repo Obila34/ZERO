@@ -124,3 +124,49 @@ def test_tts_empty_text_stays_empty():
     tts = FallbackTTS(FlakyTTS(), LocalTTS)
     assert tts.synthesize("   ").size == 0
     assert list(tts.synthesize_stream("  ")) == []
+
+
+# 1.0s at int16-scale rms ~1638: audio that PLAINLY contains speech.
+SPEECH = np.full(16000, 0.05, dtype=np.float32)
+
+
+class EmptySTT(STT):
+    """Kyutai's live-venue failure mode: the request succeeds, the marker
+    comes back, and there are zero words — no exception to catch."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def transcribe(self, audio, sample_rate):
+        self.calls += 1
+        return ""
+
+
+def test_stt_empty_on_clear_speech_escalates_to_fallback():
+    # The bug that ate live interruptions: '' with no exception was taken as
+    # "nothing said", so Whisper never ran and real speech was discarded.
+    primary = EmptySTT()
+    stt = FallbackSTT(primary, LocalSTT)
+    assert stt.transcribe(SPEECH, 16000) == "local text"
+    assert stt.degraded is False   # the primary is UP; it just couldn't hear
+
+
+def test_stt_empty_on_silence_is_taken_at_face_value():
+    primary = EmptySTT()
+    stt = FallbackSTT(primary, LocalSTT)
+    assert stt.transcribe(AUDIO, 16000) == ""   # quiet & short: a real blip
+    assert primary.calls == 1
+
+
+def test_rescue_transcribe_goes_fallback_first():
+    # The live streaming session already finalized empty on this very audio —
+    # rescue must NOT pay the primary again first.
+    primary = FlakySTT()
+    stt = FallbackSTT(primary, LocalSTT)
+    assert stt.rescue_transcribe(SPEECH, 16000) == "local text"
+    assert primary.calls == 0
+
+
+def test_rescue_transcribe_retries_primary_without_a_fallback():
+    stt = FallbackSTT(FlakySTT(), None)
+    assert stt.rescue_transcribe(SPEECH, 16000) == "remote text"

@@ -121,8 +121,19 @@ class Eyes:
         self._ann_dets: list | None = None
         self._ann_ts = 0.0
         self._ann_thread: Optional[threading.Thread] = None
-        self._ann_interval_s = 2.0   # background refresh cadence
+        self._ann_interval_s = 3.0   # background refresh cadence
         self._ann_ttl_s = 8.0        # cached annotation older than this = stale
+        # Per-INSTANCE verdict cache: (label, quantized bbox) -> (learned name
+        # or None, monotonic ts). An object that hasn't moved is never
+        # re-embedded — the first venue run of the background annotator still
+        # embedded 9-13 crops every pass (1.2-5.7s each, continuously) and the
+        # sustained load was what drove the remote detect/embed timeouts. With
+        # this cache a static scene costs ZERO remote calls at steady state;
+        # only new or moved objects pay, capped per pass.
+        self._ann_results: dict = {}
+        self._ann_key_q = 32          # px of movement before a re-embed
+        self._ann_max_per_pass = 4    # remote embeds per pass, largest first
+        self._ann_result_ttl_s = 60.0  # verdicts refresh eventually anyway
         # World state (Phase 2): Tier 0 motion every frame, Tier 1 tracks after
         # every detection pass, Tier 2 narration via the optional narrator.
         # All optional — Eyes runs exactly as before when world is None.
@@ -388,40 +399,91 @@ class Eyes:
             return ann
         return dets
 
+    def _ann_key(self, det) -> tuple:
+        """Instance identity for the verdict cache: same label in (nearly) the
+        same place is the same object. Quantized so detector jitter doesn't
+        re-embed, while a real move (> _ann_key_q px) does."""
+        x, y, w, h = (int(v) for v in det.bbox)
+        q = self._ann_key_q
+        return (det.label.lower(), (x + w // 2) // q, (y + h // 2) // q,
+                w // q, h // q)
+
     def _annotate_loop(self) -> None:
-        """Background learned-object annotation: refresh the cached overrides
-        every couple of seconds so per-turn context reads are instant. Also
-        owns the unknown-object (curiosity) tracking, which used to ride the
-        inline annotate."""
+        """Background learned-object annotation, instance-cached: each object
+        is embedded ONCE (and again only if it moves or its verdict ages out),
+        at most _ann_max_per_pass embeds per pass, largest boxes first, people
+        excluded. Also owns the unknown-object (curiosity) tracking."""
         while not self._stop.is_set():
             self._stop.wait(self._ann_interval_s)
             if self._stop.is_set():
                 return
-            snap = self._scene.snapshot()
-            dets = snap.detections
-            if snap.frame_rgb is None or not dets:
-                continue
             try:
-                t0 = time.monotonic()
-                annotated = self._learned.annotate(snap.frame_rgb, dets)
-                dt = time.monotonic() - t0
-                if dt > 1.0:
-                    log.info("learned annotate slow: %.2fs for %d detections "
-                             "(background — turns are not waiting on this)",
-                             dt, len(dets))
-            except Exception as e:  # learned names must never break perception
-                log.debug("learned annotate failed: %s", e)
+                self._annotate_pass()
+            except Exception as e:  # the annotator must never die quietly
+                log.debug("annotate pass failed: %s", e)
+
+    def _annotate_pass(self) -> None:
+        """One cache-aware annotation pass over the current scene snapshot."""
+        results = self._ann_results
+        snap = self._scene.snapshot()
+        frame = snap.frame_rgb
+        dets = snap.detections
+        if frame is None or not dets:
+            return
+        try:
+            if self._learned.name_count() == 0:
+                return   # nothing taught — nothing to look up
+        except Exception:
+            return
+        now = time.monotonic()
+        # Which instances actually need an embed this pass?
+        fresh = [d for d in dets
+                 if d.label.lower() != "person"
+                 and getattr(d, "bbox", None) is not None
+                 and (self._ann_key(d) not in results
+                      or now - results[self._ann_key(d)][1]
+                      > self._ann_result_ttl_s)]
+        fresh.sort(key=lambda d: d.bbox[2] * d.bbox[3], reverse=True)
+        H, W = frame.shape[:2]
+        t0 = time.monotonic()
+        embedded = 0
+        for det in fresh[: self._ann_max_per_pass]:
+            try:
+                x, y, w, h = (int(v) for v in det.bbox)
+                crop = frame[max(0, y):min(H, y + h),
+                             max(0, x):min(W, x + w)]
+                hit = self._learned.match(crop) if crop.size else None
+            except Exception as e:  # a failed embed is just "no verdict"
+                log.debug("learned match failed: %s", e)
                 continue
-            with self._ann_lock:
-                self._ann_dets = annotated
-                self._ann_ts = time.monotonic()
-            now = time.time()
-            with self._unknowns_lock:
-                for orig, ann in zip(dets, annotated):
-                    if (ann.label == orig.label        # no learned override
-                            and orig.confidence < self._unknown_conf
-                            and orig.label.lower() != "person"):
-                        self._unknowns[orig.label.lower()] = now
+            results[self._ann_key(det)] = (hit[0] if hit else None, now)
+            embedded += 1
+        dt = time.monotonic() - t0
+        if dt > 1.5:
+            log.info("learned annotate slow: %.2fs for %d embeds "
+                     "(background — turns are not waiting on this)",
+                     dt, embedded)
+        if len(results) > 256:   # bound the cache; oldest verdicts go
+            for key, _ in sorted(results.items(),
+                                 key=lambda kv: kv[1][1])[:64]:
+                results.pop(key, None)
+        # Publish the annotated view from whatever verdicts exist now.
+        annotated = []
+        for det in dets:
+            verdict = results.get(self._ann_key(det))
+            name = verdict[0] if verdict else None
+            annotated.append(det.model_copy(update={"label": name})
+                             if name else det)
+        with self._ann_lock:
+            self._ann_dets = annotated
+            self._ann_ts = time.monotonic()
+        wall = time.time()
+        with self._unknowns_lock:
+            for orig, ann in zip(dets, annotated):
+                if (ann.label == orig.label        # no learned override
+                        and orig.confidence < self._unknown_conf
+                        and orig.label.lower() != "person"):
+                    self._unknowns[orig.label.lower()] = wall
 
     def recent_unknowns(self, within_s: float = 3600.0) -> list[str]:
         """Labels of unfamiliar (low-confidence, unlearned) objects sighted

@@ -49,6 +49,13 @@ class FallbackTTS(TTS):
     def sample_rate(self) -> int:  # type: ignore[override]
         return self._primary.sample_rate
 
+    def prewarm(self) -> None:
+        """Pass a pre-connect request through to the primary engine (the one
+        whose connect latency sits on the first-audio path)."""
+        pw = getattr(self._primary, "prewarm", None)
+        if callable(pw):
+            pw()
+
     def _get_fallback(self) -> Optional[TTS]:
         if self._fallback is None and self._builder is not None and not self._fallback_broken:
             try:

@@ -234,6 +234,17 @@ class VoiceOrchestrator:
         self-state narration (Phase 7) reads this to be honest about it."""
         return bool(getattr(self.tts, "degraded", False))
 
+    def prewarm(self) -> None:
+        """Ask the engine to open its next synthesis connection now (before
+        the reply text exists) so the connect overlaps the LLM's thinking.
+        No-op for engines without the capability. Never raises."""
+        pw = getattr(self.tts, "prewarm", None)
+        if callable(pw):
+            try:
+                pw()
+            except Exception as e:
+                log.debug("tts prewarm failed (harmless): %s", e)
+
     def _smile(self) -> "_SmileShelf | None":
         """Fresh smile filter when the current mood calls for one. Fresh per
         reply/sentence so filter state can never leak across utterances; the

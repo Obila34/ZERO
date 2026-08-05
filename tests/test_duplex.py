@@ -197,6 +197,86 @@ class TestLearnedAnnotationCache:
         assert eyes._with_learned(self._Snap(dets)) == dets
 
 
+class TestAnnotatePassInstanceCache:
+    """The background annotator must not hammer the remote embedder: each
+    object instance is embedded once (capped per pass), people never, and a
+    static scene costs ZERO embeds at steady state — the first venue run
+    embedded 9-13 crops every pass, continuously, and the sustained load
+    drove the remote perception timeouts."""
+
+    class _CountingLearned:
+        def __init__(self):
+            self.embeds = 0
+
+        def name_count(self):
+            return 1
+
+        def match(self, crop):
+            self.embeds += 1
+            return ("french press", 0.9)
+
+    class _Scene:
+        def __init__(self, dets, frame):
+            self.detections = dets
+            self.frame_rgb = frame
+
+        def snapshot(self):
+            return self
+
+    def _eyes_with(self, dets):
+        from zero.vision.eyes import Eyes
+
+        learned = self._CountingLearned()
+        eyes = Eyes(camera=None, detector=None, color_namer=None,
+                    learned=learned)
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        eyes._scene = self._Scene(dets, frame)
+        return eyes, learned
+
+    def _dets(self, n_cups=6, with_person=True):
+        from zero.vision.schemas import Detection
+
+        dets = [Detection(label="cup", bbox=[i * 100, 50, 60, 60],
+                          confidence=0.8) for i in range(n_cups)]
+        if with_person:
+            dets.append(Detection(label="person", bbox=[0, 200, 200, 200],
+                                  confidence=0.9))
+        return dets
+
+    def test_embeds_are_capped_and_people_are_skipped(self):
+        eyes, learned = self._eyes_with(self._dets())
+        eyes._annotate_pass()
+        assert learned.embeds == eyes._ann_max_per_pass   # 6 cups, cap 4
+
+    def test_static_scene_costs_zero_embeds_at_steady_state(self):
+        eyes, learned = self._eyes_with(self._dets())
+        eyes._annotate_pass()   # 4 embedded
+        eyes._annotate_pass()   # remaining 2
+        assert learned.embeds == 6
+        eyes._annotate_pass()   # everything cached: nothing to do
+        eyes._annotate_pass()
+        assert learned.embeds == 6
+
+    def test_a_moved_object_is_re_embedded_once(self):
+        dets = self._dets(n_cups=2, with_person=False)
+        eyes, learned = self._eyes_with(dets)
+        eyes._annotate_pass()
+        assert learned.embeds == 2
+        # A real move to a spot no cup was cached at. (Moving exactly onto
+        # ANOTHER cup's cached position is a legitimate cache hit — the cache
+        # keys on label + place, not on which frame the box came from.)
+        dets[0].bbox = [400, 300, 60, 60]
+        eyes._annotate_pass()
+        assert learned.embeds == 3
+
+    def test_published_view_carries_the_learned_names(self):
+        eyes, learned = self._eyes_with(self._dets(n_cups=2, with_person=True))
+        eyes._annotate_pass()
+        with eyes._ann_lock:
+            labels = [d.label for d in eyes._ann_dets]
+        assert labels == ["french press", "french press", "person"]
+
+
 class TestStripAsides:
     def _run(self, chunks):
         from zero.tts.orchestrator import strip_asides

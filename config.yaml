@@ -111,6 +111,13 @@ conversation:
     # room: a cough or a passing group cleared the old gate and audibly
     # ducked the reply (`interruption '' -> noise` in the logs). Raise
     # toward 0.7 in a noisier hall; lower if real interruptions are missed.
+  barge_in_wake_threshold:
+    0.35 # wake-word bar WHILE A REPLY IS PLAYING (idle keeps wake.threshold).
+    # Asymmetric on purpose: mid-reply, a false wake merely stops ZERO talking,
+    # while a miss means someone said the wake word to cut it off and was
+    # ignored — a live session logged scores 0.33/0.41 against the idle 0.50
+    # doing exactly that. Raise back toward 0.5 if replies start cutting out
+    # on random speech.
   barge_in_gate_ceiling:
     1200 # HARD ceiling on the interrupt gate. The echo floor is learned from
     # the first 900ms of playback on the assumption that it is all echo — and
@@ -631,6 +638,11 @@ tts:
     voice: expresso/ex03-ex01_happy_001_channel1_334s.wav
     api_key: public_token
     timeout: 30
+    prebuffer_ms:
+      100 # jitter buffer for the KYUTAI voice. The Orpheus 300ms was being
+      # applied to every engine; Kyutai generates at 2.9x realtime and never
+      # underruns, so most of that was pure added first-audio latency. Raise
+      # toward 300 only if the voice ever stutters mid-word.
   # If the remote Orpheus fails (tunnel down), speak through local Piper instead of
   # going silently mute — the different voice IS the "degraded mode" signal. Built
   # lazily on first failure; the remote is retried every sentence. Needs the piper
