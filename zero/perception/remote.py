@@ -20,6 +20,7 @@ from __future__ import annotations
 import base64
 import io
 import wave
+import time
 from typing import Callable, Optional
 
 import numpy as np
@@ -173,6 +174,8 @@ class _FallbackBase:
         self._local_broken = False
         self._what = what
         self.degraded = False
+        self._retry_after = 0.0    # skip the dead remote until this time
+        self._fail_streak = 0
 
     def _fallback(self):
         if self._local is None and self._builder is not None and not self._local_broken:
@@ -186,12 +189,36 @@ class _FallbackBase:
         return self._local
 
     def _call(self, method: str, *args, empty=None, **kwargs):
+        # Back off from a dead remote instead of retrying it on EVERY call.
+        # The retry-primary-first design recovers instantly when a tunnel comes
+        # back, but while it is down each call pays a full connection timeout —
+        # on a congested network that is seconds of latency added to every
+        # frame, and the log showed it firing several times per second. Retry
+        # occasionally so recovery still happens, just not on the hot path.
+        now = time.monotonic()
+        if now < self._retry_after:
+            local = self._fallback()
+            if local is not None:
+                try:
+                    return getattr(local, method)(*args, **kwargs)
+                except Exception as e:
+                    log.debug("local %s fallback failed: %s", self._what, e)
+            return empty
         try:
             out = getattr(self._primary, method)(*args, **kwargs)
+            if self.degraded:
+                log.info("remote %s recovered", self._what)
             self.degraded = False
+            self._fail_streak = 0
             return out
         except Exception as e:
-            log.warning("remote %s failed: %s", self._what, e)
+            self._fail_streak += 1
+            # Exponential-ish backoff, capped: 1s, 2s, 4s ... 30s.
+            self._retry_after = now + min(30.0, 2.0 ** min(self._fail_streak, 5))
+            if self._fail_streak <= 2 or self._fail_streak % 20 == 0:
+                log.warning("remote %s failed (%d in a row, retrying in %.0fs): %s",
+                            self._what, self._fail_streak,
+                            self._retry_after - now, e)
         self.degraded = True
         local = self._fallback()
         if local is None:
