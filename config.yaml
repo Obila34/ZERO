@@ -23,6 +23,14 @@ audio:
     # distance, peak well under 32767. If it still feels quiet, move
     # the mic closer before raising this again — distance costs
     # signal-to-noise that gain cannot buy back.
+  output_gain:
+    2.2 # BASE speaker level, multiplied under the dynamic gains (room
+    # loudness, and any "talk quietly"/"speak up" the person asked for).
+    # Raised because the venue reported it as hard to hear. Output is
+    # hard-clipped after gain, so a boost gets louder rather than
+    # distorting — but if it starts sounding harsh on peaks, come down
+    # to ~1.8. Also check the OS mixer (alsamixer / wpctl) is not the
+    # thing holding it back before raising this further.
   output_device:
     pipewire # routes to PipeWire's default sink = the BT speaker
     # (needs the pipewire-alsa package). Use Headphones for 3.5mm jack.
@@ -284,8 +292,13 @@ perception:
   remote:
     enabled: true
     base_url: http://127.0.0.1:8000 # vision server through the tunnel
-    timeout_s: 5.0 # face/speaker/CLIP calls
-    detect_timeout_s: 10.0 # detection (first call loads YOLO11x)
+    timeout_s:
+      1.5 # was 5.0. These sit on the REPLY path: a vision service that is up
+      # but slow stalled a turn for the full timeout before falling back. If
+      # the GPU cannot answer in 1.5s it is useless for a live conversation
+      # and the local model is the better answer. # face/speaker/CLIP calls
+    detect_timeout_s:
+      2.0 # was 10.0 — a single slow detect blocked a reply for ten seconds. # detection (first call loads YOLO11x)
     jpeg_quality: 80
 
   # Reading HOW things are said. Affect fuses voice prosody + a text valence
@@ -580,8 +593,11 @@ llm:
     0.6 # a playful persona at 0.3 reads flat; the prompt's honesty
     # clauses do the factual guarding, not the temperature
   max_tokens:
-    500 # ~1-2 spoken sentences — snappier replies, fewer pauses
-    # (caps runaway answers; raise if you want longer ones)
+    220 # was 500. Spoken replies were running 3-5 sentences, which is a long
+    # time to listen to and a long time to wait through before you can speak
+    # again. This caps the answer nearer 2-3 sentences. It does NOT change
+    # time-to-first-word — that is network + prefill — but it makes each turn
+    # end sooner, which is most of what "feels quick" actually is.
   num_ctx:
     4096 # explicit context size. Big enough for persona + memory +
     # 6 turns, but HALF the KV-cache VRAM of 8192 — the GPU is

@@ -196,7 +196,8 @@ class Zero:
             self.speaker = Speaker(
                 device=self.cfg.get("audio.output_device"),
                 echo_ref=echo_ref,
-                prebuffer_ms=self.cfg.get("tts.orpheus.prebuffer_ms", 0))
+                prebuffer_ms=self.cfg.get("tts.orpheus.prebuffer_ms", 0),
+                output_gain=self.cfg.get("audio.output_gain", 1.0))
             from zero.audio.room import RoomSense
 
             self.room = RoomSense(

@@ -29,7 +29,7 @@ log = get_logger("audio.playback")
 
 class Speaker:
     def __init__(self, device: int | str | None = None, chunk_ms: int = 50,
-                 echo_ref=None, prebuffer_ms: int = 0):
+                 echo_ref=None, prebuffer_ms: int = 0, output_gain: float = 1.0):
         self.device = device
         self.chunk_ms = chunk_ms
         # AEC far-end feed: every chunk written to the device is also pushed
@@ -45,6 +45,10 @@ class Speaker:
         # Output gain [0..1]. duck() lowers it mid-stream (yield gesture while
         # an interruption is assessed); reset to 1.0 by every new play call so
         # a duck can never leak into the next reply.
+        # Base output level for this speaker/room, applied UNDER everything
+        # else (room Lombard gain, asked-for level). Set once in config for the
+        # physical setup; the dynamic gains multiply on top.
+        self.output_gain = max(0.1, float(output_gain))
         self.gain = 1.0
         # Envelope tap: (monotonic_t, rms) of each chunk as WRITTEN (post-gain
         # — that's what the room hears). Bounded; readers snapshot it.
@@ -55,6 +59,14 @@ class Speaker:
 
     def unduck(self) -> None:
         self.gain = 1.0
+
+    def _level(self, block: np.ndarray) -> np.ndarray:
+        """Apply base x dynamic gain, hard-clipped. Without the clip a boost
+        wraps around into loud distortion instead of just being loud."""
+        g = self.output_gain * self.gain
+        if g == 1.0:
+            return block
+        return np.clip(block * g, -1.0, 1.0)
 
     def env_snapshot(self) -> list:
         """Recent played-audio envelope for the barge-in correlation guard."""
@@ -92,8 +104,7 @@ class Speaker:
                         log.info("playback interrupted (barge-in)")
                         return False
                     block = audio[start : start + chunk]
-                    if self.gain != 1.0:
-                        block = block * self.gain
+                    block = self._level(block)
                     stream.write(block.reshape(-1, 1))
                     self._tap(block)
                     if self.echo_ref is not None:
@@ -134,8 +145,7 @@ class Speaker:
                                          dtype="float32")
                 stream.start()
                 self.playing = True  # sound is now really leaving the device
-            if self.gain != 1.0:
-                block = block * self.gain
+            block = self._level(block)
             stream.write(block.reshape(-1, 1))
             self._tap(block)
             if self.echo_ref is not None:
