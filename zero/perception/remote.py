@@ -167,7 +167,7 @@ class RemoteObjectEmbedder:
 # ── fallback wrappers (remote first, lazily-built local on failure) ──────────
 class _FallbackBase:
     def __init__(self, primary, builder: Optional[Callable] = None,
-                 what: str = "perception"):
+                 what: str = "perception", retry_backoff_s: float = 2.0):
         self._primary = primary
         self._builder = builder
         self._local = None
@@ -176,6 +176,10 @@ class _FallbackBase:
         self.degraded = False
         self._retry_after = 0.0    # skip the dead remote until this time
         self._fail_streak = 0
+        # Base of the backoff. 0 disables it entirely (retry every call), which
+        # is what the recovery test wants — recovery semantics are unchanged,
+        # only how often a DOWN remote is probed.
+        self._backoff = float(retry_backoff_s)
 
     def _fallback(self):
         if self._local is None and self._builder is not None and not self._local_broken:
@@ -214,7 +218,9 @@ class _FallbackBase:
         except Exception as e:
             self._fail_streak += 1
             # Exponential-ish backoff, capped: 1s, 2s, 4s ... 30s.
-            self._retry_after = now + min(30.0, 2.0 ** min(self._fail_streak, 5))
+            self._retry_after = (now + min(30.0, self._backoff
+                                           * 2 ** min(self._fail_streak - 1, 4))
+                                 if self._backoff else 0.0)
             if self._fail_streak <= 2 or self._fail_streak % 20 == 0:
                 log.warning("remote %s failed (%d in a row, retrying in %.0fs): %s",
                             self._what, self._fail_streak,
@@ -231,16 +237,18 @@ class _FallbackBase:
 
 
 class FallbackDetector(_FallbackBase):
-    def __init__(self, primary, builder=None):
-        super().__init__(primary, builder, what="detector")
+    def __init__(self, primary, builder=None, retry_backoff_s: float = 2.0):
+        super().__init__(primary, builder, what="detector",
+                         retry_backoff_s=retry_backoff_s)
 
     def detect(self, frame_rgb):
         return self._call("detect", frame_rgb, empty=[])
 
 
 class FallbackFace(_FallbackBase):
-    def __init__(self, primary, builder=None):
-        super().__init__(primary, builder, what="face recognizer")
+    def __init__(self, primary, builder=None, retry_backoff_s: float = 2.0):
+        super().__init__(primary, builder, what="face recognizer",
+                         retry_backoff_s=retry_backoff_s)
 
     def embed_faces(self, frame_rgb, max_faces=3):
         return self._call("embed_faces", frame_rgb, max_faces=max_faces, empty=[])
@@ -250,8 +258,9 @@ class FallbackFace(_FallbackBase):
 
 
 class FallbackSpeaker(_FallbackBase):
-    def __init__(self, primary, builder=None):
-        super().__init__(primary, builder, what="speaker embedder")
+    def __init__(self, primary, builder=None, retry_backoff_s: float = 2.0):
+        super().__init__(primary, builder, what="speaker embedder",
+                         retry_backoff_s=retry_backoff_s)
 
     def embed(self, audio):
         return self._call("embed", audio, empty=None)

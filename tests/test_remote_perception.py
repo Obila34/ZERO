@@ -142,11 +142,33 @@ def test_fallback_detector_degrades_and_recovers():
                 raise RuntimeError("tunnel down")
             return ["remote-detection"]
 
-    d = FallbackDetector(FlakyRemote(), lambda: LocalDetector())
+    # retry_backoff_s=0 keeps the original per-call probing for this test; the
+    # backoff only changes HOW OFTEN a down remote is probed, not whether
+    # recovery works. See test_dead_remote_is_not_probed_every_call.
+    d = FallbackDetector(FlakyRemote(), lambda: LocalDetector(),
+                         retry_backoff_s=0)
     assert d.detect(FRAME) == ["local-detection"]            # outage -> local
     assert d.degraded is True
     assert d.detect(FRAME) == ["remote-detection"]           # recovery per-call
     assert d.degraded is False
+
+
+def test_dead_remote_is_not_probed_every_call():
+    """A down tunnel must not cost a connection timeout on every frame. A live
+    log showed the remote detector failing several times per second, each
+    attempt paying a full timeout on an already-congested link."""
+    calls = {"n": 0}
+
+    class DeadCounting:
+        def detect(self, frame):
+            calls["n"] += 1
+            raise RuntimeError("tunnel down")
+
+    d = FallbackDetector(DeadCounting(), lambda: LocalDetector())
+    for _ in range(50):
+        assert d.detect(FRAME) == ["local-detection"]   # always served
+    assert calls["n"] == 1, f"probed the dead remote {calls['n']} times, want 1"
+    assert d.degraded is True
 
 
 def test_fallback_face_and_speaker_empty_safe_without_local():
