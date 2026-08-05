@@ -170,9 +170,16 @@ class MicCapture:
                 _time.sleep(0.5)
         raise RuntimeError(f"could not start mic after 3 attempts: {last_err}")
 
-    def frames(self, timeout: float = 1.0) -> Iterator[np.ndarray]:
-        """Yield int16 mono frames as they arrive. Blocks up to `timeout` each."""
+    def frames(self, timeout: float = 1.0, stop=None) -> Iterator[np.ndarray]:
+        """Yield int16 mono frames as they arrive. Blocks up to `timeout` each.
+
+        ``stop`` (a threading.Event) ends the iteration. Without it a consumer
+        on a PAUSED mic blocks inside get() forever — the barge-in monitor got
+        wedged exactly like that, outlived its join timeout, and then stole
+        the next turn's frames off the shared queue (mic contention)."""
         while True:
+            if stop is not None and stop.is_set():
+                return
             try:
                 yield self._q.get(timeout=timeout)
             except queue.Empty:

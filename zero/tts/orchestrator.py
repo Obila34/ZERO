@@ -128,6 +128,46 @@ def split_sentences(text: str, clause_split: bool = True) -> list[str]:
     return [s for s in split if s] or out
 
 
+_SENT_END_TAIL_RE = re.compile(r"[.!?…\n]\s*$")
+
+
+def split_stream(text: str, eager_first: bool = False) -> tuple[list[str], str]:
+    """Incremental split for streaming TTS: (complete_sentences, remainder).
+
+    Unlike split_sentences, the remainder keeps its ORIGINAL whitespace. The
+    old producer pattern (`buffer = split_sentences(buffer)[-1]`) stripped the
+    buffer's trailing space, so when the tokenizer put the joining space at the
+    END of a chunk ("I'm " + "still"), it was silently lost — live replies came
+    out as "I'mstill" / "Heythere" and were spoken that way.
+
+    ``eager_first``: when nothing has been spoken yet, also emit a leading
+    CLAUSE ("Well, that's a good question,") the moment one is long enough,
+    instead of holding all audio until the first full stop — the first sound
+    starts several LLM tokens sooner.
+    """
+    complete: list[str] = []
+    consumed = 0
+    for m in _SENTENCE_RE.finditer(text):
+        seg = m.group(1)
+        if m.end() >= len(text) and not _SENT_END_TAIL_RE.search(seg):
+            break  # incomplete tail — stays in the buffer, spacing intact
+        # Reuse the long-sentence clause splitting on each complete sentence.
+        complete.extend(split_sentences(seg.strip()))
+        consumed = m.end()
+    remainder = text[consumed:]
+    if eager_first and not complete:
+        buf = ""
+        end = 0
+        for m in _CLAUSE_RE.finditer(remainder):
+            buf += m.group(1)
+            end = m.end()
+            if len(buf.strip()) >= _CLAUSE_MIN_CHARS:
+                complete.append(buf.strip())
+                remainder = remainder[end:]
+                break
+    return [s for s in complete if s], remainder
+
+
 def strip_asides(chunks):
     """Drop non-speech the model writes into a streamed reply, statefully
     across chunk and sentence boundaries:

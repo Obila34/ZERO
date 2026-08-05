@@ -32,14 +32,25 @@ from zero.utils.logging import get_logger
 log = get_logger("llm.openai")
 
 
-# A reasoning pass that leaks into `content` shows up welded to the first real
-# word ("thoughtIt's looking warm..."), which then gets SPOKEN. Narrow on
-# purpose: only a bare marker immediately followed by a capital letter, so
-# ordinary words ("thoughtful", "thinking about it") are untouched.
-_REASON_PREFIX_RE = re.compile(r"^\s*(?:thought|thinking|reasoning)(?=[A-Z])")
+# A reasoning pass that leaks into `content` shows up as a bare marker welded
+# (or loosely joined) to the first real word: "thoughtIt's looking warm...",
+# "thought Heythere!" — which then gets SPOKEN. The first version required the
+# capital IMMEDIATELY after the marker, so the spaced form slipped through and
+# was said aloud at a live venue. Now optional space/colon is allowed before
+# the capital. Still narrow on purpose: the reply must START with the bare
+# lowercase marker and the next real character must be a capital, so ordinary
+# words ("thoughtful", "thinking about it") are untouched.
+_REASON_PREFIX_RE = re.compile(
+    r"^\s*(?:thought|thinking|reasoning):?\s*(?=[A-Z])")
+# The marker alone (the capital arrives in the NEXT stream chunk): drop the
+# whole chunk and keep treating the next one as the reply's first.
+_REASON_BARE_RE = re.compile(r"^\s*(?:thought|thinking|reasoning):?\s*$")
 
 
 def _strip_reasoning_prefix(chunk: str) -> str:
+    if _REASON_BARE_RE.match(chunk):
+        log.warning("dropped a bare leaked reasoning marker (%r)", chunk)
+        return ""
     cleaned = _REASON_PREFIX_RE.sub("", chunk)
     if cleaned != chunk:
         log.warning("stripped a leaked reasoning prefix from the reply")
@@ -227,10 +238,10 @@ class OpenAICompatLLM(LLM):
                 chunk = (choices[0].get("delta") or {}).get("content", "")
                 if chunk:
                     if first:
-                        first = False
                         chunk = _strip_reasoning_prefix(chunk)
                         if not chunk:
-                            continue
+                            continue  # still first: a bare marker was dropped
+                        first = False
                     if guard.feed(chunk):
                         return   # degenerate: stop before it reaches the voice
                     yield chunk

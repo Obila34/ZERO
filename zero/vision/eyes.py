@@ -109,6 +109,20 @@ class Eyes:
         from zero.vision.tracker import IouTracker
 
         self._tracker = IouTracker()
+        # Learned-name annotation runs in the BACKGROUND, never per turn. Each
+        # annotate() is a remote CLIP round trip per detection (or a Pi-CPU
+        # embed when the tunnel is down) — measured 1.6-2.0s for 4 detections,
+        # and it was being paid inline on turns that asked nothing visual
+        # (`vision+recall=1775ms, visual=False`). The scene barely changes
+        # between refreshes, so a turn attaches whatever annotation is already
+        # cached and NEVER waits: stale-but-instant beats fresh-but-late in a
+        # live conversation.
+        self._ann_lock = threading.Lock()
+        self._ann_dets: list | None = None
+        self._ann_ts = 0.0
+        self._ann_thread: Optional[threading.Thread] = None
+        self._ann_interval_s = 2.0   # background refresh cadence
+        self._ann_ttl_s = 8.0        # cached annotation older than this = stale
         # World state (Phase 2): Tier 0 motion every frame, Tier 1 tracks after
         # every detection pass, Tier 2 narration via the optional narrator.
         # All optional — Eyes runs exactly as before when world is None.
@@ -150,6 +164,10 @@ class Eyes:
         self._started_at = time.time()
         self._thread = threading.Thread(target=self._loop, name="Eyes", daemon=True)
         self._thread.start()
+        if self._learned is not None:
+            self._ann_thread = threading.Thread(
+                target=self._annotate_loop, name="EyesAnnotate", daemon=True)
+            self._ann_thread.start()
         if self._narrator is not None:
             self._narrator.start()
         log.info("eyes open — perceiving continuously")
@@ -161,6 +179,9 @@ class Eyes:
         if self._thread is not None:
             self._thread.join(timeout=2.0)
             self._thread = None
+        if self._ann_thread is not None:
+            self._ann_thread.join(timeout=2.0)
+            self._ann_thread = None
         self._camera.stop()
         if self._preview_sink is not None:
             self._preview_sink.close()
@@ -352,29 +373,55 @@ class Eyes:
         return self._scene.snapshot().frame_rgb
 
     def _with_learned(self, snap) -> list:
-        """Detections with learned-name overrides applied; also logs sightings
-        of low-confidence objects nobody has named yet (curiosity fodder)."""
+        """Detections with learned-name overrides — from the background cache,
+        NEVER computed inline. annotate() costs a remote round trip (or a
+        Pi-CPU embed) per detection and was stalling every conversation turn
+        by 1.6-2.0s, including turns that asked nothing visual. A turn takes
+        whatever the annotator last produced; if that's stale (or the loop
+        hasn't run yet), the raw detector labels are the honest answer."""
         dets = snap.detections
-        if self._learned is None or snap.frame_rgb is None or not dets:
+        if self._learned is None or not dets:
             return dets
-        try:
-            t0 = time.monotonic()
-            annotated = self._learned.annotate(snap.frame_rgb, dets)
-            dt = time.monotonic() - t0
-            if dt > 0.3:
-                log.info("learned annotate slow: %.2fs for %d detections",
-                         dt, len(dets))
-        except Exception as e:  # learned names must never break perception
-            log.debug("learned annotate failed: %s", e)
-            return dets
-        now = time.time()
-        with self._unknowns_lock:
-            for orig, ann in zip(dets, annotated):
-                if (ann.label == orig.label            # no learned override
-                        and orig.confidence < self._unknown_conf
-                        and orig.label.lower() != "person"):
-                    self._unknowns[orig.label.lower()] = now
-        return annotated
+        with self._ann_lock:
+            ann, ts = self._ann_dets, self._ann_ts
+        if ann is not None and time.monotonic() - ts <= self._ann_ttl_s:
+            return ann
+        return dets
+
+    def _annotate_loop(self) -> None:
+        """Background learned-object annotation: refresh the cached overrides
+        every couple of seconds so per-turn context reads are instant. Also
+        owns the unknown-object (curiosity) tracking, which used to ride the
+        inline annotate."""
+        while not self._stop.is_set():
+            self._stop.wait(self._ann_interval_s)
+            if self._stop.is_set():
+                return
+            snap = self._scene.snapshot()
+            dets = snap.detections
+            if snap.frame_rgb is None or not dets:
+                continue
+            try:
+                t0 = time.monotonic()
+                annotated = self._learned.annotate(snap.frame_rgb, dets)
+                dt = time.monotonic() - t0
+                if dt > 1.0:
+                    log.info("learned annotate slow: %.2fs for %d detections "
+                             "(background — turns are not waiting on this)",
+                             dt, len(dets))
+            except Exception as e:  # learned names must never break perception
+                log.debug("learned annotate failed: %s", e)
+                continue
+            with self._ann_lock:
+                self._ann_dets = annotated
+                self._ann_ts = time.monotonic()
+            now = time.time()
+            with self._unknowns_lock:
+                for orig, ann in zip(dets, annotated):
+                    if (ann.label == orig.label        # no learned override
+                            and orig.confidence < self._unknown_conf
+                            and orig.label.lower() != "person"):
+                        self._unknowns[orig.label.lower()] = now
 
     def recent_unknowns(self, within_s: float = 3600.0) -> list[str]:
         """Labels of unfamiliar (low-confidence, unlearned) objects sighted

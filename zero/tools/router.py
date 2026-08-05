@@ -348,9 +348,16 @@ class ToolAwareLLM:
             result = tool.safe_run(args, self._ctx())
             log.info("tool %s -> %r", name, result[:100])
         # Second pass: let the model phrase the outcome in its own voice.
+        # The assistant turn is included ONLY when it has content: most tool
+        # routes pass raw_reply="" (forced/auto web search never asked the
+        # model first), and an EMPTY assistant turn renders as a degenerate
+        # `<start_of_turn>model<end_of_turn>` in Gemma's chat template — which
+        # is exactly the shape that provoked leaked "thought ..." reasoning
+        # prefixes on tool-router turns, despite enable_thinking=false.
         followup = [
             *messages,
-            {"role": "assistant", "content": raw_reply},
+            *([{"role": "assistant", "content": raw_reply}]
+              if raw_reply.strip() else []),
             {"role": "user", "content":
                 f"(Tool result: {result}) State the answer to the user "
                 "directly, in one or two spoken sentences. Never narrate the "

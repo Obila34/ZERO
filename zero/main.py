@@ -40,7 +40,7 @@ from zero.tools.base import ToolContext
 from zero.vision.learned import parse_object_teach
 from zero.llm.persona import build_system_prompt
 from zero.state import State, can_transition
-from zero.tts.orchestrator import split_sentences, strip_asides
+from zero.tts.orchestrator import split_stream, strip_asides
 from zero.utils.logging import get_logger, setup_logging
 
 log = get_logger("main")
@@ -635,6 +635,10 @@ class Zero:
         # prefix stable, so the cache stays warm through the conversation).
         if self.memory is not None:
             self.convo.set_memory(self.memory.as_block())
+        # Prefill visibility: the system prefix is what every cold prefill
+        # pays for. Logged so prompt growth is a measured fact, not a guess.
+        _sys = self.convo.messages()[0]["content"]
+        log.info("system prefix: %d chars (~%d tokens)", len(_sys), len(_sys) // 4)
         # A proactive opener ("Hey David, welcome back.") started this
         # conversation — seed it as the first assistant turn.
         opener = getattr(self, "_pending_opener", None)
@@ -725,8 +729,32 @@ class Zero:
                         # The live transcript is already here — no STT round
                         # trip to wait on. Use it for the endpoint decision AND
                         # to start guessing at a reply before they finish.
-                        spec["live_text"] = live.text()
-                        self._maybe_speculate(spec.get("live_text"), p)
+                        spec["live_text"] = lt = (live.text() or "").strip()
+                        self._maybe_speculate(lt, p)
+                        # Speculative LLM PREFILL on the live path. This block
+                        # used to live only in the batch-STT branch below,
+                        # which the live path returns before — so with Kyutai
+                        # streaming (the deployed config) the KV cache was
+                        # never warmed and every turn paid full prefill on the
+                        # real request. A full speculative reply supersedes it
+                        # (its own stream prefills); otherwise one throwaway
+                        # token here makes commit-time first-token near-instant.
+                        if (lt and self._llm_prefill is not None
+                                and self._speculation is None
+                                and spec.get("prefilled") != lt):
+                            spec["prefilled"] = lt
+
+                            def _prefill(text=lt):
+                                try:
+                                    self._llm_prefill(
+                                        [*self.convo.messages(),
+                                         {"role": "user", "content": text}])
+                                except Exception as e:
+                                    log.debug("speculative prefill failed "
+                                              "(harmless): %s", e)
+                            threading.Thread(target=_prefill,
+                                             name="llm-prefill",
+                                             daemon=True).start()
                         return
                     if not allow_spec:
                         return
@@ -1844,11 +1872,19 @@ class Zero:
                                  time.monotonic() - self._t_reply_start)
                         first_token = False
                     buffer += chunk
-                    # Only rescan for sentences when this chunk could complete one.
-                    if not any(c in chunk for c in ".!?…\n"):
+                    # Rescan when this chunk could complete a sentence — or,
+                    # before ANY audio has been queued, a clause: the first
+                    # sound then starts at the first comma instead of waiting
+                    # for the whole opening sentence (split_stream eager_first).
+                    eager = not full
+                    if not any(c in chunk for c in ".!?…\n") and not (
+                            eager and any(c in chunk for c in ",;:—–")):
                         continue
-                    sentences = split_sentences(buffer)
-                    complete, buffer = sentences[:-1], (sentences[-1] if sentences else "")
+                    # split_stream keeps the remainder's original whitespace —
+                    # taking split_sentences' stripped tail as the new buffer
+                    # lost the space between chunks ("I'm " + "still" was
+                    # spoken as "I'mstill").
+                    complete, buffer = split_stream(buffer, eager_first=eager)
                     for sentence in complete:
                         full.append(sentence)
                         idx = len(full) - 1
@@ -2176,8 +2212,10 @@ class Zero:
             return
         if turn_p is None or turn_p < self.cfg.get(
                 "llm.speculative_reply_threshold", 0.8):
+            log.debug("no speculation: turn_p=%s below threshold", turn_p)
             return
         if not worth_speculating(partial):
+            log.debug("no speculation: partial not bet-worthy (%r)", partial)
             return
         if self._speculation is not None:
             if self._speculation.matches(partial):
@@ -2260,7 +2298,7 @@ class Zero:
         # room tone and would drag the ratio down.
         judged = voiced = 0
         quiet = 0
-        for frame in self.mic.frames():
+        for frame in self.mic.frames(stop=stop):
             if stop.is_set():
                 return None
             frames.append(frame)
@@ -2270,6 +2308,8 @@ class Zero:
             quiet = 0 if is_voice else quiet + 1
             if quiet >= need_quiet or len(frames) >= cap:
                 break
+        if stop.is_set():   # frames() ended because the monitor was stopped
+            return None
         return frames, (voiced / judged if judged else 0.0)
 
     def _assess_interruption(self, speech, stop) -> bool:
@@ -2413,7 +2453,11 @@ class Zero:
                 self.wake.reset()
             except Exception as e:
                 log.debug("wake reset failed: %s", e)
-            for frame in self.mic.frames():
+            # stop-aware frames(): the monitor must exit even when the mic is
+            # paused (empty queue) — a plain frames() blocked forever there,
+            # outlived the join in _stop_bargein, and then fought the next
+            # turn's endpointer for the one shared frame queue.
+            for frame in self.mic.frames(stop=stop):
                 if stop.is_set():
                     return
                 try:
@@ -2429,9 +2473,16 @@ class Zero:
                         continue
                     # A remark that finished in the think-gap (before any reply
                     # audio): transcribe it now so the merge points find text.
+                    # On a WORKER thread — transcription is a network call that
+                    # can block for seconds, and a monitor stuck inside it
+                    # can't see stop and misses its exit window ("barge-in
+                    # monitor did not exit in time").
                     frames_af = speech.take_afterthought()
                     if frames_af:
-                        self._transcribe_afterthought(frames_af)
+                        threading.Thread(
+                            target=self._transcribe_afterthought,
+                            args=(frames_af,), name="afterthought-stt",
+                            daemon=True).start()
                 except Exception as e:  # never let the monitor crash playback
                     log.debug("barge-in monitor error: %s", e)
                     return

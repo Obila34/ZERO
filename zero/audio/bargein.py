@@ -99,11 +99,34 @@ class SpeechBargeIn:
         return float(np.percentile(np.fromiter(self._floor_win, dtype=np.float32),
                                    self._pct))
 
-    def _echo_correlated(self, now: float) -> bool:
+    def _gate(self, floor: float) -> float:
+        """The speech gate actually used: ratio x floor, floored at min_rms,
+        clamped to the ceiling. One place, so the armed log and the trigger
+        test can never disagree (the log used to print the raw gate while the
+        ceiling silently clamped the real one — 2047 shown, 1200 used)."""
+        gate = max(self._min_rms, self._ratio * floor)
+        if self._gate_ceiling and gate > self._gate_ceiling:
+            gate = self._gate_ceiling
+        return gate
+
+    def _echo_correlated(self, now: float, last_blocks: int | None = None) -> bool:
         """True when the mic envelope tracks the played envelope (own echo).
         Compared at 0..~400 ms lags on a block_ms grid; envelopes survive the
-        drifting BT latency that breaks sample-level AEC. Never raises."""
-        if self._played_env is None or len(self._mic_env) < 8:
+        drifting BT latency that breaks sample-level AEC. Never raises.
+
+        ``last_blocks`` restricts the judgment to the most recent slice of the
+        mic envelope. The full ~900 ms window is right for the trigger veto
+        (more evidence = fewer eaten interruptions), but wrong for floor
+        adaptation: echo from a second ago still inside the window can align
+        with the played history at some lag and vouch for a CURRENT frame that
+        is actually a person — which is how the user's steady voice kept
+        ratcheting the floor."""
+        if self._played_env is None:
+            return False
+        env = list(self._mic_env)
+        if last_blocks is not None:
+            env = env[-last_blocks:]
+        if len(env) < 8:
             return False
         try:
             played = self._played_env()
@@ -111,9 +134,9 @@ class SpeechBargeIn:
                 return False
             # Resample both envelopes onto a common block_ms grid ending now.
             step = self._block_ms / 1000.0
-            n = len(self._mic_env)
+            n = len(env)
             grid = now - step * np.arange(n - 1, -1, -1)
-            mic = np.fromiter((r for _, r in self._mic_env), dtype=np.float64)
+            mic = np.fromiter((r for _, r in env), dtype=np.float64)
             pt = np.array([t for t, _ in played], dtype=np.float64)
             pr = np.array([r for _, r in played], dtype=np.float64)
             best = 0.0
@@ -225,20 +248,19 @@ class SpeechBargeIn:
                 floor = self._floor()
                 # The calibration line: your voice must beat `gate` to
                 # interrupt. If it never triggers, lower barge_in_ratio /
-                # barge_in_min_rms; if it self-triggers, raise them.
+                # barge_in_min_rms; if it self-triggers, raise them. This is
+                # the CLAMPED gate — the number shown is the number used.
                 log.info("barge-in armed: echo floor %.0f, speech gate %.0f",
-                         floor, max(self._min_rms, self._ratio * floor))
+                         floor, self._gate(floor))
             return False
 
         floor = self._floor()
-        gate = max(self._min_rms, self._ratio * floor)
-        # Hard ceiling. Even with correlation filtering, a floor estimate that
-        # runs away would silently make interruption impossible — the failure
-        # mode is invisible, because nothing errors, the person just cannot get
-        # a word in. Better to accept a rare echo false-trigger than to be
-        # deaf to a real one.
-        if self._gate_ceiling and gate > self._gate_ceiling:
-            gate = self._gate_ceiling
+        # Hard ceiling (inside _gate). Even with correlation filtering, a floor
+        # estimate that runs away would silently make interruption impossible —
+        # the failure mode is invisible, because nothing errors, the person
+        # just cannot get a word in. Better to accept a rare echo false-trigger
+        # than to be deaf to a real one.
+        gate = self._gate(floor)
         if carrying:
             # Speech began BEFORE any audio played — it cannot be our echo.
             # Only the absolute level + VAD gate it, and the trigger shortens:
@@ -269,7 +291,18 @@ class SpeechBargeIn:
             # audible. Adapting on silence (inter-sentence gaps) decayed the
             # floor to nothing, so the NEXT sentence's own echo fired a false
             # barge-in mid-reply.
-            if rms > 0.3 * floor:
+            # AND only frames that actually correlate with what the speaker is
+            # playing. This path had no correlation guard: a person talking
+            # under the gate (or a loud frame the correlation veto had just
+            # rejected as foreground) fed the floor window frame after frame,
+            # ratcheting the gate above their own voice — the venue session's
+            # `echo floor 1279 -> gate 2047` was the user's voice learned as
+            # echo through HERE, not through the learn window. Judged on the
+            # RECENT envelope only (last_blocks) — the full window still holds
+            # old genuine echo that can vouch for a frame that is a person.
+            if rms > 0.3 * floor and (self._played_env is None
+                                      or self._echo_correlated(now,
+                                                               last_blocks=8)):
                 self._floor_win.append(rms)
             self._misses += 1
             if self._misses > 1:  # allow a single-frame dropout inside a run

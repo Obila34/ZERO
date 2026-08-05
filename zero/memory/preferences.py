@@ -35,16 +35,23 @@ _PREF_PATTERNS: list[tuple[re.Pattern, str, float | None]] = [
 # a different knob: rate changes the engine, level changes the speaker. People
 # genuinely ask a voice to change loudness ("keep it down", "I can't hear
 # you"), and it should STICK rather than snap back on the next sentence.
+# Softeners people put between the verb and the direction: "talk a bit
+# louder", "speak a little more quietly". Without this, a real venue request
+# ("you talk a bit louder than you are talking right now") fell through to the
+# LLM as ordinary chat and the volume never changed.
+_HEDGE = r"(?:a\s+(?:bit|little|touch|tad)\s+|slightly\s+|much\s+|way\s+)?"
+
 _VOLUME_PATTERNS: list[tuple[re.Pattern, str, float]] = [
     (re.compile(r"\bwhisper\b", re.I), "speak very quietly", 0.5),
-    (re.compile(r"\b(?:talk|speak|say it)\s+(?:more\s+)?"
+    (re.compile(r"\b(?:talk|speak|say it)\s+" + _HEDGE + r"(?:more\s+)?"
                 r"(?:quiet(?:ly|er)?|soft(?:ly|er)?|lower)\b", re.I),
      "speak more quietly", 0.72),
     (re.compile(r"\b(?:lower|turn down)\s+(?:your\s+)?(?:voice|volume)\b", re.I),
      "speak more quietly", 0.72),
     (re.compile(r"\b(?:keep it down|not so loud|too loud)\b", re.I),
      "speak more quietly", 0.72),
-    (re.compile(r"\b(?:speak|talk)\s+(?:up|louder|more loudly)\b", re.I),
+    (re.compile(r"\b(?:speak|talk)\s+" + _HEDGE
+                + r"(?:up|louder|more loudly)\b", re.I),
      "speak louder", 1.35),
     (re.compile(r"\b(?:turn up|raise)\s+(?:your\s+)?(?:voice|volume)\b", re.I),
      "speak louder", 1.35),
@@ -53,13 +60,19 @@ _VOLUME_PATTERNS: list[tuple[re.Pattern, str, float]] = [
      "speak at normal volume", 1.0),
 ]
 
+# Spoken volume requests run longer than other corrections ("you talk a bit
+# louder than you are talking right now" is 11 words) — but stories that merely
+# MENTION loudness run longer still, so the cap stays, just wider than the
+# 10-word one that dropped that exact request at a live venue.
+_VOLUME_MAX_WORDS = 14
+
 
 def parse_volume(text: str) -> tuple[str, float] | None:
     """(normalized_preference, level_multiplier) when the utterance asks ZERO
     to change how LOUD it is, else None. Short utterances only — a story that
     mentions whispering is not an instruction."""
     t = (text or "").strip()
-    if len(t.split()) > 10:
+    if len(t.split()) > _VOLUME_MAX_WORDS:
         return None
     for rx, pref, level in _VOLUME_PATTERNS:
         if rx.search(t):

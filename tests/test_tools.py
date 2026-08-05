@@ -371,6 +371,36 @@ def test_router_tier2_json_tool_call_and_rephrase():
                for m in llm.calls[1])
 
 
+def test_rephrase_omits_the_empty_assistant_turn():
+    # Forced/auto web-search routes call _run_and_rephrase with raw_reply="".
+    # An EMPTY assistant turn renders as a degenerate model turn in Gemma's
+    # chat template — the shape that provoked spoken "thought ..." reasoning
+    # leaks on tool-router turns. It must simply not be there.
+    reg, _, _ = _registry()
+    llm = FakeLLM("It's three o'clock.")
+    router = ToolAwareLLM(llm, reg)
+    out = _collect(router._run_and_rephrase(
+        [{"role": "user", "content": "what time is it"}],
+        "", {"tool": "time", "args": {}}))
+    assert out == "It's three o'clock."
+    followup = llm.calls[0]
+    assert not any(m["role"] == "assistant" and not str(m["content"]).strip()
+                   for m in followup)
+
+
+def test_rephrase_keeps_a_real_assistant_turn():
+    reg, _, _ = _registry()
+    llm = FakeLLM("Timer's running.")
+    router = ToolAwareLLM(llm, reg)
+    raw = '{"tool": "timer", "args": {"duration": "3 minutes"}}'
+    _collect(router._run_and_rephrase(
+        [{"role": "user", "content": "3 minute timer"}], raw,
+        {"tool": "timer", "args": {"duration": "3 minutes"}}))
+    followup = llm.calls[0]
+    assert any(m["role"] == "assistant" and m["content"] == raw
+               for m in followup)
+
+
 def test_router_tier2_unknown_tool_is_graceful():
     reg, _, _ = _registry()
     llm = FakeLLM('{"tool": "nuke", "args": {}}', "I can't do that one.")

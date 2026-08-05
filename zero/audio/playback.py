@@ -60,13 +60,28 @@ class Speaker:
     def unduck(self) -> None:
         self.gain = 1.0
 
+    # Soft-knee limiter threshold: below this the signal is untouched (linear),
+    # above it peaks are squashed smoothly toward 1.0 with tanh instead of
+    # being hard-clipped flat. At output_gain ~2x a hard clip flattened every
+    # loud syllable into a buzz; the knee keeps the average loudness of the
+    # boost while peaks round off instead of shearing.
+    _KNEE = 0.85
+
     def _level(self, block: np.ndarray) -> np.ndarray:
-        """Apply base x dynamic gain, hard-clipped. Without the clip a boost
-        wraps around into loud distortion instead of just being loud."""
+        """Apply base x dynamic gain with a soft-knee limiter. Output is always
+        inside [-1, 1] (tanh is asymptotic to the ceiling), so a boost gets
+        louder rather than wrapping into distortion."""
         g = self.output_gain * self.gain
         if g == 1.0:
             return block
-        return np.clip(block * g, -1.0, 1.0)
+        block = block * g
+        a = np.abs(block)
+        over = a > self._KNEE
+        if over.any():
+            head = 1.0 - self._KNEE
+            block[over] = np.sign(block[over]) * (
+                self._KNEE + head * np.tanh((a[over] - self._KNEE) / head))
+        return block
 
     def env_snapshot(self) -> list:
         """Recent played-audio envelope for the barge-in correlation guard."""

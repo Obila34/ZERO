@@ -186,7 +186,10 @@ conversation:
 memory:
   enabled: true # remember durable facts across sessions (SQLite)
   path: zero_memory.sqlite # single file on disk; survives reboots
-  max_facts: 30 # cap injected facts so the prompt stays small/fast
+  max_facts:
+    20 # cap injected facts so the prompt stays small/fast. Was 30 — trimmed
+    # as part of cutting cold-prefill cost; the activation ranking means the
+    # 20 that survive are the ones that were actually being used.
   recent_episodes:
     3 # one-line summaries of recent conversations injected at
     # the start, so ZERO recalls the ARC of past chats (0 = off)
@@ -222,9 +225,13 @@ memory:
     top_k: 6 # memories surfaced per recall
     half_life_days: 14 # recency decay half-life
     min_activation: 0.05 # below this a memory doesn't surface at all
-    budget_ms: 300 # hard per-turn budget for recall; over-budget = skip the
-      # note this turn. Keeps memory OFF the reply's critical path
-      # (a slow GPU embed was costing ~6s of first-token latency).
+    budget_ms: 200 # hard per-turn budget for recall; over-budget = skip the
+      # note this turn. Was 300 — with the vision note now served from a
+      # background cache (never inline), recall is the only remaining
+      # blocking cost in the context stage, and 200ms keeps the whole
+      # `vision+recall` stage under the 200ms target on non-visual turns.
+      # Keeps memory OFF the reply's critical path (a slow GPU embed was
+      # costing ~6s of first-token latency).
   forgetting:
     enabled: true # gentle decay: old + unimportant + never-recalled
     max_age_days: 90 # ...memories fade after this long untouched

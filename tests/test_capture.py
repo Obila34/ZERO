@@ -148,3 +148,28 @@ def test_callback_still_drops_frames_when_paused():
     indata = np.zeros((480, 1), dtype=np.float32)
     mic._callback(indata, 480, None, None)
     assert mic._q.empty()
+
+
+def test_frames_ends_when_stop_event_is_set():
+    """The barge-in monitor's exit guarantee: frames() must return — not block
+    forever — when its stop event is set, even on a paused mic whose queue
+    stays empty. A wedged monitor outlived its join and then stole the next
+    turn's audio off the shared queue (mic contention)."""
+    import threading
+
+    _install_fake_sd(fail_at_16k=False)
+    from zero.audio.capture import MicCapture
+
+    mic = MicCapture(sample_rate=16000, block_ms=30, device=0)
+    stop = threading.Event()
+    stop.set()
+    # Empty queue + stop already set: iteration ends immediately.
+    assert list(mic.frames(timeout=0.05, stop=stop)) == []
+
+    # And mid-iteration: one frame comes through, then stop ends it.
+    stop = threading.Event()
+    mic._q.put_nowait(np.zeros(480, dtype=np.int16))
+    gen = mic.frames(timeout=0.05, stop=stop)
+    assert next(gen).shape[0] == 480
+    stop.set()
+    assert list(gen) == []

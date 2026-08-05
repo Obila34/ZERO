@@ -148,6 +148,55 @@ class TestSceneChanges:
         assert eyes.scene_changes() == []   # inside cooldown: swallowed
 
 
+class TestLearnedAnnotationCache:
+    """Learned-name annotation must NEVER run inline on a turn — it cost
+    1.6-2.0s per look at the venue (a remote round trip per detection), paid
+    even on turns that asked nothing visual. Turns read a background cache."""
+
+    class _Det:
+        def __init__(self, label):
+            self.label = label
+
+    class _Snap:
+        def __init__(self, dets):
+            self.detections = dets
+            self.frame_rgb = object()   # non-None: annotation would be legal
+
+    class _ExplodingLearned:
+        def annotate(self, frame, dets):  # pragma: no cover — must not run
+            raise AssertionError("annotate() ran on the turn path")
+
+    def _eyes(self):
+        from zero.vision.eyes import Eyes
+
+        return Eyes(camera=None, detector=None, color_namer=None,
+                    learned=self._ExplodingLearned())
+
+    def test_turn_path_never_calls_annotate(self):
+        import time
+
+        eyes = self._eyes()
+        dets = [self._Det("cup")]
+        snap = self._Snap(dets)
+        # No cache yet: raw detections come back, annotate() is NOT called.
+        assert eyes._with_learned(snap) == dets
+        # Fresh cache: the cached annotation is served as-is.
+        ann = [self._Det("french press")]
+        with eyes._ann_lock:
+            eyes._ann_dets, eyes._ann_ts = ann, time.monotonic()
+        assert eyes._with_learned(snap) == ann
+
+    def test_stale_cache_falls_back_to_raw_labels(self):
+        import time
+
+        eyes = self._eyes()
+        dets = [self._Det("cup")]
+        with eyes._ann_lock:
+            eyes._ann_dets = [self._Det("french press")]
+            eyes._ann_ts = time.monotonic() - (eyes._ann_ttl_s + 1.0)
+        assert eyes._with_learned(self._Snap(dets)) == dets
+
+
 class TestStripAsides:
     def _run(self, chunks):
         from zero.tts.orchestrator import strip_asides
@@ -453,6 +502,65 @@ class TestBargeInEnvelopeCorrelation:
         assert any(fired)
 
 
+class TestBargeInFloorAdaptation:
+    def test_user_voice_below_the_gate_cannot_ratchet_the_floor(self):
+        import time as _t
+
+        # The venue failure: someone talking UNDER the interrupt gate fed the
+        # slow floor-adaptation path frame after frame (it had no correlation
+        # guard), the floor climbed to their voice (1279), and the gate rose
+        # above anything they could say. Now only frames that CORRELATE with
+        # what the speaker is playing may adapt the floor.
+        played = []
+
+        def env():
+            return list(played)
+
+        d = SpeechBargeIn(is_speech=lambda f: True, block_ms=BLOCK_MS,
+                          learn_ms=90, trigger_ms=90, ratio=2.0, min_rms=250,
+                          played_env=env, env_corr_max=0.65)
+        rng = np.random.default_rng(11)
+        step = BLOCK_MS / 1000.0
+        # Echo phase: mic tracks playback exactly (varying level) — this is
+        # what legitimately builds the floor, via learn window + adaptation.
+        # Long enough that the floor window is well populated, as it is in a
+        # real reply.
+        for _ in range(40):
+            level = int(rng.uniform(300, 600))
+            played.append((_t.monotonic(), float(level)))
+            d.update(_frame(level))
+            _t.sleep(step)
+        floor_after_echo = d._floor()
+        assert floor_after_echo > 0          # echo did feed the floor
+        # User phase: playback goes constant-quiet, the mic holds a steady 700
+        # (a person talking under the gate). Uncorrelated -> must NOT adapt.
+        for _ in range(30):
+            played.append((_t.monotonic(), 400.0))
+            d.update(_frame(700))
+            _t.sleep(step)
+        assert d._floor() <= max(floor_after_echo, 600.0), \
+            "user's voice was learned into the echo floor"
+        # And when they raise their voice above the (honest) gate, it fires.
+        fired = []
+        for _ in range(6):
+            played.append((_t.monotonic(), 400.0))
+            fired.append(d.update(_frame(4000)))
+            _t.sleep(step)
+        assert any(fired)
+
+
+class TestBargeInGateCeiling:
+    def test_gate_is_clamped_and_log_uses_the_same_number(self):
+        d = SpeechBargeIn(is_speech=lambda f: True, block_ms=BLOCK_MS,
+                          learn_ms=90, trigger_ms=90, ratio=1.6, min_rms=250,
+                          gate_ceiling=1200)
+        # The venue log printed "gate 2047" while 1200 was actually in force —
+        # _gate() is now the single source both the trigger and the log read.
+        assert d._gate(1279) == 1200
+        assert d._gate(100) == 250        # min_rms floor still applies
+        assert d._gate(500) == 800        # ratio path, under the ceiling
+
+
 class TestBargeInRearm:
     def test_rearm_clears_the_run_but_keeps_the_floor(self):
         d = SpeechBargeIn(is_speech=lambda f: True, block_ms=BLOCK_MS,
@@ -681,6 +789,21 @@ class TestSpokenVolume:
         # Long sentences that merely MENTION volume must not change it.
         assert self._v("she whispered a long story to me about that yesterday ok") is None
         assert self._v("what time is it") is None
+        # Past the (widened) word cap: still a story, still ignored.
+        assert self._v("yesterday he told me to whisper because everyone in the "
+                       "library was already asleep by then") is None
+
+    def test_the_venue_phrase_that_was_missed(self):
+        # Heard live and misrouted to `-> queue`: 11 words defeated the old
+        # 10-word cap, and "a bit" sat between the verb and "louder".
+        pref, lvl = self._v(
+            "you talk a bit louder than you are talking right now")
+        assert lvl > 1.0 and "louder" in pref
+
+    def test_hedged_requests_still_parse(self):
+        assert self._v("talk a little louder")[1] > 1.0
+        assert self._v("speak a bit more quietly")[1] < 1.0
+        assert self._v("could you talk much louder please")[1] > 1.0
 
 
 class TestRoomSense:
