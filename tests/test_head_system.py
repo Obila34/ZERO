@@ -105,3 +105,53 @@ def test_efference_copy_suppresses_on_motion_then_resettles():
     hs._efference_copy(2000.05 + 1.0)         # past resettle_dwell_s
     assert eyes.resettled == 1
     assert hs._moved is False
+
+
+def test_tilt_envelope_from_config_reaches_controller():
+    # audit H5: the calibrated tilt window must exist in BELIEF space too
+    hs = _sys(over={"head.tilt_min_deg": -10.0, "head.tilt_max_deg": 25.0})
+    assert hs._controller.clamp_to_envelope(0.0, 90.0) == (0.0, 25.0)
+    assert hs._controller.clamp_to_envelope(0.0, -90.0) == (0.0, -10.0)
+    # pan window untouched
+    assert hs._controller.clamp_to_envelope(120.0, 0.0)[0] == 45.0
+
+
+def test_command_sentinel_is_clamped_into_the_envelope():
+    # audit M3: FULL_DEG=999 must never leak into _cmd_target
+    hs = _sys(over={"head.tilt_min_deg": -10.0, "head.tilt_max_deg": 25.0})
+    hs.look_direction("tilt", 999.0)
+    assert hs._cmd_target == (0.0, 25.0)
+    hs.look_direction("pan", -999.0)
+    assert hs._cmd_target[0] == -45.0     # default limit_deg
+
+
+def test_command_deadline_is_set_when_target_appears():
+    # audit M2: the deadline is written BEFORE the target so a source tick
+    # can never see a fresh target with an expired deadline
+    import time as _t
+    hs = _sys()
+    hs.look_direction("pan", 20.0)
+    assert hs._cmd_target is not None
+    assert hs._cmd_until > _t.monotonic()
+
+
+def test_hand_tick_vertical_channel_gated_and_clamped():
+    class FakeHand:
+        value = (0.5, 1.0, 0.9)          # x, y, conf
+
+        def reset_filters(self):
+            pass
+
+    hs = _sys(over={"head.tilt_min_deg": -10.0, "head.tilt_max_deg": 25.0})
+    hs._hand = FakeHand()
+    hs._hand_tilt = False                 # kill switch (default): tilt stays 0
+    hs._hand_tick(now=0.0)
+    assert hs._last_aim[1] == 0.0
+    hs._hand_tilt = True                  # enabled: y maps into the envelope
+    hs._hand_tilt_deg = 15.0
+    hs._hand_tick(now=0.0)
+    assert hs._last_aim[1] == 15.0
+    hs._hand = FakeHand()
+    hs._hand.value = (0.0, 100.0, 0.9)    # absurd y still clamped to the window
+    hs._hand_tick(now=0.0)
+    assert hs._last_aim[1] == 25.0

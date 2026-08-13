@@ -124,7 +124,7 @@ class HeadController:
 
     # ── loop ──────────────────────────────────────────────────────────────────
     def start(self) -> None:
-        if self._thread is not None:
+        if self._thread is not None and self._thread.is_alive():
             return
         self._stop.clear()
         self._thread = threading.Thread(target=self._run, name="head-ctrl", daemon=True)
@@ -215,6 +215,12 @@ class HeadController:
             dt = self._dt - (time.monotonic() - t0)
             if dt > 0:
                 self._stop.wait(dt)
+
+    def clamp_to_envelope(self, head_x: float, head_y: float) -> tuple[float, float]:
+        """Clamp a target into the current per-axis soft-limit window."""
+        with self._lock:
+            return (_clamp_range(head_x, self._xmin, self._xmax),
+                    _clamp_range(head_y, self._ymin, self._ymax))
 
     # ── introspection (for tests / status) ───────────────────────────────────
     @property

@@ -60,6 +60,17 @@ class HeadSystem:
             home_x=float(cfg.get("head.home_x", 0.0)),
             home_y=float(cfg.get("head.home_y", 0.0)),
         )
+        # Tilt's mechanical range is asymmetric and much smaller than pan's.
+        # Install the calibrated window in the CONTROLLER too (not only the
+        # driver's servo clamp) so belief can never sit outside what the
+        # hardware can reach — else efference copy reports motion that never
+        # happened and the tilt tracker winds up against the clamp (audit H5).
+        tmin = cfg.get("head.tilt_min_deg", None)
+        tmax = cfg.get("head.tilt_max_deg", None)
+        if tmin is not None or tmax is not None:
+            self._controller.set_calibration(
+                y_min=float(tmin) if tmin is not None else None,
+                y_max=float(tmax) if tmax is not None else None)
         self._tracker = FaceTracker(
             self._controller,
             kp_pan=float(cfg.get("head.tracker.kp_pan", 0.22)),
@@ -121,7 +132,14 @@ class HeadSystem:
                 min_cutoff=float(cfg.get("head.hand.min_cutoff", 1.5)),
                 beta=float(cfg.get("head.hand.beta", 0.5)),
                 mirror=bool(cfg.get("head.hand.mirror", True)),
-                gain=gain)
+                gain=gain,
+                gain_y=float(cfg.get("head.hand.gain_y", 1.0)),
+                deadzone_y=float(cfg.get("head.hand.deadzone_y", 0.15)))
+        # Vertical teleop channel — kill switch + its own conservative range.
+        # Ships dark: even with the nod driven, the follow stays horizontal
+        # until head.hand.tilt is turned on after the supervised calibration.
+        self._hand_tilt = bool(cfg.get("head.hand.tilt", False))
+        self._hand_tilt_deg = float(cfg.get("head.hand.tilt_range_deg", 15.0))
         self._source_hz = float(cfg.get("head.source_hz", 15.0))
         self._suppress_lead_s = float(cfg.get("head.suppress_lead_s", 0.5))
         self._resettle_dwell_s = float(cfg.get("head.resettle_dwell_s", 0.4))
@@ -171,8 +189,17 @@ class HeadSystem:
         if self._hand is not None:
             self._hand.stop()
         try:
-            self._controller.center()      # ease to home before releasing
-            time.sleep(0.2)
+            # Ease to home before releasing, and actually WAIT for it: the
+            # gateway holds the last commanded pose forever (no watchdog), so
+            # cutting the loop mid-travel leaves the robot staring sideways
+            # until the next run (audit C3/M5). Bounded so shutdown never hangs.
+            self._controller.center()
+            t0 = time.monotonic()
+            while time.monotonic() - t0 < 2.5:
+                px, py = self._controller.position
+                if abs(px) < 2.0 and abs(py) < 2.0:
+                    break
+                time.sleep(0.05)
         except Exception:
             pass
         self._controller.stop()
@@ -275,7 +302,7 @@ class HeadSystem:
         self._cmd_target = None
         self._cmd_hold = False
         if self._hand is not None:
-            self._hand._filt.reset()   # avoid a jump when the follow resumes
+            self._hand.reset_filters()   # avoid a jump when the follow resumes
         self._scheduler.set_state(self._scheduler.state, time.monotonic())
         what = "following you" if self._input in ("hand", "head") else "tracking"
         return f"Okay, {what} again."
@@ -283,8 +310,16 @@ class HeadSystem:
     def _set_command(self, target, dwell=None, hold=False) -> None:
         self._cmd_hold = bool(hold)
         d = float(dwell if dwell is not None else self._cmd_dwell)
-        self._cmd_target = (float(target[0]), float(target[1]))
+        # Clamp into the controller's envelope so sentinel magnitudes (the
+        # parser's FULL_DEG=999) never leak into state — look_and_settle and
+        # status() must see a reachable target (audit M3).
+        tx, ty = self._controller.clamp_to_envelope(float(target[0]),
+                                                    float(target[1]))
+        # Deadline BEFORE target: the source tick reads target-then-deadline,
+        # so writing in this order can't expose a new target with the previous
+        # (expired) deadline and drop the command (audit M2).
         self._cmd_until = time.monotonic() + d
+        self._cmd_target = (tx, ty)
         if self._eyes is not None:
             try:
                 self._eyes.suppress_changes((3.0 if hold else d) + 0.3)  # efference copy
@@ -320,6 +355,9 @@ class HeadSystem:
                 "state": self._scheduler.state,
                 "driver": type(self._driver).__name__,
                 "moves_hardware": self._driver.moves_hardware,
+                # False = posts are failing: the hardware is NOT following
+                # belief. None = the driver has no link-health notion (null/udp).
+                "driver_healthy": getattr(self._driver, "healthy", None),
                 "stabilizer": "imu" if self._stab.has_imu else "efference",
                 "estop": self._estop,
                 "dbg": dict(self._dbg)}
@@ -330,14 +368,16 @@ class HeadSystem:
         The pose runs on its own thread; we read the latest smoothed value and
         set the target (the controller slews to it at rate_hz). When the hand is
         lost for a moment we ease back to home rather than freezing at an angle."""
-        x, conf = self._hand.value if self._hand is not None else (0.0, 0.0)
+        x, y, conf = (self._hand.value if self._hand is not None
+                      else (0.0, 0.0, 0.0))
         if conf > 0.0:
             self._hand_seen = now
-            aim = (x * self._limit_deg, 0.0)
+            ty = y * self._hand_tilt_deg if self._hand_tilt else 0.0
+            aim = self._controller.clamp_to_envelope(x * self._limit_deg, ty)
             self._controller.set_target(*aim)
             self._last_aim = aim
             self._dbg["branch"] = "hand"
-            self._dbg["aim"] = (round(aim[0], 1), 0.0)
+            self._dbg["aim"] = (round(aim[0], 1), round(aim[1], 1))
         elif now - self._hand_seen > self._hand_lost_s:
             self._controller.set_target(0.0, 0.0)   # hand gone -> recentre
             self._last_aim = (0.0, 0.0)
