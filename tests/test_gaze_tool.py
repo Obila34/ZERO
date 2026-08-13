@@ -73,11 +73,23 @@ def test_then_answer_settles_and_prompts_model():
     assert "describe" in out.lower()          # model is told to look then answer
 
 
-def test_command_overrides_tracking_then_expires():
+def test_directed_command_holds_until_released():
     import time
     h = _head()
-    h.look_direction("pan", -20.0, dwell=0.0001)
+    h.look_direction("pan", -20.0)
     assert h._cmd_target == (-20.0, 0.0)      # override is set
-    time.sleep(0.01)                          # let the tiny dwell elapse
-    h._source_tick(time.monotonic())          # expired → cleared, tracking resumes
+    assert h._cmd_hold is True                # directed commands HOLD (turn + stay)
+    time.sleep(0.01)
+    h._source_tick(time.monotonic())          # does NOT expire — stays put
+    assert h._cmd_target == (-20.0, 0.0)
+    h.resume_tracking()                       # 'follow me' releases the hold
     assert h._cmd_target is None
+    assert h._cmd_hold is False
+
+
+def test_hold_and_track_intents():
+    h = _head()
+    assert h.apply_command({"kind": "hold"}).lower().startswith("okay")
+    assert h._cmd_hold is True                # 'freeze' holds where it is
+    assert h.apply_command({"kind": "track"}).lower().startswith("okay")
+    assert h._cmd_target is None and h._cmd_hold is False

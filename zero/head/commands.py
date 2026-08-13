@@ -34,6 +34,10 @@ _FULL = re.compile(
 # intensifiers meaning "a large turn" (not necessarily the mechanical max).
 _FAR = re.compile(r"\b(?:far|hard|a\s+lot|much|right\s+over)\b", re.IGNORECASE)
 
+# manual servo control: freeze where it is / hand control back to tracking
+_HOLD = re.compile(r"\b(?:freeze|halt|hold(?:\s+(?:it|still|there|on|steady|position|your\s+head))?|don'?t\s+move|stop\s+moving|stop\s+(?:right\s+)?there|stay\s+(?:there|still|put))\b", re.IGNORECASE)
+_TRACK = re.compile(r"\b(?:follow\s+(?:me|my\s+(?:head|hand|face))|track\s+(?:me|my\s+(?:head|hand))|keep\s+(?:following|tracking)|start\s+(?:following|tracking)|resume(?:\s+tracking)?|as\s+you\s+were|go\s+back\s+to\s+(?:following|tracking))\b", re.IGNORECASE)
+
 _DIR_AXIS = {"left": ("pan", -1.0), "right": ("pan", +1.0),
              "up": ("tilt", +1.0), "down": ("tilt", -1.0)}
 
@@ -87,6 +91,12 @@ def parse_gaze_command(text: str) -> dict | None:
     # center / face-forward first (most specific)
     if _CENTER.search(t):
         return {"kind": "center"}
+
+    # manual servo control: hold/stop where it is, or resume tracking
+    if _HOLD.search(t):
+        return {"kind": "hold"}
+    if _TRACK.search(t):
+        return {"kind": "track"}
 
     m = _DIR.search(t)
     if m:

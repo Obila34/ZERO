@@ -144,6 +144,7 @@ class HeadSystem:
         # is the SAME controller as tracking — no separate 'command mode'.
         self._cmd_target = None          # (pan, tilt) degrees, or None
         self._cmd_until = 0.0
+        self._cmd_hold = False           # True = hold the commanded pose indefinitely
         self._cmd_dwell = float(cfg.get("head.command_dwell_s", 2.5))
         self._cmd_deg = float(cfg.get("head.command_deg", 25.0))
         # lightweight diagnostics surfaced via status()["dbg"]
@@ -208,6 +209,10 @@ class HeadSystem:
         kind = cmd.get("kind")
         if kind == "center":
             return self.look_center()
+        if kind == "hold":
+            return self.hold_here()
+        if kind == "track":
+            return self.resume_tracking()
         if kind == "direction":
             deg = float(cmd.get("degrees", self._cmd_deg))
             return self.look_direction(cmd.get("axis"), float(cmd.get("sign", 1.0)) * deg)
@@ -221,13 +226,13 @@ class HeadSystem:
         # current facing instead of inheriting stale tracker state.
         ax, ay = self._controller.position
         tgt = (signed_deg, ay) if axis == "pan" else (ax, signed_deg)
-        self._set_command(tgt, dwell)
+        self._set_command(tgt, dwell, hold=True)
         word = ({"pan": "left" if signed_deg < 0 else "right",
                  "tilt": "up" if signed_deg > 0 else "down"}).get(axis, "there")
         return f"Okay, looking {word}."
 
     def look_center(self, *, dwell=None) -> str:
-        self._set_command((0.0, 0.0), dwell)
+        self._set_command((0.0, 0.0), dwell, hold=True)
         return "Okay, facing forward."
 
     def look_person(self, name, *, dwell=None) -> str:
@@ -237,6 +242,7 @@ class HeadSystem:
         # several faces are present) is phase 4/5.
         self._cmd_target = None
         self._cmd_until = 0.0
+        self._cmd_hold = False
         self._scheduler.set_state(self._scheduler.state, time.monotonic())
         who = "you" if (not name or name == "me") else name.capitalize()
         return f"Okay, looking at {who}."
@@ -255,13 +261,31 @@ class HeadSystem:
                 time.sleep(0.03)
         return msg
 
-    def _set_command(self, target, dwell=None) -> None:
+    def hold_here(self) -> str:
+        """Freeze the head where it is — stop the servos until told to move or
+        track again. Full manual control: the neck stays put."""
+        self._set_command(self._controller.position, hold=True)
+        return "Okay, holding here."
+
+    def resume_tracking(self) -> str:
+        """Release any held/commanded pose and resume the active input mode
+        (head/hand follow, or face tracking)."""
+        self._cmd_target = None
+        self._cmd_hold = False
+        if self._hand is not None:
+            self._hand._filt.reset()   # avoid a jump when the follow resumes
+        self._scheduler.set_state(self._scheduler.state, time.monotonic())
+        what = "following you" if self._input in ("hand", "head") else "tracking"
+        return f"Okay, {what} again."
+
+    def _set_command(self, target, dwell=None, hold=False) -> None:
+        self._cmd_hold = bool(hold)
         d = float(dwell if dwell is not None else self._cmd_dwell)
         self._cmd_target = (float(target[0]), float(target[1]))
         self._cmd_until = time.monotonic() + d
         if self._eyes is not None:
             try:
-                self._eyes.suppress_changes(d + 0.3)   # efference copy
+                self._eyes.suppress_changes((3.0 if hold else d) + 0.3)  # efference copy
             except Exception:
                 pass
 
@@ -350,10 +374,10 @@ class HeadSystem:
         # returns to the active mode. Same controller, open-loop toward the target.
         # This is why "turn far left" works even while you are head-controlling.
         if self._cmd_target is not None:
-            if now < self._cmd_until:
+            if self._cmd_hold or now < self._cmd_until:
                 self._controller.set_target(*self._cmd_target)
                 self._last_aim = self._cmd_target
-                self._dbg["branch"] = "command"
+                self._dbg["branch"] = "hold" if self._cmd_hold else "command"
                 return
             self._cmd_target = None       # dwell elapsed -> resume the input mode
         if self._input in ("hand", "head"):
