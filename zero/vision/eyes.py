@@ -481,6 +481,13 @@ class Eyes:
         Used by identity (face matching) and learning (object crops)."""
         return self._scene.snapshot().frame_rgb
 
+    def raw_frame(self):
+        """Freshest frame straight from the camera thread (RGB copy), bypassing
+        the detection loop's scene snapshot. The scene frame stalls when remote
+        detection retries on backoff; real-time consumers (hand teleoperation)
+        need the live camera feed, which runs at 30 fps on its own thread."""
+        return self._camera.read()
+
     def _with_learned(self, snap) -> list:
         """Detections with learned-name overrides — from the background cache,
         NEVER computed inline. annotate() costs a remote round trip (or a

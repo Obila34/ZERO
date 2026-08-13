@@ -894,12 +894,13 @@ head:
     model_path: models/yolo11n-pose.onnx
     min_cutoff: 1.5         # 1€ filter: lower = smoother but laggier
     beta: 0.5               # 1€ filter: higher = snappier on fast moves
-    conf: 0.25              # min person confidence to accept a detection
-    kp_conf: 0.15           # min wrist-keypoint confidence (noisier than person)
+    conf: 0.35              # min person confidence (width guard is the real junk filter)
+    kp_conf: 0.25           # min keypoint confidence
+    min_shoulder_frac: 0.10 # reject detections whose shoulders span < 10% of frame (junk)
     keypoint: wrist         # "wrist" = hand control; "head" = control with your head (nose)
     lost_s: 1.5             # hand gone this long -> ease the neck back to centre
     mirror: true            # flip if the head follows the wrong way
-    gain: 1.3               # sensitivity: hand ~0.8 shoulder-widths off-centre = full swing
+    gain: 0.6               # sensitivity: full ~1.6-width hand sweep maps across +/-80 proportionally
 
   tracker:                  # closed-loop visual servo (FaceTracker)
     kp_pan: 0.55            # snappier horizontal follow

@@ -109,8 +109,9 @@ class HeadSystem:
             self._hand = HandPoseSource(
                 cfg.resolve_path("head.hand.model_path", "models/yolo11n-pose.onnx"),
                 keypoint=str(cfg.get("head.hand.keypoint", "wrist")),
-                conf=float(cfg.get("head.hand.conf", 0.25)),
-                kp_conf=float(cfg.get("head.hand.kp_conf", 0.15)),
+                conf=float(cfg.get("head.hand.conf", 0.5)),
+                kp_conf=float(cfg.get("head.hand.kp_conf", 0.3)),
+                min_shoulder_frac=float(cfg.get("head.hand.min_shoulder_frac", 0.10)),
                 min_cutoff=float(cfg.get("head.hand.min_cutoff", 1.5)),
                 beta=float(cfg.get("head.hand.beta", 0.5)),
                 mirror=bool(cfg.get("head.hand.mirror", True)),
