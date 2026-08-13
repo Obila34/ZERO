@@ -875,7 +875,7 @@ head:
   # war's endpoint: low slew + wide deadband = smooth, no ±40° revolving.
   rate_hz: 40               # control tick
   max_speed_dps: 220        # slew ceiling °/s — keep up with the hand (was 70)
-  input: face               # "face"=track faces | "hand"=hand teleop | "head"=head-motion teleop
+  input: head               # "face"=track faces | "hand"=hand teleop | "head"=head-motion teleop
   limit_deg: 80             # ± pan envelope: 'completely left/right' = ±80°
   home_x: 0.0
   home_y: 0.0
