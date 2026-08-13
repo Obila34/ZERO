@@ -36,6 +36,7 @@ def _controller():
         rate_hz=float(cget("head.rate_hz", 25.0)),
         max_speed_dps=float(cget("head.max_speed_dps", 36.0)),
         limit_deg=float(cget("head.limit_deg", 45.0)),
+        max_accel_dps2=float(cget("head.max_accel_dps2", 0.0)),
     )
 
 
@@ -58,7 +59,8 @@ def _report(name, schedule, duration, axis=0):
 def main():
     print("HeadController smoothness (NullDriver, config defaults):")
     print(f"  max_speed_dps={cget('head.max_speed_dps', 36.0)} "
-          f"rate_hz={cget('head.rate_hz', 25.0)}")
+          f"rate_hz={cget('head.rate_hz', 25.0)} "
+          f"max_accel_dps2={cget('head.max_accel_dps2', 0.0)}")
     _report("saccade: 0 -> 40 deg pan", [(0.1, 40.0, 0.0)], duration=3.0, axis=0)
     _report("small look: 0 -> 8 deg pan", [(0.1, 8.0, 0.0)], duration=1.5, axis=0)
     _report("return: 40 -> 0 after settle",

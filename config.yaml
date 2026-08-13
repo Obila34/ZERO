@@ -875,6 +875,12 @@ head:
   # war's endpoint: low slew + wide deadband = smooth, no ±40° revolving.
   rate_hz: 40               # control tick
   max_speed_dps: 220        # slew ceiling °/s — keep up with the hand (was 70)
+  # Trapezoidal profiling: velocity ramps at this accel and brakes into the
+  # target instead of stepping straight to the ceiling. Measured (simulate):
+  # legacy 0 -> jerk 88-168k°/s³, spectral 0.56-0.80; 1200 -> jerk ~42-45k,
+  # spectral 0.78-0.93, settle +0.1s; 800 is smoother still but laggier on a
+  # fast hand sweep. 0 restores the old pure-slew behavior exactly.
+  max_accel_dps2: 1200
   input: head               # "face"=track faces | "hand"=hand teleop | "head"=head-motion teleop
   limit_deg: 80             # ± pan envelope: 'completely left/right' = ±80°
   command_dwell_s: 4.0      # a voice turn holds this long, then resumes following ('stop' locks)

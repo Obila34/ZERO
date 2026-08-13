@@ -59,6 +59,7 @@ class HeadSystem:
             gate=self._gate,
             home_x=float(cfg.get("head.home_x", 0.0)),
             home_y=float(cfg.get("head.home_y", 0.0)),
+            max_accel_dps2=float(cfg.get("head.max_accel_dps2", 0.0)),
         )
         # Tilt's mechanical range is asymmetric and much smaller than pan's.
         # Install the calibrated window in the CONTROLLER too (not only the

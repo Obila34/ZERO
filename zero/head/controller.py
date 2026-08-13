@@ -63,7 +63,7 @@ def _clamp_range(v: float, lo: float, hi: float) -> float:
 class HeadController:
     def __init__(self, send, *, rate_hz: float = 25.0, max_speed_dps: float = 90.0,
                  limit_deg: float = 45.0, gate=None, home_x: float = 0.0,
-                 home_y: float = 0.0):
+                 home_y: float = 0.0, max_accel_dps2: float = 0.0):
         """`send(head_x, head_y)` is the motion sink (MirrorLink.send). rate_hz is
         the tick rate; max_speed_dps caps how fast either axis may move (the slew
         limit that keeps motion smooth); limit_deg is the ± soft envelope about the
@@ -76,7 +76,15 @@ class HeadController:
         always "track" (backward-compatible)."""
         self._send = send
         self._dt = 1.0 / max(1.0, float(rate_hz))
+        self._max_speed = float(max_speed_dps)
         self._max_step = float(max_speed_dps) * self._dt   # deg per tick
+        # >0 enables trapezoidal (accel-limited) profiling: velocity ramps at
+        # max_accel_dps2 and decelerates into the target instead of stepping
+        # instantly to the slew ceiling. 0 = legacy pure slew. The measured
+        # slew-only profile hit ~4400°/s² / 88k-168k°/s³ peaks (audit M4).
+        self._max_accel = float(max_accel_dps2)
+        self._vx = 0.0            # profiled velocity state (deg/s), per axis
+        self._vy = 0.0
         self._limit = float(limit_deg)
         # Per-axis soft-limit window [min, max] — symmetric ±limit by default, but
         # set_calibration() can install the operator's asymmetric saved limits
@@ -184,6 +192,7 @@ class HeadController:
         """
         with self._lock:
             if state in ("freeze", "yield"):
+                self._vx = self._vy = 0.0     # a freeze stops dead
                 return False, self._cur_x, self._cur_y
             if state == "home":
                 tx = _clamp_range(self._home_x, self._xmin, self._xmax)
@@ -192,10 +201,31 @@ class HeadController:
                 gx, gy = self._gesture_offset(now)
                 tx = _clamp_range(self._live_x + gx, self._xmin, self._xmax)
                 ty = _clamp_range(self._live_y + gy, self._ymin, self._ymax)
-            # Slew-rate limit each axis toward the target — the smoothing.
-            self._cur_x += _clamp(tx - self._cur_x, self._max_step)
-            self._cur_y += _clamp(ty - self._cur_y, self._max_step)
+            if self._max_accel > 0:
+                self._cur_x, self._vx = self._profile(self._cur_x, self._vx, tx)
+                self._cur_y, self._vy = self._profile(self._cur_y, self._vy, ty)
+            else:
+                # Legacy pure slew — velocity steps instantly to the ceiling.
+                self._cur_x += _clamp(tx - self._cur_x, self._max_step)
+                self._cur_y += _clamp(ty - self._cur_y, self._max_step)
             return True, self._cur_x, self._cur_y
+
+    def _profile(self, cur: float, v: float, target: float) -> tuple[float, float]:
+        """One tick of trapezoidal profiling: accelerate at most max_accel,
+        never exceed max_speed, and cap speed by what can still brake to a stop
+        within the remaining distance — so the move ramps up, cruises, and
+        decelerates into the target with no overshoot."""
+        d = target - cur
+        if d == 0.0 and v == 0.0:
+            return cur, 0.0
+        v_brake = (2.0 * self._max_accel * abs(d)) ** 0.5
+        v_des = min(self._max_speed, v_brake)
+        v_des = v_des if d >= 0 else -v_des
+        v += _clamp(v_des - v, self._max_accel * self._dt)
+        step = v * self._dt
+        if abs(step) >= abs(d) and (step > 0) == (d > 0):
+            return target, 0.0                # terminal tick — land exactly
+        return cur + _clamp(step, self._max_step), v
 
     def _run(self) -> None:
         while not self._stop.is_set():

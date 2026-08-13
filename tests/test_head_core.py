@@ -157,3 +157,24 @@ def test_centred_face_latches_and_holds_steady():
     _drive(tr, (320, 240, 60, 60), n=5)
     # once latched, a still centred face produces no further corrective aims
     assert len(ctl.aims) - n_before <= 1
+
+
+def test_accel_profile_converges_without_overshoot():
+    # audit M4: trapezoidal profiling — ramps, cruises, decelerates, lands
+    from zero.head.controller import HeadController
+    c = HeadController(lambda x, y: None, rate_hz=40.0, max_speed_dps=220.0,
+                       limit_deg=80.0, max_accel_dps2=1200.0)
+    c.set_target(40.0, 0.0)
+    dt, now = 1.0 / 40.0, 1000.0
+    xs, prev = [], 0.0
+    for k in range(200):
+        _, cx, _cy = c._step(now + k * dt)
+        # never exceeds the slew ceiling per tick
+        assert abs(cx - prev) <= 220.0 * dt + 1e-9
+        # never overshoots the target
+        assert cx <= 40.0 + 1e-9
+        xs.append(cx)
+        prev = cx
+    assert abs(xs[-1] - 40.0) < 1e-6          # converged exactly
+    # velocity ramps: the first tick moves far less than the slew ceiling
+    assert xs[0] <= 1200.0 * dt * dt + 1e-9
