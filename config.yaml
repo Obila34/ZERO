@@ -884,7 +884,11 @@ head:
   # Eyes-lead-head: the neck holds while the face is within this fraction of the
   # half-frame (the digital crop is the fast 'eye'); beyond it the neck engages.
   engage_frac: 0.1          # neck engages past ~5-7° off-centre (this cam's scale)
-  track_tilt: false         # horizontal-only for now (nod can't centre a low face)
+  track_tilt: false         # horizontal-only until the nod is calibrated + verified
+  # Controller-side tilt envelope (belief space), set from nod calibration so
+  # belief can never sit outside what the servo can reach. Unset = ±limit_deg.
+  # tilt_min_deg: -10
+  # tilt_max_deg: 25
   source_hz: 15             # rate the neck target is pulled from Eyes' gaze
   suppress_lead_s: 0.5      # efference copy: silence novelty while moving
   resettle_dwell_s: 0.4     # re-baseline this long after the neck stops
@@ -904,6 +908,12 @@ head:
     mirror: false           # MIRROR control: hand left -> head right, hand right -> head left
     gain: 0.6               # HAND sensitivity: full ~1.6-width hand sweep maps across +/-80
     gain_head: 2.0          # HEAD-yaw sensitivity (nose-vs-ears signal is smaller-range than a hand sweep)
+    # Vertical (tilt) teleop channel — DARK until the nod is calibrated. The
+    # y-signal is neutral-relative (auto-baselined from the first ~10 samples).
+    tilt: false             # kill switch: true = hand/head vertical also drives the nod
+    tilt_range_deg: 15      # full vertical deflection maps across +/- this many degrees
+    gain_y: 1.0             # vertical sensitivity
+    deadzone_y: 0.15        # vertical deadzone (neutral-relative units)
 
   tracker:                  # closed-loop visual servo (FaceTracker)
     kp_pan: 0.55            # snappier horizontal follow
@@ -927,17 +937,28 @@ head:
     up_deg: 10
 
   # Physical driver settings (only used when driver is http/udp — MOVES METAL).
-  gateway:                  # driver: http — direct-LAN gateway on the Arm Pi
-    base_url: http://192.168.150.183:5000
+  gateway:                  # driver: http — gateway on the Arm Pi (:5000)
+    # Tailscale address: the Arm Pi's LAN IP drifts with DHCP (.183 -> .184,
+    # 2026-08-13) and the LAN path is blocked between the Pis anyway (AP
+    # isolation). Tailscale is stable and ~24 ms RTT — fine at 15 Hz.
+    base_url: http://100.67.233.65:5000
     pan_joint: head_tilt_joint    # firmware joint names (resolve on calibration)
     tilt_joint: head_nod_joint
     max_hz: 15
     deadband_deg: 0.4
     timeout_s: 0.5
-    # Nod home/range: gateway servo = 90 + angle_deg. Offset -40 parks the nod at
-    # servo 50 (home, looking at the person) when ZERO tilt is 0; clamp keeps it in
-    # servo 50-90 (angle_deg -40..0) so it never drives past its physical stop.
-    drive_nod: false        # KILL the nod: ZERO never posts it — perfect pan first
+    max_jump_deg: 12        # max hardware move per post from last-ACKED pose —
+                            # after an outage the driver WALKS to the target
+                            # instead of whipping (slew only exists in belief)
+    # Nod mapping: gateway servo = 90 + angle_deg, and the driver posts
+    # angle = clamp(nod_sign*tilt + nod_offset_deg, nod_min_deg, nod_max_deg).
+    # So with offset -40: tilt 0 -> servo 50 (the old park/home) and the clamp
+    # keeps servo in 50..90. THESE ARE PRE-CALIBRATION PLACEHOLDERS — the true
+    # safe envelope, home and sign are UNVERIFIED until the supervised run of
+    # scripts/nod_calibrate.py, which prints the values to paste here (it also
+    # prints head.tilt_min_deg/tilt_max_deg — the controller-side envelope).
+    drive_nod: false        # KILL the nod: ZERO never posts it — calibrate first
+    nod_sign: 1.0           # +1 if a larger servo angle looks UP; -1 if DOWN
     nod_offset_deg: -40
     nod_min_deg: -40
     nod_max_deg: 0
