@@ -22,12 +22,17 @@ DEFAULT_DEG = 25.0
 # 'turn completely left' lands at the mechanical max without the parser needing
 # to know the configured range.
 FULL_DEG = 999.0
+# "far left/right" = a big deliberate turn, between a glance (25) and the max.
+FAR_DEG = 60.0
 
 # "as far as you can" / "all the way" / "completely" / "fully" / "hard" / "max"
 _FULL = re.compile(
     r"\b(?:all\s+the\s+way|completely|complete|fully|full|entirely|totally|"
     r"as\s+far\s+(?:(?:to\s+the\s+)?(?:left|right|up|down)\s+)?as\s+(?:you\s+can|possible)|"
-    r"maximum|max|hard)\b", re.IGNORECASE)
+    r"maximum|max)\b", re.IGNORECASE)
+
+# intensifiers meaning "a large turn" (not necessarily the mechanical max).
+_FAR = re.compile(r"\b(?:far|hard|a\s+lot|much|right\s+over)\b", re.IGNORECASE)
 
 _DIR_AXIS = {"left": ("pan", -1.0), "right": ("pan", +1.0),
              "up": ("tilt", +1.0), "down": ("tilt", -1.0)}
@@ -91,6 +96,8 @@ def parse_gaze_command(text: str) -> dict | None:
             deg = float(dm.group("deg"))        # explicit "30 degrees left"
         elif _FULL.search(t):
             deg = FULL_DEG                       # "all the way / completely left"
+        elif _FAR.search(t):
+            deg = FAR_DEG                        # "far left" = a big turn
         else:
             deg = DEFAULT_DEG                     # bare "look left" = a glance
         return {"kind": "direction", "axis": axis, "sign": sign, "degrees": deg}

@@ -345,17 +345,20 @@ class HeadSystem:
                 self._src_stop.wait(wait)
 
     def _source_tick(self, now: float) -> None:
-        if self._input in ("hand", "head"):
-            self._hand_tick(now)
-            return
-        # A commanded gaze (voice/LLM) overrides tracking for its dwell — same
-        # controller, open-loop toward the target.
+        # A commanded gaze (voice fast-path or the LLM tool) overrides EVERYTHING
+        # — face tracking OR hand/head teleoperation — for its dwell, then control
+        # returns to the active mode. Same controller, open-loop toward the target.
+        # This is why "turn far left" works even while you are head-controlling.
         if self._cmd_target is not None:
             if now < self._cmd_until:
                 self._controller.set_target(*self._cmd_target)
                 self._last_aim = self._cmd_target
+                self._dbg["branch"] = "command"
                 return
-            self._cmd_target = None       # dwell elapsed → resume tracking
+            self._cmd_target = None       # dwell elapsed -> resume the input mode
+        if self._input in ("hand", "head"):
+            self._hand_tick(now)
+            return
         bias = self._scheduler.tick(now)
         if not bias.on_face:
             # Aversion (or thinking): hold the last face aim plus a small offset,
