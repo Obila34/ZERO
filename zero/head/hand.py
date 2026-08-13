@@ -76,7 +76,7 @@ class HandPoseSource:
 
     def __init__(self, model_path, *, keypoint: str = "wrist", imgsz: int = 320,
                  conf: float = 0.5, kp_conf: float = 0.3,
-                 min_shoulder_frac: float = 0.10,
+                 min_shoulder_frac: float = 0.10, deadzone: float = 0.0,
                  min_cutoff: float = 1.5, beta: float = 0.5,
                  mirror: bool = True, gain: float = 1.3):
         import onnxruntime as ort
@@ -90,6 +90,7 @@ class HandPoseSource:
         # Reject degenerate detections: real shoulders span a decent fraction of
         # the frame; a ~6 px width is the model hallucinating on an empty scene.
         self._min_shoulder_px = float(min_shoulder_frac) * self._sz
+        self._deadzone = float(deadzone)   # |signal| below this -> hold centre (kills jitter)
         self._keypoint = keypoint
         self._mirror = bool(mirror)
         self._gain = float(gain)
@@ -126,8 +127,32 @@ class HandPoseSource:
         return float(conf[best]), p[best, 5:5 + 17 * 3].reshape(17, 3)
 
     def _signal(self, kps: np.ndarray):
-        """Body-relative signal in shoulder-width units, or None if the detection
-        is unusable (missing/too-close shoulders, or no confident control point)."""
+        """Body-relative horizontal control signal, or None if unusable.
+        hand: raised-wrist offset from the shoulder midline / shoulder width.
+        head: nose offset from the EAR midline / ear span (a head-yaw proxy)."""
+        if self._keypoint == "head":
+            return self._head_yaw(kps)
+        return self._hand_offset(kps)
+
+    def _head_yaw(self, kps: np.ndarray):
+        """Head YAW from face geometry: the nose swings across the ears as you
+        turn your head. Offset of the nose from the ear midline, normalised by ear
+        span (head width) - distance/position independent, and it isolates yaw
+        from where the head sits in the frame. Falls back to the eyes when an ear
+        is hidden; works up close when the shoulders are cropped out."""
+        nose = kps[NOSE]
+        if nose[2] < self._kp_conf:
+            return None
+        for a, b, floor in ((L_EAR, R_EAR, 0.04), (L_EYE, R_EYE, 0.02)):
+            ka, kb = kps[a], kps[b]
+            if ka[2] >= self._kp_conf and kb[2] >= self._kp_conf:
+                span = abs(ka[0] - kb[0])
+                if span >= floor * self._sz:
+                    return float((nose[0] - 0.5 * (ka[0] + kb[0])) / span)
+        return None
+
+    def _hand_offset(self, kps: np.ndarray):
+        """Raised-wrist offset from the shoulder midline, in shoulder-width units."""
         ls, rs = kps[L_SHOULDER], kps[R_SHOULDER]
         if ls[2] < self._kp_conf or rs[2] < self._kp_conf:
             return None                          # need both shoulders for a midline
@@ -135,19 +160,13 @@ class HandPoseSource:
         width = abs(ls[0] - rs[0])
         if width < self._min_shoulder_px:        # degenerate / hallucinated
             return None
-        if self._keypoint == "head":
-            k = kps[NOSE]
-            if k[2] < self._kp_conf:
-                return None
-            cx = k[0]
-        else:
-            # track the RAISED hand - the wrist higher in the frame (smaller y),
-            # by height not confidence, so it never flip-flops to the resting hand.
-            lw, rw = kps[L_WRIST], kps[R_WRIST]
-            cand = [w for w in (lw, rw) if w[2] >= self._kp_conf]
-            if not cand:
-                return None
-            cx = min(cand, key=lambda w: w[1])[0]
+        # track the RAISED hand - the wrist higher in the frame (smaller y), by
+        # height not confidence, so it never flip-flops to the resting hand.
+        lw, rw = kps[L_WRIST], kps[R_WRIST]
+        cand = [w for w in (lw, rw) if w[2] >= self._kp_conf]
+        if not cand:
+            return None
+        cx = min(cand, key=lambda w: w[1])[0]
         return float((cx - mid) / width)         # shoulder-width units, signed
 
     def update(self, frame_rgb, now: float | None = None):
@@ -165,6 +184,8 @@ class HandPoseSource:
             with self._lock:
                 self._conf_last = 0.0
             return self.value
+        if abs(sig) < self._deadzone:
+            sig = 0.0                       # near-centre jitter -> stay put
         hx = max(-1.0, min(1.0, sig * self._gain))
         if self._mirror:
             hx = -hx

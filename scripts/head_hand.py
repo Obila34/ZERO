@@ -35,8 +35,7 @@ def main():
     # default untouched). raw is the merged dict behind Config.
     cfg.raw.setdefault("head", {})
     cfg.raw["head"]["enabled"] = True
-    cfg.raw["head"]["input"] = "hand"
-    cfg.raw["head"].setdefault("hand", {})["keypoint"] = "head" if a.head else "wrist"
+    cfg.raw["head"]["input"] = "head" if a.head else "hand"
 
     eyes = build_vision(cfg)
     if eyes is None:

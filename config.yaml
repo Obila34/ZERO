@@ -875,7 +875,7 @@ head:
   # war's endpoint: low slew + wide deadband = smooth, no ±40° revolving.
   rate_hz: 40               # control tick
   max_speed_dps: 220        # slew ceiling °/s — keep up with the hand (was 70)
-  input: face               # "face" = track faces (default); "hand" = hand teleoperation
+  input: face               # "face"=track faces | "hand"=hand teleop | "head"=head-motion teleop
   limit_deg: 80             # ± pan envelope: 'completely left/right' = ±80°
   home_x: 0.0
   home_y: 0.0
@@ -892,15 +892,17 @@ head:
   # hand left/right → head follows in real time (open-loop map + 1€ filter).
   hand:
     model_path: models/yolo11n-pose.onnx
-    min_cutoff: 1.5         # 1€ filter: lower = smoother but laggier
-    beta: 0.5               # 1€ filter: higher = snappier on fast moves
+    min_cutoff: 0.8         # 1€ filter: lower = smoother but laggier
+    beta: 0.25              # 1€ filter: higher = snappier on fast moves
+    deadzone: 0.12          # hand within 0.12 shoulder-widths of centre -> head holds (anti-jitter)
     conf: 0.35              # min person confidence (width guard is the real junk filter)
     kp_conf: 0.25           # min keypoint confidence
     min_shoulder_frac: 0.10 # reject detections whose shoulders span < 10% of frame (junk)
     keypoint: wrist         # "wrist" = hand control; "head" = control with your head (nose)
     lost_s: 1.5             # hand gone this long -> ease the neck back to centre
-    mirror: true            # flip if the head follows the wrong way
-    gain: 0.6               # sensitivity: full ~1.6-width hand sweep maps across +/-80 proportionally
+    mirror: false           # MIRROR control: hand left -> head right, hand right -> head left
+    gain: 0.6               # HAND sensitivity: full ~1.6-width hand sweep maps across +/-80
+    gain_head: 2.0          # HEAD-yaw sensitivity (nose-vs-ears signal is smaller-range than a hand sweep)
 
   tracker:                  # closed-loop visual servo (FaceTracker)
     kp_pan: 0.55            # snappier horizontal follow

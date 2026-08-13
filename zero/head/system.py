@@ -105,17 +105,23 @@ class HeadSystem:
         self._hand = None
         self._hand_seen = 0.0
         self._hand_lost_s = float(cfg.get("head.hand.lost_s", 1.5))
-        if self._input == "hand":
+        if self._input in ("hand", "head"):
+            kpt = "head" if self._input == "head" else "wrist"
+            # head-yaw signal has a smaller natural range than a hand sweep, so
+            # it gets its own (higher) gain.
+            gain = (float(cfg.get("head.hand.gain_head", 2.0)) if self._input == "head"
+                    else float(cfg.get("head.hand.gain", 1.3)))
             self._hand = HandPoseSource(
                 cfg.resolve_path("head.hand.model_path", "models/yolo11n-pose.onnx"),
-                keypoint=str(cfg.get("head.hand.keypoint", "wrist")),
+                keypoint=kpt,
                 conf=float(cfg.get("head.hand.conf", 0.5)),
                 kp_conf=float(cfg.get("head.hand.kp_conf", 0.3)),
                 min_shoulder_frac=float(cfg.get("head.hand.min_shoulder_frac", 0.10)),
+                deadzone=float(cfg.get("head.hand.deadzone", 0.12)),
                 min_cutoff=float(cfg.get("head.hand.min_cutoff", 1.5)),
                 beta=float(cfg.get("head.hand.beta", 0.5)),
                 mirror=bool(cfg.get("head.hand.mirror", True)),
-                gain=float(cfg.get("head.hand.gain", 1.3)))
+                gain=gain)
         self._source_hz = float(cfg.get("head.source_hz", 15.0))
         self._suppress_lead_s = float(cfg.get("head.suppress_lead_s", 0.5))
         self._resettle_dwell_s = float(cfg.get("head.resettle_dwell_s", 0.4))
@@ -339,7 +345,7 @@ class HeadSystem:
                 self._src_stop.wait(wait)
 
     def _source_tick(self, now: float) -> None:
-        if self._input == "hand":
+        if self._input in ("hand", "head"):
             self._hand_tick(now)
             return
         # A commanded gaze (voice/LLM) overrides tracking for its dwell — same
