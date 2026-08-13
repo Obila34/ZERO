@@ -244,6 +244,10 @@ class Zero:
         # are up. Dark by default (head.enabled=false) so this stays None on a
         # normal run; when on, the default NullDriver still moves nothing.
         self.head = None
+        # Conversational expression (gesture cues in replies + the sentence-end
+        # look-back). The hooks existed but were never called (audit H3); wired
+        # into the playback loop now, still dark until head.express is on.
+        self._head_express_on = bool(self.cfg.get("head.express", False))
 
         tool_block = (self.tool_registry.spec_block()
                       if self.tool_registry is not None else "")
@@ -2038,6 +2042,12 @@ class Zero:
                         self._stage("llm+tts")
                         self._stage_report((now - self._t_utterance_end) * 1000.0)
                     spoke_any = True
+                if idx != played:
+                    # A new sentence is reaching the speaker: fire its gesture
+                    # cues, and let the social layer look back at the partner
+                    # on the boundary it just crossed (turn-yield gaze).
+                    self._head_express(full[idx] if idx < len(full) else "",
+                                       boundary=played >= 0)
                 played = idx
                 yield piece
 
@@ -2057,6 +2067,22 @@ class Zero:
             return " ".join(full[: played + 1]).strip()
         prod.join(timeout=5.0)
         return " ".join(full).strip()
+
+    def _head_express(self, sentence: str, *, boundary: bool) -> None:
+        """Forward a spoken sentence's expression cues to the head. Gated by
+        head.express; must never disturb playback, so everything is swallowed."""
+        if not self._head_express_on:
+            return
+        head = getattr(self, "head", None)
+        if head is None:
+            return
+        try:
+            if boundary:
+                head.on_sentence_end()
+            if sentence:
+                head.express(sentence)
+        except Exception:
+            pass
 
     @staticmethod
     def _drain_audio_queue(q: "queue.Queue", producer: threading.Thread) -> None:
