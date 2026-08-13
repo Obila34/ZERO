@@ -62,7 +62,7 @@ def main():
     try:
         while time.time() - t0 < a.secs:
             frame = eyes.current_frame()
-            x, conf = src.update(frame)
+            x, _y, conf = src.update(frame)
             target = x * limit
             ctl.set_target(target, 0.0)
             px, _ = ctl.position

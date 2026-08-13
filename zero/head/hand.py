@@ -78,7 +78,8 @@ class HandPoseSource:
                  conf: float = 0.5, kp_conf: float = 0.3,
                  min_shoulder_frac: float = 0.10, deadzone: float = 0.0,
                  min_cutoff: float = 1.5, beta: float = 0.5,
-                 mirror: bool = True, gain: float = 1.3):
+                 mirror: bool = True, gain: float = 1.3,
+                 gain_y: float = 1.0, deadzone_y: float = 0.15):
         import onnxruntime as ort
 
         self._sess = ort.InferenceSession(
@@ -94,8 +95,19 @@ class HandPoseSource:
         self._keypoint = keypoint
         self._mirror = bool(mirror)
         self._gain = float(gain)
+        self._gain_y = float(gain_y)
+        self._deadzone_y = float(deadzone_y)
         self._filt = OneEuro(min_cutoff=min_cutoff, beta=beta)
+        self._filt_y = OneEuro(min_cutoff=min_cutoff, beta=beta)
+        # Vertical neutral: the raw y-signal has a person-dependent resting
+        # value (the nose sits below the ear line; a teleop hand hovers at some
+        # natural height). The first few valid samples define "neutral"; the
+        # control value is the deviation from it, so the head holds level until
+        # the person actually moves up/down.
+        self._y0_samples: list[float] = []
+        self._y0: float | None = None
         self._x = 0.0
+        self._y = 0.0
         self._conf_last = 0.0
         self._lock = threading.Lock()
         self._eyes = None
@@ -127,19 +139,24 @@ class HandPoseSource:
         return float(conf[best]), p[best, 5:5 + 17 * 3].reshape(17, 3)
 
     def _signal(self, kps: np.ndarray):
-        """Body-relative horizontal control signal, or None if unusable.
-        hand: raised-wrist offset from the shoulder midline / shoulder width.
-        head: nose offset from the EAR midline / ear span (a head-yaw proxy)."""
+        """Body-relative control signal (x, y), or None if unusable. y may be
+        None when only the horizontal is readable this frame.
+        hand: raised-wrist offset from the shoulder midline / shoulder width
+              (x), wrist height above the shoulder line / shoulder width (y).
+        head: nose offset from the EAR midline / ear span (yaw, x), nose height
+              vs the ear line / ear span (a pitch proxy, y)."""
         if self._keypoint == "head":
-            return self._head_yaw(kps)
+            return self._head_pose(kps)
         return self._hand_offset(kps)
 
-    def _head_yaw(self, kps: np.ndarray):
-        """Head YAW from face geometry: the nose swings across the ears as you
-        turn your head. Offset of the nose from the ear midline, normalised by ear
-        span (head width) - distance/position independent, and it isolates yaw
-        from where the head sits in the frame. Falls back to the eyes when an ear
-        is hidden; works up close when the shoulders are cropped out."""
+    def _head_pose(self, kps: np.ndarray):
+        """Head YAW + PITCH from face geometry: the nose swings across the ears
+        as you turn (x) and rides up toward the ear line as you look up (y).
+        Both are normalised by the ear span (head width) - distance/position
+        independent. Falls back to the eyes when an ear is hidden; works up
+        close when the shoulders are cropped out. The pitch signal has a
+        person-dependent resting value - the caller subtracts the auto-captured
+        neutral."""
         nose = kps[NOSE]
         if nose[2] < self._kp_conf:
             return None
@@ -148,11 +165,15 @@ class HandPoseSource:
             if ka[2] >= self._kp_conf and kb[2] >= self._kp_conf:
                 span = abs(ka[0] - kb[0])
                 if span >= floor * self._sz:
-                    return float((nose[0] - 0.5 * (ka[0] + kb[0])) / span)
+                    x = float((nose[0] - 0.5 * (ka[0] + kb[0])) / span)
+                    # image y grows DOWN; up-positive means (line_y - nose_y)
+                    y = float((0.5 * (ka[1] + kb[1]) - nose[1]) / span)
+                    return x, y
         return None
 
     def _hand_offset(self, kps: np.ndarray):
-        """Raised-wrist offset from the shoulder midline, in shoulder-width units."""
+        """Raised-wrist offset from the shoulder midline, in shoulder-width
+        units: x across, y above the shoulder line (up positive)."""
         ls, rs = kps[L_SHOULDER], kps[R_SHOULDER]
         if ls[2] < self._kp_conf or rs[2] < self._kp_conf:
             return None                          # need both shoulders for a midline
@@ -166,12 +187,15 @@ class HandPoseSource:
         cand = [w for w in (lw, rw) if w[2] >= self._kp_conf]
         if not cand:
             return None
-        cx = min(cand, key=lambda w: w[1])[0]
-        return float((cx - mid) / width)         # shoulder-width units, signed
+        wr = min(cand, key=lambda w: w[1])
+        x = float((wr[0] - mid) / width)         # shoulder-width units, signed
+        mid_y = 0.5 * (ls[1] + rs[1])
+        y = float((mid_y - wr[1]) / width)       # up positive
+        return x, y
 
     def update(self, frame_rgb, now: float | None = None):
-        """Run pose on one frame. Returns (x_norm in [-1,1], person_conf). Holds
-        the last value (conf 0) when there is no usable detection."""
+        """Run pose on one frame. Returns (x, y, person_conf), x/y in [-1, 1].
+        Holds the last value (conf 0) when there is no usable detection."""
         if frame_rgb is None:
             return self.value
         try:
@@ -184,16 +208,36 @@ class HandPoseSource:
             with self._lock:
                 self._conf_last = 0.0
             return self.value
-        if abs(sig) < self._deadzone:
-            sig = 0.0                       # near-centre jitter -> stay put
-        hx = max(-1.0, min(1.0, sig * self._gain))
+        sx, sy = sig
+        if abs(sx) < self._deadzone:
+            sx = 0.0                       # near-centre jitter -> stay put
+        hx = max(-1.0, min(1.0, sx * self._gain))
         if self._mirror:
             hx = -hx
         hx = self._filt(hx, now)
+        hy = self._vertical(sy, now)
         with self._lock:
             self._x = hx
+            self._y = hy
             self._conf_last = person
-        return hx, self._conf_last
+        return hx, hy, self._conf_last
+
+    def _vertical(self, sy, now):
+        """Neutral-relative, deadzoned, filtered vertical channel in [-1, 1].
+        Returns 0 until the neutral is learned (first ~10 valid samples)."""
+        if sy is None:
+            return self._y
+        if self._y0 is None:
+            self._y0_samples.append(float(sy))
+            if len(self._y0_samples) >= 10:
+                ys = sorted(self._y0_samples)
+                self._y0 = ys[len(ys) // 2]      # median - robust to a flick
+            return 0.0
+        dy = float(sy) - self._y0
+        if abs(dy) < self._deadzone_y:
+            dy = 0.0
+        hy = max(-1.0, min(1.0, dy * self._gain_y))
+        return self._filt_y(hy, now)
 
     def debug(self, frame_rgb) -> dict:
         """Diagnostic: raw detection facts for one frame (no filtering / no hold).
@@ -219,7 +263,14 @@ class HandPoseSource:
     @property
     def value(self):
         with self._lock:
-            return self._x, self._conf_last
+            return self._x, self._y, self._conf_last
+
+    def reset_filters(self) -> None:
+        """Drop filter state so a resumed follow starts from the live signal
+        (no jump). Keeps the learned vertical neutral - that is the person's
+        resting pose, not stale state."""
+        self._filt.reset()
+        self._filt_y.reset()
 
     # -- threaded mode (for HeadSystem) ----------------------------------------
     def start(self, eyes) -> None:
