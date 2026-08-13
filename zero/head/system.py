@@ -145,7 +145,7 @@ class HeadSystem:
         self._cmd_target = None          # (pan, tilt) degrees, or None
         self._cmd_until = 0.0
         self._cmd_hold = False           # True = hold the commanded pose indefinitely
-        self._cmd_dwell = float(cfg.get("head.command_dwell_s", 2.5))
+        self._cmd_dwell = float(cfg.get("head.command_dwell_s", 4.0))
         self._cmd_deg = float(cfg.get("head.command_deg", 25.0))
         # lightweight diagnostics surfaced via status()["dbg"]
         self._dbg = {"ticks": 0, "face": 0, "nowin": 0, "off": 0.0,
@@ -228,13 +228,13 @@ class HeadSystem:
         # current facing instead of inheriting stale tracker state.
         ax, ay = self._controller.position
         tgt = (signed_deg, ay) if axis == "pan" else (ax, signed_deg)
-        self._set_command(tgt, dwell, hold=True)
+        self._set_command(tgt, dwell, hold=False)
         word = ({"pan": "left" if signed_deg < 0 else "right",
                  "tilt": "up" if signed_deg > 0 else "down"}).get(axis, "there")
         return f"Okay, looking {word}."
 
     def look_center(self, *, dwell=None) -> str:
-        self._set_command((0.0, 0.0), dwell, hold=True)
+        self._set_command((0.0, 0.0), dwell, hold=False)
         return "Okay, facing forward."
 
     def look_person(self, name, *, dwell=None) -> str:

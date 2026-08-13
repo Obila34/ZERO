@@ -73,18 +73,15 @@ def test_then_answer_settles_and_prompts_model():
     assert "describe" in out.lower()          # model is told to look then answer
 
 
-def test_directed_command_holds_until_released():
+def test_directed_command_is_flexible():
     import time
     h = _head()
-    h.look_direction("pan", -20.0)
+    h.look_direction("pan", -20.0, dwell=0.02)
     assert h._cmd_target == (-20.0, 0.0)      # override is set
-    assert h._cmd_hold is True                # directed commands HOLD (turn + stay)
-    time.sleep(0.01)
-    h._source_tick(time.monotonic())          # does NOT expire — stays put
-    assert h._cmd_target == (-20.0, 0.0)
-    h.resume_tracking()                       # 'follow me' releases the hold
+    assert h._cmd_hold is False               # obey-then-follow, not a lock
+    time.sleep(0.03)
+    h._source_tick(time.monotonic())          # dwell elapsed -> resumes following
     assert h._cmd_target is None
-    assert h._cmd_hold is False
 
 
 def test_hold_and_track_intents():

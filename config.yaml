@@ -877,6 +877,7 @@ head:
   max_speed_dps: 220        # slew ceiling °/s — keep up with the hand (was 70)
   input: head               # "face"=track faces | "hand"=hand teleop | "head"=head-motion teleop
   limit_deg: 80             # ± pan envelope: 'completely left/right' = ±80°
+  command_dwell_s: 4.0      # a voice turn holds this long, then resumes following ('stop' locks)
   home_x: 0.0
   home_y: 0.0
 
