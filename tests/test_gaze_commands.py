@@ -56,3 +56,35 @@ def test_ambiguous_targets_are_not_names():
     assert P("look at it") is None
     assert P("look at that") is None
     assert P("look at there") is None
+
+
+def test_hold_still_fires_on_short_imperatives():
+    for phrase in ["stop", "freeze", "hold on", "hold still", "stay put",
+                   "don't move", "okay stop"]:
+        assert P(phrase) == {"kind": "hold"}, phrase
+
+
+def test_hold_fires_with_head_motion_context():
+    for phrase in ["stop moving your head please", "please hold your head still",
+                   "stop turning your head around now"]:
+        assert P(phrase) == {"kind": "hold"}, phrase
+
+
+def test_stop_buried_in_a_long_sentence_does_not_hijack():
+    # audit M1: these used to return a head-hold and eat the whole turn
+    for phrase in ["hold on, what's the time right now?",
+                   "we should stop for lunch before the meeting",
+                   "can you stop the timer please",
+                   "stop joking around with everyone",
+                   "stop the music for a second"]:
+        assert P(phrase) is None, phrase
+
+
+def test_turn_it_up_is_not_a_gaze_command():
+    # audit M1: "it" was a filler word, so volume talk moved the head
+    assert P("turn it up") is None
+    assert P("turn it down") is None
+    assert P("turn it up a bit please") is None
+    # but real gaze phrasings still parse
+    assert P("turn your head up")["axis"] == "tilt"
+    assert P("look up")["sign"] == 1.0

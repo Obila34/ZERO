@@ -34,8 +34,20 @@ _FULL = re.compile(
 # intensifiers meaning "a large turn" (not necessarily the mechanical max).
 _FAR = re.compile(r"\b(?:far|hard|a\s+lot|much|right\s+over)\b", re.IGNORECASE)
 
-# manual servo control: freeze where it is / hand control back to tracking
+# manual servo control: freeze where it is / hand control back to tracking.
+# A bare stop-word is NOT enough on a long utterance — "hold on, what's the
+# time?" or "stop joking" must never hijack the turn into a head-hold. The hold
+# fires only when the utterance is a short imperative (a few words) or carries
+# explicit head/motion context ("stop moving your head", "keep your head still").
 _HOLD = re.compile(r"\b(?:stop|freeze|halt|hold(?:\s+(?:it|still|there|on|steady|position|your\s+head))?|don'?t\s+move|stay\s+(?:there|still|put))\b", re.IGNORECASE)
+_HOLD_CTX = re.compile(r"\b(?:head|neck|mov(?:e|ing)|turn(?:ing)?|look(?:ing)?|"
+                       r"track(?:ing)?|follow(?:ing)?|still|there|put)\b",
+                       re.IGNORECASE)
+# "stop the timer / music / talking" is about something else entirely.
+_HOLD_VETO = re.compile(r"\b(?:timer|alarm|reminder|music|song|video|recording|"
+                        r"talk(?:ing)?|speak(?:ing)?|jok(?:e|ing)|count(?:ing)?|"
+                        r"sing(?:ing)?|play(?:ing)?)\b", re.IGNORECASE)
+_HOLD_MAX_WORDS = 4
 _TRACK = re.compile(r"\b(?:follow\s+(?:me|my\s+(?:head|hand|face))|track\s+(?:me|my\s+(?:head|hand))|keep\s+(?:following|tracking)|start\s+(?:following|tracking)|resume(?:\s+tracking)?|as\s+you\s+were|go\s+back\s+to\s+(?:following|tracking))\b", re.IGNORECASE)
 
 _DIR_AXIS = {"left": ("pan", -1.0), "right": ("pan", +1.0),
@@ -48,7 +60,10 @@ _VERB = (r"(?:look(?:ing)?|turn(?:ing)?|glanc(?:e|ing)|gaz(?:e|ing)|fac(?:e|ing)
 # phrasings parse: 'turn head to its complete left', 'look all the way to the
 # right', 'turn a little to your left'. Kept to connective/quantifier words so
 # 'look, I went left' still won't fire (no verb→direction adjacency there).
-_FILL = (r"back|over|round|around|again|to|your|my|the|towards?|at|its|it|head|"
+# NOTE: the pronoun "it" is deliberately NOT a filler — "turn it up / turn it
+# down" is volume/appliance talk, not gaze, and used to hijack the turn (audit
+# M1). The possessive "its" ("turn head to its complete left") stays.
+_FILL = (r"back|over|round|around|again|to|your|my|the|towards?|at|its|head|"
          r"all|way|as|far|you|can|possible|completely|complete|fully|full|"
          r"entirely|totally|maximum|max|hard|side|a|little|bit|slightly|please|"
          r"more|much|now|and")
@@ -92,9 +107,12 @@ def parse_gaze_command(text: str) -> dict | None:
     if _CENTER.search(t):
         return {"kind": "center"}
 
-    # manual servo control: hold/stop where it is, or resume tracking
-    if _HOLD.search(t):
-        return {"kind": "hold"}
+    # manual servo control: hold/stop where it is, or resume tracking. Guarded:
+    # short imperative ("stop", "hold on", "stay put") or explicit head/motion
+    # context — a stop-word buried in a longer sentence falls through.
+    if _HOLD.search(t) and not _HOLD_VETO.search(t):
+        if len(t.split()) <= _HOLD_MAX_WORDS or _HOLD_CTX.search(t):
+            return {"kind": "hold"}
     if _TRACK.search(t):
         return {"kind": "track"}
 
