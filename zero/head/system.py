@@ -32,6 +32,7 @@ from zero.head.controller import HeadController
 from zero.head.driver import make_driver
 from zero.head.social import GazeScheduler
 from zero.head.stabilizer import Stabilizer
+from zero.head.hand import HandPoseSource
 from zero.head.tracker import FaceTracker
 from zero.utils.logging import get_logger
 
@@ -97,6 +98,23 @@ class HeadSystem:
         # ignored so a persistent low/high face (camera-mount offset the nod can't
         # fix) can't keep the tracker engaged and wind the tilt up.
         self._track_tilt = bool(cfg.get("head.track_tilt", True))
+        # Input mode: "face" = closed-loop face tracking (default); "hand" =
+        # direct hand teleoperation (body-relative wrist offset -> pan angle).
+        self._input = str(cfg.get("head.input", "face")).lower()
+        self._limit_deg = float(cfg.get("head.limit_deg", 45.0))
+        self._hand = None
+        self._hand_seen = 0.0
+        self._hand_lost_s = float(cfg.get("head.hand.lost_s", 1.5))
+        if self._input == "hand":
+            self._hand = HandPoseSource(
+                cfg.resolve_path("head.hand.model_path", "models/yolo11n-pose.onnx"),
+                keypoint=str(cfg.get("head.hand.keypoint", "wrist")),
+                conf=float(cfg.get("head.hand.conf", 0.25)),
+                kp_conf=float(cfg.get("head.hand.kp_conf", 0.15)),
+                min_cutoff=float(cfg.get("head.hand.min_cutoff", 1.5)),
+                beta=float(cfg.get("head.hand.beta", 0.5)),
+                mirror=bool(cfg.get("head.hand.mirror", True)),
+                gain=float(cfg.get("head.hand.gain", 1.3)))
         self._source_hz = float(cfg.get("head.source_hz", 15.0))
         self._suppress_lead_s = float(cfg.get("head.suppress_lead_s", 0.5))
         self._resettle_dwell_s = float(cfg.get("head.resettle_dwell_s", 0.4))
@@ -128,6 +146,8 @@ class HeadSystem:
     # ── lifecycle ────────────────────────────────────────────────────────────
     def start(self) -> None:
         self._controller.start()
+        if self._hand is not None and self._eyes is not None:
+            self._hand.start(self._eyes)     # background pose thread (~8 fps)
         if self._eyes is not None:
             self._src_stop.clear()
             self._src_thread = threading.Thread(
@@ -138,6 +158,8 @@ class HeadSystem:
 
     def stop(self) -> None:
         self._src_stop.set()
+        if self._hand is not None:
+            self._hand.stop()
         try:
             self._controller.center()      # ease to home before releasing
             time.sleep(0.2)
@@ -270,6 +292,25 @@ class HeadSystem:
                 "dbg": dict(self._dbg)}
 
     # ── internals ────────────────────────────────────────────────────────────
+    def _hand_tick(self, now: float) -> None:
+        """Direct hand teleoperation: the body-relative wrist offset drives pan.
+        The pose runs on its own thread; we read the latest smoothed value and
+        set the target (the controller slews to it at rate_hz). When the hand is
+        lost for a moment we ease back to home rather than freezing at an angle."""
+        x, conf = self._hand.value if self._hand is not None else (0.0, 0.0)
+        if conf > 0.0:
+            self._hand_seen = now
+            aim = (x * self._limit_deg, 0.0)
+            self._controller.set_target(*aim)
+            self._last_aim = aim
+            self._dbg["branch"] = "hand"
+            self._dbg["aim"] = (round(aim[0], 1), 0.0)
+        elif now - self._hand_seen > self._hand_lost_s:
+            self._controller.set_target(0.0, 0.0)   # hand gone -> recentre
+            self._last_aim = (0.0, 0.0)
+            self._dbg["branch"] = "hand-lost"
+        # else: brief dropout within grace -> hold the last target
+
     def _gate(self) -> str:
         if self._estop:
             return "freeze"
@@ -297,6 +338,9 @@ class HeadSystem:
                 self._src_stop.wait(wait)
 
     def _source_tick(self, now: float) -> None:
+        if self._input == "hand":
+            self._hand_tick(now)
+            return
         # A commanded gaze (voice/LLM) overrides tracking for its dwell — same
         # controller, open-loop toward the target.
         if self._cmd_target is not None:

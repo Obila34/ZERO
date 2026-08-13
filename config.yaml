@@ -873,8 +873,9 @@ head:
 
   # Motion envelope + smoothing (HeadController). Values are the 28ce9ee tuning
   # war's endpoint: low slew + wide deadband = smooth, no ±40° revolving.
-  rate_hz: 25               # control tick
-  max_speed_dps: 70         # slew ceiling °/s — faster head (was 36)
+  rate_hz: 40               # control tick
+  max_speed_dps: 220        # slew ceiling °/s — keep up with the hand (was 70)
+  input: face               # "face" = track faces (default); "hand" = hand teleoperation
   limit_deg: 80             # ± pan envelope: 'completely left/right' = ±80°
   home_x: 0.0
   home_y: 0.0
@@ -886,6 +887,19 @@ head:
   source_hz: 15             # rate the neck target is pulled from Eyes' gaze
   suppress_lead_s: 0.5      # efference copy: silence novelty while moving
   resettle_dwell_s: 0.4     # re-baseline this long after the neck stops
+
+  # Direct teleoperation by hand/head pose (YOLO-pose, local ONNX). Move your
+  # hand left/right → head follows in real time (open-loop map + 1€ filter).
+  hand:
+    model_path: models/yolo11n-pose.onnx
+    min_cutoff: 1.5         # 1€ filter: lower = smoother but laggier
+    beta: 0.5               # 1€ filter: higher = snappier on fast moves
+    conf: 0.25              # min person confidence to accept a detection
+    kp_conf: 0.15           # min wrist-keypoint confidence (noisier than person)
+    keypoint: wrist         # "wrist" = hand control; "head" = control with your head (nose)
+    lost_s: 1.5             # hand gone this long -> ease the neck back to centre
+    mirror: true            # flip if the head follows the wrong way
+    gain: 1.3               # sensitivity: hand ~0.8 shoulder-widths off-centre = full swing
 
   tracker:                  # closed-loop visual servo (FaceTracker)
     kp_pan: 0.55            # snappier horizontal follow
