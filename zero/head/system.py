@@ -156,11 +156,13 @@ class HeadSystem:
         self._controller.start()
         if self._hand is not None and self._eyes is not None:
             self._hand.start(self._eyes)     # background pose thread (~8 fps)
-        if self._eyes is not None:
-            self._src_stop.clear()
-            self._src_thread = threading.Thread(
-                target=self._source_loop, name="head-source", daemon=True)
-            self._src_thread.start()
+        # Always run the source loop — even with no camera it carries out
+        # commanded gaze (voice/typed "turn left", "stop", ...). Head-FOLLOW and
+        # face tracking need eyes and idle-home without them; commands do not.
+        self._src_stop.clear()
+        self._src_thread = threading.Thread(
+            target=self._source_loop, name="head-source", daemon=True)
+        self._src_thread.start()
         log.info("head system up (driver=%s moves_hardware=%s)",
                  type(self._driver).__name__, self._driver.moves_hardware)
 
