@@ -355,7 +355,7 @@ tools:
   # LLM JSON tool calls (flexible), plain chat (everything else). The allow
   # list is the safety boundary: a tool not named here cannot run.
   enabled: true
-  allow: [time, timer, reminder, remember, recall, web_search]
+  allow: [time, timer, reminder, remember, recall, web_search, gaze]
 
   # Live internet access. Points at a search endpoint returning JSON
   # {results:[{title,url,content}]} — a self-hosted SearXNG is the easy private
@@ -855,3 +855,74 @@ world:
 # Persona: the system prompt lives in zero/llm/persona.py (SYSTEM_TEMPLATE) —
 # edit it there. (It used to be templated from here, but the values were no
 # longer substituted, so the dead keys were removed.)
+
+# ───────────────────────────────────────────────────────────────────────────
+# Head / attention subsystem (phase 1). Gaze as an OUTPUT of attention, driven
+# by the same controller as tracking and by ZERO's conversation state.
+#
+# SHIPS DARK: enabled:false means a normal run is completely unaffected. Turning
+# it on with the default driver (null) moves NOTHING — it runs the full stack
+# (social gaze, face tracking, efference-copy suppression) against a no-op sink
+# so the feel and the emitted command stream can be judged with zero risk. A
+# physical driver (http/udp) is a separate, explicit opt-in and WILL move metal.
+# ───────────────────────────────────────────────────────────────────────────
+head:
+  enabled: true             # head subsystem LIVE — tracks faces + social gaze in convo
+  driver: http              # http = drive the gateway directly (no reflex layer)
+  trace: false              # (null-driver only) log the ~1 Hz commanded pose
+
+  # Motion envelope + smoothing (HeadController). Values are the 28ce9ee tuning
+  # war's endpoint: low slew + wide deadband = smooth, no ±40° revolving.
+  rate_hz: 25               # control tick
+  max_speed_dps: 70         # slew ceiling °/s — faster head (was 36)
+  limit_deg: 80             # ± pan envelope: 'completely left/right' = ±80°
+  home_x: 0.0
+  home_y: 0.0
+
+  # Eyes-lead-head: the neck holds while the face is within this fraction of the
+  # half-frame (the digital crop is the fast 'eye'); beyond it the neck engages.
+  engage_frac: 0.1          # neck engages past ~5-7° off-centre (this cam's scale)
+  track_tilt: false         # horizontal-only for now (nod can't centre a low face)
+  source_hz: 15             # rate the neck target is pulled from Eyes' gaze
+  suppress_lead_s: 0.5      # efference copy: silence novelty while moving
+  resettle_dwell_s: 0.4     # re-baseline this long after the neck stops
+
+  tracker:                  # closed-loop visual servo (FaceTracker)
+    kp_pan: 0.55            # snappier horizontal follow
+    kp_tilt: 0.16           # only used when head.track_tilt is true
+    deadband: 0.04          # face within ~4% of centre = "centred" (was 0.22)
+    pan_sign: 1.0           # +1: face right -> turn right (matches +deg=right hw)
+    tilt_sign: 1.0          # the one-look sign test: flip if error GROWS on turn
+    half_fov_pan_deg: 35
+    half_fov_tilt_deg: 25
+    settle_delay_s: 0.2     # beat between corrections (quicker follow)
+    lead_s: 0.12            # predictive lead (was 0.30 — big leads jumped on noise)
+
+  social:                   # GazeScheduler — the turn-taking layer
+    listen_face_frac: 0.71  # Argyle & Cook: gaze ~71% while listening
+    speak_face_frac: 0.41   #                gaze ~41% while speaking
+    listen_avert_s: 1.14    # Andrist et al. 2014 aversion durations
+    speak_avert_s: 1.96
+    max_mutual_s: 5.0       # never hold unbroken mutual gaze past ~5 s (Binetti)
+    think_hold_s: 3.5       # THINKING: look up-and-away this long
+    sideways_deg: 12        # aversion offset magnitude (head-only)
+    up_deg: 10
+
+  # Physical driver settings (only used when driver is http/udp — MOVES METAL).
+  gateway:                  # driver: http — direct-LAN gateway on the Arm Pi
+    base_url: http://192.168.150.183:5000
+    pan_joint: head_tilt_joint    # firmware joint names (resolve on calibration)
+    tilt_joint: head_nod_joint
+    max_hz: 15
+    deadband_deg: 0.4
+    timeout_s: 0.5
+    # Nod home/range: gateway servo = 90 + angle_deg. Offset -40 parks the nod at
+    # servo 50 (home, looking at the person) when ZERO tilt is 0; clamp keeps it in
+    # servo 50-90 (angle_deg -40..0) so it never drives past its physical stop.
+    drive_nod: false        # KILL the nod: ZERO never posts it — perfect pan first
+    nod_offset_deg: -40
+    nod_min_deg: -40
+    nod_max_deg: 0
+  setpoint:                 # driver: udp — Arm-side reflex/smoothing service
+    host: 192.168.150.183
+    port: 8099

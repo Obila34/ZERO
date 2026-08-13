@@ -1,0 +1,107 @@
+"""Parse spoken gaze commands into a structured intent — the FAST lexical path.
+
+'look left', 'turn to your right', 'look up', 'look back at me', 'look at Sam',
+'face forward' must move the head with NO ~3 s LLM round trip, exactly like the
+timer/time tier-1 intents. This is the pure, high-precision parser; the router
+dispatches its result to the gaze tool instantly, and anything ambiguous ('look
+at that', 'what's over there?') falls through to the LLM, which can still call
+the same tool with look_then_speak.
+
+Frame of reference: relative directions are ROBOT-EGOCENTRIC — 'your right' and a
+bare 'right' both mean the robot's right — the single frame the plan commits to
+(the neck's limits and the digital crop are all egocentric). Pure logic, no I/O.
+"""
+from __future__ import annotations
+
+import re
+
+# Default magnitude for a bare direction (no explicit degrees). ~25° is a clear
+# glance that still engages the neck (past the ~15-20° eyes-only threshold).
+DEFAULT_DEG = 25.0
+# Sentinel for "go all the way" — the controller clamps it to the axis limit, so
+# 'turn completely left' lands at the mechanical max without the parser needing
+# to know the configured range.
+FULL_DEG = 999.0
+
+# "as far as you can" / "all the way" / "completely" / "fully" / "hard" / "max"
+_FULL = re.compile(
+    r"\b(?:all\s+the\s+way|completely|complete|fully|full|entirely|totally|"
+    r"as\s+far\s+(?:(?:to\s+the\s+)?(?:left|right|up|down)\s+)?as\s+(?:you\s+can|possible)|"
+    r"maximum|max|hard)\b", re.IGNORECASE)
+
+_DIR_AXIS = {"left": ("pan", -1.0), "right": ("pan", +1.0),
+             "up": ("tilt", +1.0), "down": ("tilt", -1.0)}
+
+# A gaze verb near the start: look / turn / glance / face / gaze (+ optional
+# 'your'/'to the'/'over'/'back'). "watch"/"see" excluded (too ambiguous).
+_VERB = r"(?:look|turn|glance|gaze|face|point)"
+# Filler words allowed between the gaze verb and the direction, so natural
+# phrasings parse: 'turn head to its complete left', 'look all the way to the
+# right', 'turn a little to your left'. Kept to connective/quantifier words so
+# 'look, I went left' still won't fire (no verb→direction adjacency there).
+_FILL = (r"back|over|round|around|again|to|your|the|towards?|at|its|it|head|"
+         r"all|way|as|far|you|can|possible|completely|complete|fully|full|"
+         r"entirely|totally|maximum|max|hard|side|a|little|bit|slightly|please|"
+         r"more|much|now|and")
+_LEAD = rf"\b{_VERB}\b(?:\s+(?:{_FILL}))*"
+
+_DEG = re.compile(r"(?P<deg>\d{1,3}(?:\.\d+)?)\s*(?:deg|degrees?|°)", re.IGNORECASE)
+# direction, optionally with a degrees phrase sitting between verb and direction
+# ('look 15° up') — the magnitude itself is pulled out separately by _DEG.
+_DIR = re.compile(
+    rf"{_LEAD}\s+(?:\d{{1,3}}(?:\.\d+)?\s*(?:deg|degrees?|°)\s+)?"
+    rf"(?P<dir>left|right|up|down)\b", re.IGNORECASE)
+_CENTER = re.compile(
+    rf"{_LEAD}\s+(?:center|centre|forward|forwards|ahead|straight|front)\b"
+    rf"|\bface\s+(?:me\s+)?(?:forward|forwards|ahead|straight|front)\b",
+    re.IGNORECASE)
+_AT_ME = re.compile(rf"{_LEAD}\s+(?:at\s+|to\s+)?me\b", re.IGNORECASE)
+# 'look at <Name>' — a capitalised or known token. We capture a single word and
+# let the caller resolve it against known people; unresolved → best-effort.
+_AT_NAME = re.compile(
+    rf"{_VERB}\b(?:\s+(?:back|over|to|your|the|towards?))*\s+at\s+(?P<name>[a-z][a-z'-]{{1,20}})\b",
+    re.IGNORECASE)
+
+_NOT_A_NAME = {"me", "you", "it", "that", "this", "there", "them", "us", "the",
+               "my", "him", "her", "his", "your", "yourself", "everyone",
+               "someone", "anybody", "camera", "left", "right", "up", "down",
+               "center", "centre", "forward", "ahead", "straight", "front"}
+
+
+def parse_gaze_command(text: str) -> dict | None:
+    """Return a gaze intent dict or None. Shapes:
+        {"kind": "direction", "axis": "pan"|"tilt", "sign": +/-1, "degrees": N}
+        {"kind": "center"}
+        {"kind": "person", "name": "me"|<name>}
+    High precision: only fires on clear gaze phrasings so normal speech ('look,
+    I think…') never moves the head."""
+    if not text:
+        return None
+    t = text.strip()
+
+    # center / face-forward first (most specific)
+    if _CENTER.search(t):
+        return {"kind": "center"}
+
+    m = _DIR.search(t)
+    if m:
+        axis, sign = _DIR_AXIS[m.group("dir").lower()]
+        dm = _DEG.search(t)
+        if dm:
+            deg = float(dm.group("deg"))        # explicit "30 degrees left"
+        elif _FULL.search(t):
+            deg = FULL_DEG                       # "all the way / completely left"
+        else:
+            deg = DEFAULT_DEG                     # bare "look left" = a glance
+        return {"kind": "direction", "axis": axis, "sign": sign, "degrees": deg}
+
+    if _AT_ME.search(t):
+        return {"kind": "person", "name": "me"}
+
+    m = _AT_NAME.search(t)
+    if m:
+        name = m.group("name").lower()
+        if name not in _NOT_A_NAME:
+            return {"kind": "person", "name": name}
+
+    return None

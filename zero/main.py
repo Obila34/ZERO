@@ -26,7 +26,7 @@ from zero.config import load_config
 from zero.conversation import Conversation
 from zero.events import EventBus
 from zero.factory import (
-    build_corpus, build_endpointer, build_guests, build_identity,
+    build_corpus, build_endpointer, build_guests, build_head, build_identity,
     build_learning_loop, build_llm, build_memory, build_perception,
     build_privacy, build_proactive, build_stt, build_tools,
     build_turn_detector, build_vision, build_voice, build_voiceid, build_wake,
@@ -240,6 +240,11 @@ class Zero:
             self.eyes = None
             self.room = None
 
+        # Head / attention subsystem — built in _start_conversation() once eyes
+        # are up. Dark by default (head.enabled=false) so this stays None on a
+        # normal run; when on, the default NullDriver still moves nothing.
+        self.head = None
+
         tool_block = (self.tool_registry.spec_block()
                       if self.tool_registry is not None else "")
         lang_block = ""
@@ -387,6 +392,7 @@ class Zero:
             memory=self.memory, events=self.events,
             person_id=person.person_id if person is not None else None,
             person_name=person.name if person is not None else None,
+            extras={"head": getattr(self, "head", None)},   # gaze tool, late-bound
         )
 
     def _drain_events(self) -> bool:
@@ -478,6 +484,9 @@ class Zero:
         self.state = dst
         if self.indicator is not None:   # the visible "I can hear you" signal
             self.indicator.set_state(dst.name.lower())
+        head = getattr(self, "head", None)
+        if head is not None:             # gaze is turn-taking machinery: drive
+            head.set_state(dst.name.lower())        # social gaze off the state
 
     def _start_conversation(self) -> None:
         """Fresh history + load long-term memory (injected once, cache-friendly)."""
@@ -565,6 +574,16 @@ class Zero:
             except Exception as e:  # a missing camera must not stop voice working
                 log.warning("could not start eyes — running voice-only: %s", e)
                 self.eyes = None
+        # Head / attention subsystem (after eyes so it can read the digital gaze).
+        # Dark unless head.enabled; NullDriver unless head.driver names a real
+        # sink. A failure here must never stop the conversation.
+        try:
+            self.head = build_head(self.cfg, eyes=self.eyes)
+            if self.head is not None:
+                self.head.start()
+        except Exception as e:
+            log.warning("head subsystem unavailable: %s", e)
+            self.head = None
         # Surprise gate (Phase 3): scores world events by prediction error —
         # the unexpected becomes episodes and wakes the narrator. Built here
         # (not __init__) because it needs the eyes to have survived startup.
@@ -595,6 +614,11 @@ class Zero:
             self.mic.stop()
             if getattr(self, "_surprise", None) is not None:
                 self._surprise.stop()
+            if self.head is not None:
+                try:
+                    self.head.stop()
+                except Exception:
+                    pass
             if self.eyes is not None:
                 self.eyes.stop()
             if self.indicator is not None:

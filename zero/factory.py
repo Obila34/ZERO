@@ -280,6 +280,12 @@ def build_tools(cfg: Config, llm: LLM, memory, events, context_provider=None):
             timeout=cfg.get("tools.websearch.timeout_s", 8.0),
             max_results=cfg.get("tools.websearch.max_results", 3),
         ))
+    if cfg.get("head.enabled", False):
+        # The head reaches the tool late-bound via ToolContext.extras['head'];
+        # registered here (config known) even though HeadSystem is built later.
+        from zero.tools.gaze import GazeTool
+
+        registry.register(GazeTool())
     wrapped = ToolAwareLLM(llm, registry, context_provider=context_provider)
     return wrapped, registry, timers
 
@@ -508,8 +514,14 @@ def build_vision(cfg: Config):
             from zero.vision.framer import FaceFramer
 
             framer = FaceFramer(
+                # Face TRACKING gets a smaller min-size than identity/enrollment
+                # (which wants a big, clean face): at 640x480 a person at
+                # conversational distance is only ~40-50px wide, and the 60px
+                # identity floor filtered them out entirely, so the head had
+                # nothing to follow. The 0.8 score threshold still rejects the
+                # false positives (real faces score ~0.9).
                 YuNetDetector(str(det_path),
-                              min_size=cfg.get("identity.face.min_size", 60)),
+                              min_size=cfg.get("vision.attention.min_face_px", 32)),
                 window_frac=cfg.get("vision.attention.window_frac", 0.45),
                 confirm_s=cfg.get("vision.attention.confirm_s", 0.4),
                 lost_s=cfg.get("vision.attention.lost_s", 2.0),
@@ -543,6 +555,32 @@ def build_vision(cfg: Config):
         tier1_budget=tier1_budget,
     )
     return eyes
+
+
+def build_head(cfg: Config, eyes=None, gate=None):
+    """Build the head/attention subsystem, or None when disabled.
+
+    Gated on head.enabled (DEFAULT FALSE) so the feature ships dark: a normal run
+    is byte-for-byte unaffected until it is turned on. Even when enabled, the
+    default driver is NullDriver — nothing physically moves — so phase 1 can be
+    felt (social gaze, tracking, efference-copy suppression) with zero risk to
+    real metal; a physical driver is a further explicit opt-in (head.driver).
+    `gate` is the optional AF1 ownership gate (track/home/yield/freeze)."""
+    from zero.utils.logging import get_logger
+
+    log = get_logger("head")
+    if not cfg.get("head.enabled", False):
+        return None
+    try:
+        from zero.head.system import HeadSystem
+    except Exception as e:   # never let an optional subsystem break startup
+        log.warning("head enabled but import failed — running without it: %s", e)
+        return None
+    try:
+        return HeadSystem(cfg, eyes=eyes, gate=gate)
+    except Exception as e:
+        log.warning("head build failed — running without it: %s", e)
+        return None
 
 
 def build_perception_client(cfg: Config):

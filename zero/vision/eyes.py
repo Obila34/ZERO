@@ -146,6 +146,20 @@ class Eyes:
         # Tier 1 hard ceiling (Phase 3): even under constant motion, detection
         # may not eat more than its duty-cycle budget of wall time.
         self._tier1_budget = tier1_budget
+        # Efference copy (head-movement phase 1): when the neck is commanded to
+        # move, the camera sweeps new objects in and old ones out. Without this,
+        # ~2 s later the diffing above manufactures "a shelf came into view; the
+        # laptop is no longer in view" on every turn the head moved, and one such
+        # false note can even swallow a real one for the whole cooldown. The head
+        # controller calls suppress_changes()/resettle() around every commanded
+        # move; while suppressed we re-baseline silently, emit no novelty, and
+        # keep ego-motion out of the world/surprise/gate signals.
+        self._suppress_until = 0.0
+        # Commanded camera angular rate (deg/s), pushed by the head system, so the
+        # loop can DROP motion-blurred frames mid-saccade rather than feed the
+        # remote detector a smeared image with mid-flight boxes.
+        self._ego_rate = (0.0, 0.0)
+        self._saccade_dps = 15.0
 
     _STABLE_S = 2.0      # presence/absence must persist this long to count
     _SETTLE_S = 8.0      # startup grace: the initial scene isn't "new"
@@ -212,11 +226,25 @@ class Eyes:
             if frame is None:
                 continue
             now = time.time()
+            suppressed = self._suppressed(now)
             # Tier 0: motion on EVERY frame (cheap), published to the world and
             # used to gate Tier 1 — a still room doesn't get re-detected at
             # full cadence.
             motion_active = True
-            if self._motion is not None:
+            if suppressed:
+                # Commanded self-motion: the whole frame shifts, which would read
+                # as scene motion, open the gate to full cadence, spike the world
+                # motion level and fire the surprise/proactive path. Hold it quiet
+                # and drop the reference frame so we never diff across the move.
+                motion_active = False
+                if self._motion is not None:
+                    try:
+                        self._motion.reset()
+                    except Exception:
+                        pass
+                if self._world is not None:
+                    self._world.update_motion(0.0, False, ts=now)
+            elif self._motion is not None:
                 try:
                     level, motion_active = self._motion.update(frame)
                     if self._world is not None:
@@ -228,6 +256,11 @@ class Eyes:
             if (run_detect and self._tier1_budget is not None
                     and not self._tier1_budget.allowed(now)):
                 run_detect = False           # hard ceiling beats motion
+            # NB: we deliberately do NOT skip detection while the neck is moving.
+            # Closed-loop pursuit needs to SEE the face re-centre as the head
+            # turns; freezing vision during motion breaks the loop and the aim
+            # winds up to the limit. (Mid-saccade blur handling, if ever needed,
+            # must gate only fast ballistic saccades AND never the local framer.)
 
             if run_detect:
                 detections: list = []
@@ -249,17 +282,19 @@ class Eyes:
                 self._scene.update(detections, frame_rgb=frame)
                 self._track_changes(detections)
                 self._track_instances(detections, now)
-                if self._framer is not None:
-                    # Digital gaze rides the same motion-gated cadence: a
-                    # still room means the face isn't moving either, so the
-                    # frozen window stays correct. update() never raises.
-                    self._framer.update(frame, now)
             else:
                 # Gated frame: keep the LAST detections current (the scene has
                 # not changed — that is why the gate closed) but still publish
                 # the fresh frame for identity/keyframes/preview.
                 detections = self._last_dets
                 self._scene.update(detections, frame_rgb=frame)
+            # Digital gaze (face tracking) runs EVERY frame, independent of the
+            # object-detection gate and motion suppression: it is cheap (local
+            # YuNet) and it is the closed-loop signal the head follows, so it must
+            # stay fresh while the neck is moving — otherwise pursuit can't see the
+            # face re-centre and winds up to the limit.
+            if self._framer is not None:
+                self._framer.update(frame, now)   # never raises
             if self._preview_sink is not None and self._preview_sink.ok:
                 self._preview_sink.show(
                     frame, detections,
@@ -272,12 +307,21 @@ class Eyes:
         """Debounced scene diffing: record labels that stably appear/disappear,
         as phrased remark candidates consumed by scene_changes()."""
         now = time.time()
-        if now - self._started_at < self._SETTLE_S:
-            for d in detections:  # seed the baseline silently
-                lbl = d.label.lower()
+        if now - self._started_at < self._SETTLE_S or self._suppressed(now):
+            # Startup grace OR commanded head motion: keep the presence baseline
+            # synced to the current view but emit no novelty. Present labels
+            # refresh their seen-time; labels that drop out expire from _stable
+            # silently, so nothing bursts as 'appeared'/'left' when tracking
+            # resumes.
+            labels = {d.label.lower() for d in detections}
+            for lbl in labels:
                 self._first_seen.setdefault(lbl, now)
                 self._last_seen[lbl] = now
                 self._stable.add(lbl)
+            for lbl in list(self._stable):
+                if lbl not in labels and now - self._last_seen.get(lbl, 0.0) >= self._STABLE_S:
+                    self._stable.discard(lbl)
+                    self._first_seen.pop(lbl, None)
             return
         labels = {d.label.lower() for d in detections}
         events: list[str] = []
@@ -323,14 +367,16 @@ class Eyes:
                 kinds = {"new": "appeared", "gone": "left", "moved": "moved"}
                 wevents = [WorldEvent(kind=kinds[k], label=lbl, ts=now)
                            for k, lbl in events if k in kinds]
-                # Startup settle: the initial scene is baseline, not events.
-                if now - self._started_at < self._SETTLE_S:
+                # Startup settle OR commanded head motion: objects still publish
+                # (positions stay current) but the events are ego-motion, not the
+                # world changing — drop them.
+                if now - self._started_at < self._SETTLE_S or self._suppressed(now):
                     wevents = []
                 self._world.update_objects(objects, wevents, ts=now)
             except Exception as e:  # world publish must never break perception
                 log.debug("world publish failed: %s", e)
-        if now - self._started_at < self._SETTLE_S:
-            return  # tracker state warms up silently
+        if now - self._started_at < self._SETTLE_S or self._suppressed(now):
+            return  # tracker state warms up silently / ego-motion emits nothing
         moved = [f"the {label} just moved" for kind, label in events
                  if kind == "moved" and label.lower() != "person"]
         if moved:
@@ -350,6 +396,58 @@ class Eyes:
             out, self._changes = self._changes[:2], []
             self._last_change_note = now
             return out
+
+    # ── efference copy (commanded head motion) ───────────────────────────────
+    def suppress_changes(self, duration_s: float = 0.6, *,
+                         until: float | None = None) -> None:
+        """Silence scene-change novelty + ego-motion for a window because the
+        head is (about to be) commanded to move. Extends, never shrinks — the
+        head controller calls this every tick while the neck is slewing, so the
+        window trails the actual motion. During it, _track_changes/_track_instances
+        keep the baseline synced to the current view and emit nothing, and the
+        motion signal is held quiet, so no false 'appeared/left/moved' remark and
+        no surprise/proactive trigger comes from ZERO merely looking elsewhere."""
+        now = time.time()
+        u = until if until is not None else now + max(0.0, float(duration_s))
+        with self._change_lock:
+            if u > self._suppress_until:
+                self._suppress_until = u
+
+    def resettle(self) -> None:
+        """End suppression now and force a fresh visual baseline: the scene the
+        head has turned to face is the new 'normal', not a burst of appearances.
+        Call once when a saccade settles."""
+        now = time.time()
+        with self._change_lock:
+            self._suppress_until = 0.0
+            self._changes = []           # drop any candidates queued mid-move
+        # re-seed presence baselines from the current view so nothing counts as
+        # 'new' or 'gone' the instant tracking resumes
+        snap = self._scene.snapshot()
+        labels = {d.label.lower() for d in snap.detections}
+        with self._change_lock:
+            self._stable = set(labels)
+            self._first_seen = {lbl: now for lbl in labels}
+            self._last_seen = {lbl: now for lbl in labels}
+        if self._motion is not None:
+            try:
+                self._motion.reset()     # drop the pre-move reference frame
+            except Exception:
+                pass
+
+    def _suppressed(self, now: float) -> bool:
+        with self._change_lock:
+            return now < self._suppress_until
+
+    def set_ego_motion(self, pan_dps: float, tilt_dps: float) -> None:
+        """The head system pushes the commanded camera angular rate (deg/s). Used
+        to drop motion-blurred frames while the neck saccades."""
+        self._ego_rate = (float(pan_dps), float(tilt_dps))
+
+    def is_ego_moving(self, threshold_dps: float | None = None) -> bool:
+        thr = self._saccade_dps if threshold_dps is None else float(threshold_dps)
+        p, t = self._ego_rate
+        return abs(p) > thr or abs(t) > thr
 
     def _fill_colors(self, frame_rgb, detections) -> None:
         # Only name the N largest boxes — color is the costly per-object step.

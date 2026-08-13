@@ -271,6 +271,15 @@ class ToolAwareLLM:
                     {"duration": m.group("dur")}, ctx)
         if _T1_TIME.search(text) and self._registry.get("time") is not None:
             return self._registry.get("time").safe_run({}, ctx)
+        if self._registry.get("gaze") is not None:
+            # Fast lexical gaze ('look left', 'face forward', 'look at Sam') —
+            # move the head with no LLM round trip. High-precision parser; bare
+            # 'look, I think…' / 'what's over there?' return None and fall to the
+            # LLM, which can still call the gaze tool (with then_answer).
+            from zero.head.commands import parse_gaze_command
+
+            if parse_gaze_command(text) is not None:
+                return self._registry.get("gaze").safe_run({"text": text}, ctx)
         return None
 
     def _forced_websearch(self, text: str) -> str | None:
