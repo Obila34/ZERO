@@ -272,7 +272,21 @@ class Zero:
                 "rather than guessing or telling the person to look it up "
                 "themselves. Only say you don't know if the search comes back "
                 "empty.")
-        system_prompt = build_system_prompt(tool_block, lang_block, web_block)
+        # The persona forbids narrating actions ("you have no way to perform
+        # them"), which the model over-generalises into "I can't move my head".
+        # When the head subsystem is enabled, say plainly that the neck is real
+        # and movement goes through the gaze tool (audit L4).
+        body_block = ""
+        if (self.cfg.get("head.enabled", False)
+                and self.tool_registry is not None
+                and self.tool_registry.get("gaze") is not None):
+            body_block = (
+                "Your body: you have a real, motorised neck and CAN physically "
+                "turn your head. When someone asks you to look or turn "
+                "somewhere, use the gaze tool to do it — never claim you can't "
+                "move your head, and never just describe the movement.")
+        system_prompt = build_system_prompt(tool_block, body_block, lang_block,
+                                            web_block)
         self.convo = Conversation(
             system_prompt=system_prompt,
             history_turns=self.cfg.get("llm.history_turns", 3),
