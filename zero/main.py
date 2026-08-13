@@ -513,6 +513,18 @@ class Zero:
             self._control.ready = True
         print("\nZERO text mode — type to chat. Say 'goodbye' to reset, Ctrl-C to quit.\n")
         self._start_conversation()
+        # Build the head so TYPED gaze commands ("turn far left", "stop",
+        # "follow me") move the real neck with no mic/STT in the loop - the
+        # reliable way to test head commands (head-follow needs a camera,
+        # absent here; the commanded moves still apply).
+        try:
+            if self.head is None:
+                self.head = build_head(self.cfg, eyes=self.eyes)
+                if self.head is not None:
+                    self.head.start()
+        except Exception as e:
+            log.warning("head unavailable in text mode: %s", e)
+            self.head = None
         try:
             while True:
                 try:
@@ -550,6 +562,11 @@ class Zero:
                 self._maybe_compact()  # rolling summary keeps context bounded
         except KeyboardInterrupt:
             print()
+        if self.head is not None:
+            try:
+                self.head.stop()
+            except Exception:
+                pass
         self._end_conversation()
         self._join_memory_thread()
 
