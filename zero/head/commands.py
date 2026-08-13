@@ -35,7 +35,7 @@ _FULL = re.compile(
 _FAR = re.compile(r"\b(?:far|hard|a\s+lot|much|right\s+over)\b", re.IGNORECASE)
 
 # manual servo control: freeze where it is / hand control back to tracking
-_HOLD = re.compile(r"\b(?:freeze|halt|hold(?:\s+(?:it|still|there|on|steady|position|your\s+head))?|don'?t\s+move|stop\s+moving|stop\s+(?:right\s+)?there|stay\s+(?:there|still|put))\b", re.IGNORECASE)
+_HOLD = re.compile(r"\b(?:stop|freeze|halt|hold(?:\s+(?:it|still|there|on|steady|position|your\s+head))?|don'?t\s+move|stay\s+(?:there|still|put))\b", re.IGNORECASE)
 _TRACK = re.compile(r"\b(?:follow\s+(?:me|my\s+(?:head|hand|face))|track\s+(?:me|my\s+(?:head|hand))|keep\s+(?:following|tracking)|start\s+(?:following|tracking)|resume(?:\s+tracking)?|as\s+you\s+were|go\s+back\s+to\s+(?:following|tracking))\b", re.IGNORECASE)
 
 _DIR_AXIS = {"left": ("pan", -1.0), "right": ("pan", +1.0),
@@ -43,12 +43,12 @@ _DIR_AXIS = {"left": ("pan", -1.0), "right": ("pan", +1.0),
 
 # A gaze verb near the start: look / turn / glance / face / gaze (+ optional
 # 'your'/'to the'/'over'/'back'). "watch"/"see" excluded (too ambiguous).
-_VERB = r"(?:look|turn|glance|gaze|face|point)"
+_VERB = (r"(?:look(?:ing)?|turn(?:ing)?|glanc(?:e|ing)|gaz(?:e|ing)|fac(?:e|ing)|point(?:ing)?|mov(?:e|ing)|swivel(?:l?ing)?|rotat(?:e|ing)|spin(?:ning)?|swing(?:ing)?|aim(?:ing)?|pan(?:ning)?|tilt(?:ing)?|go(?:ing)?|shift(?:ing)?)")
 # Filler words allowed between the gaze verb and the direction, so natural
 # phrasings parse: 'turn head to its complete left', 'look all the way to the
 # right', 'turn a little to your left'. Kept to connective/quantifier words so
 # 'look, I went left' still won't fire (no verb→direction adjacency there).
-_FILL = (r"back|over|round|around|again|to|your|the|towards?|at|its|it|head|"
+_FILL = (r"back|over|round|around|again|to|your|my|the|towards?|at|its|it|head|"
          r"all|way|as|far|you|can|possible|completely|complete|fully|full|"
          r"entirely|totally|maximum|max|hard|side|a|little|bit|slightly|please|"
          r"more|much|now|and")
