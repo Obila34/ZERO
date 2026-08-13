@@ -97,14 +97,18 @@ class HttpGatewayDriver(HeadDriver):
                  max_hz: float = 15.0, deadband_deg: float = 0.4,
                  timeout_s: float = 0.5, nod_offset_deg: float = 0.0,
                  nod_min_deg: float = -90.0, nod_max_deg: float = 90.0,
-                 drive_nod: bool = True):
+                 drive_nod: bool = True, max_jump_deg: float = 12.0,
+                 nod_sign: float = 1.0):
         self._base = base_url.rstrip("/")
         self._pan_joint = pan_joint
         self._tilt_joint = tilt_joint
         # The nod servo has a restricted travel and a home that isn't the joint's
-        # 0. gateway servo = 90 + angle_deg, so posting (tilt + offset) clamped to
-        # [nod_min, nod_max] parks the nod at its true home and never drives it
-        # past its physical stop. (Default offset 0 = no remap.)
+        # 0. gateway servo = 90 + angle_deg, so posting (sign*tilt + offset)
+        # clamped to [nod_min, nod_max] parks the nod at its true home and never
+        # drives it past its physical stop. nod_sign flips the axis if
+        # increasing servo turns out to look DOWN (set from calibration; the
+        # controller convention is +tilt = up). (Default offset 0 = no remap.)
+        self._nod_sign = float(nod_sign)
         self._nod_offset = float(nod_offset_deg)
         self._nod_min = float(nod_min_deg)
         self._nod_max = float(nod_max_deg)
@@ -112,9 +116,18 @@ class HttpGatewayDriver(HeadDriver):
         self._min_interval = 1.0 / max(1.0, float(max_hz))
         self._deadband = float(deadband_deg)
         self._timeout = float(timeout_s)
+        # Bound how far a single post may move the hardware from the last
+        # ACKNOWLEDGED pose. The controller's slew limit lives in belief space
+        # only; after an outage the next absolute post would otherwise carry the
+        # whole accumulated error and the neck would whip. <=0 disables.
+        self._max_jump = float(max_jump_deg)
         self._last = (0.0, 0.0)
         self._sent = (float("nan"), float("nan"))
         self._last_t = 0.0
+        # Link health: consecutive failed posts / last success, surfaced via
+        # .healthy so status() can tell "moving" from "unplugged" (audit C2).
+        self._fails = 0
+        self._ok_t = 0.0
         self._lock = threading.Lock()
         self._pending: tuple[float, float] | None = None
         self._stop = threading.Event()
@@ -148,18 +161,62 @@ class HttpGatewayDriver(HeadDriver):
                 continue
             px, py = target
             sx, sy = self._sent
-            moved = (sx != sx or abs(px - sx) >= self._deadband
-                     or abs(py - sy) >= self._deadband)
-            if not moved:
+            first = sx != sx          # nothing acknowledged yet (NaN sentinel)
+            # Bounded hop: never ask the hardware to move more than max_jump
+            # from the last acknowledged pose in one post. Requeue the real
+            # target so the worker keeps walking until it arrives.
+            if not first and self._max_jump > 0:
+                dx, dy = px - sx, py - sy
+                m = max(abs(dx), abs(dy))
+                if m > self._max_jump:
+                    s = self._max_jump / m
+                    px, py = sx + dx * s, sy + dy * s
+                    with self._lock:
+                        if self._pending is None:
+                            self._pending = target
+                    self._wake.set()
+            # Per-axis gating: only post an axis that actually moved (the nod
+            # rides a separate serial bus — don't spam it with pan twitches).
+            pan_due = first or abs(px - sx) >= self._deadband
+            nod_due = self._drive_nod and (first or abs(py - sy) >= self._deadband)
+            if not pan_due and not nod_due:
                 continue
             self._last_t = now
-            self._sent = (px, py)
-            self._post(self._pan_joint, px)
-            if self._drive_nod:
-                nod = max(self._nod_min, min(self._nod_max, py + self._nod_offset))
-                self._post(self._tilt_joint, nod)
+            ok = True
+            if pan_due:
+                ok = self._post(self._pan_joint, px) and ok
+            if nod_due:
+                nod = max(self._nod_min,
+                          min(self._nod_max, self._nod_sign * py + self._nod_offset))
+                ok = self._post(self._tilt_joint, nod) and ok
+            if ok:
+                # Acknowledge only on success, so a failed post is retried
+                # instead of silently skipped (audit H1).
+                self._sent = (px, py)
+                if self._fails >= 3:
+                    log.warning("head gateway recovered after %d failed posts",
+                                self._fails)
+                self._fails = 0
+                self._ok_t = time.monotonic()
+            else:
+                self._fails += 1
+                if self._fails == 3:
+                    log.warning("head gateway unreachable (%s) — will keep "
+                                "retrying; the head is NOT moving", self._base)
+                with self._lock:
+                    if self._pending is None:
+                        self._pending = target
+                self._wake.set()
+                # Back off while the link is down so a dead gateway isn't
+                # hammered at full rate (timeouts already slow each attempt).
+                time.sleep(min(2.0, 0.2 * self._fails))
 
-    def _post(self, joint: str, deg: float) -> None:
+    @property
+    def healthy(self) -> bool:
+        """False once several consecutive posts have failed."""
+        return self._fails < 3
+
+    def _post(self, joint: str, deg: float) -> bool:
         import math
         body = json.dumps({
             "name": joint, "angle_deg": deg,
@@ -170,8 +227,10 @@ class HttpGatewayDriver(HeadDriver):
             headers={"Content-Type": "application/json"}, method="POST")
         try:
             urllib.request.urlopen(req, timeout=self._timeout).close()
+            return True
         except Exception as e:   # never raise into the loop
             log.debug("gateway post failed (%s=%.1f): %s", joint, deg, e)
+            return False
 
     def estop(self) -> None:
         try:
@@ -257,6 +316,8 @@ def make_driver(cfg) -> HeadDriver:
             nod_min_deg=float(cfg.get("head.gateway.nod_min_deg", -90.0)),
             nod_max_deg=float(cfg.get("head.gateway.nod_max_deg", 90.0)),
             drive_nod=bool(cfg.get("head.gateway.drive_nod", True)),
+            max_jump_deg=float(cfg.get("head.gateway.max_jump_deg", 12.0)),
+            nod_sign=float(cfg.get("head.gateway.nod_sign", 1.0)),
         )
         log.warning("head.driver=http — HEAD WILL MOVE via %s", drv._base)
         return drv
