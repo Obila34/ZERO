@@ -67,6 +67,21 @@ def post_servo(base: str, servo_deg: float, log) -> bool:
         return False
 
 
+def _last_logged_servo() -> float | None:
+    """The last servo value this script ever commanded, from its own log."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "..", "calibration_nod_log.txt")
+    try:
+        val = None
+        with open(path) as f:
+            for line in f:
+                if "servo=" in line:
+                    val = float(line.rsplit("servo=", 1)[1])
+        return val
+    except Exception:
+        return None
+
+
 def telemetry(base: str) -> dict | None:
     try:
         with urllib.request.urlopen(f"{base}/api/telemetry", timeout=2.0) as r:
@@ -116,13 +131,25 @@ def main() -> int:
         print("Gateway did not answer /api/telemetry — is it running?")
         return 1
     last = tel.get("head_nod_joint")
+    # Last resort ordering: telemetry echo > --start > this script's own log.
+    # (A --start far from where a previous session left the servo caused a
+    # 90-degree snap once — the log knows better than a guessed number.)
+    logged = _last_logged_servo()
+    if a.start is not None and logged is not None and abs(a.start - logged) > 5.0:
+        print(f"\nWARNING: --start {a.start:.1f} but this script last commanded "
+              f"servo {logged:.1f}. If the servo hasn't been power-cycled since,"
+              f" the first command would SNAP it {abs(a.start - logged):.0f} "
+              "degrees. Prefer the logged value unless you know better.")
+        if input(f"Use logged {logged:.1f} instead of --start {a.start:.1f}? "
+                 "[Y/n] ").strip().lower() != "n":
+            a.start = logged
     if last is not None and a.start is None:
         cur = 90.0 + float(last.get("angle_deg", 0.0))
         print(f"\nTelemetry says the last COMMANDED nod was servo {cur:.1f} "
               "(command echo, not a sensor).")
     elif a.start is not None:
         cur = float(a.start)
-        print(f"\nStarting from your --start value: servo {cur:.1f}.")
+        print(f"\nStarting from servo {cur:.1f}.")
     else:
         print("\nTelemetry has no nod entry (gateway restarted since the last "
               "command). If the head was parked at the old park (servo 50), "

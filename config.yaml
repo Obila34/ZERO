@@ -893,11 +893,14 @@ head:
   # Eyes-lead-head: the neck holds while the face is within this fraction of the
   # half-frame (the digital crop is the fast 'eye'); beyond it the neck engages.
   engage_frac: 0.1          # neck engages past ~5-7° off-centre (this cam's scale)
-  track_tilt: false         # horizontal-only until the nod is calibrated + verified
-  # Controller-side tilt envelope (belief space), set from nod calibration so
-  # belief can never sit outside what the servo can reach. Unset = ±limit_deg.
-  # tilt_min_deg: -10
-  # tilt_max_deg: 25
+  track_tilt: false         # next switch to flip once typed tilt commands verify
+  # Controller-side tilt envelope (belief space), from the supervised nod
+  # calibration of 2026-08-13: servo 50..140 traversed freely, +servo = UP,
+  # park/home = servo 140 (the user's explicit ceiling-rest choice). tilt 0 =
+  # servo 140, so ALL nod motion is downward from rest ("look up" from home is
+  # a deliberate no-op; lower gateway.nod_offset_deg to win back up-headroom).
+  tilt_min_deg: -90
+  tilt_max_deg: 0
   source_hz: 15             # rate the neck target is pulled from Eyes' gaze
   suppress_lead_s: 0.5      # efference copy: silence novelty while moving
   resettle_dwell_s: 0.4     # re-baseline this long after the neck stops
@@ -912,7 +915,8 @@ head:
     conf: 0.35              # min person confidence (width guard is the real junk filter)
     kp_conf: 0.25           # min keypoint confidence
     min_shoulder_frac: 0.10 # reject detections whose shoulders span < 10% of frame (junk)
-    keypoint: wrist         # "wrist" = hand control; "head" = control with your head (nose)
+    # (no keypoint key: the tracked keypoint is derived from head.input —
+    #  input "hand" tracks the wrist, input "head" tracks the nose)
     lost_s: 1.5             # hand gone this long -> ease the neck back to centre
     mirror: false           # MIRROR control: hand left -> head right, hand right -> head left
     gain: 0.6               # HAND sensitivity: full ~1.6-width hand sweep maps across +/-80
@@ -961,16 +965,15 @@ head:
                             # instead of whipping (slew only exists in belief)
     # Nod mapping: gateway servo = 90 + angle_deg, and the driver posts
     # angle = clamp(nod_sign*tilt + nod_offset_deg, nod_min_deg, nod_max_deg).
-    # So with offset -40: tilt 0 -> servo 50 (the old park/home) and the clamp
-    # keeps servo in 50..90. THESE ARE PRE-CALIBRATION PLACEHOLDERS — the true
-    # safe envelope, home and sign are UNVERIFIED until the supervised run of
-    # scripts/nod_calibrate.py, which prints the values to paste here (it also
-    # prints head.tilt_min_deg/tilt_max_deg — the controller-side envelope).
-    drive_nod: false        # KILL the nod: ZERO never posts it — calibrate first
-    nod_sign: 1.0           # +1 if a larger servo angle looks UP; -1 if DOWN
-    nod_offset_deg: -40
+    # CALIBRATED 2026-08-13 (supervised, log in calibration_nod_log.txt):
+    # servo 50..140 moves freely, larger servo = head UP, user chose servo 140
+    # as both the hard max AND the park. So: tilt 0 -> angle 50 -> servo 140;
+    # "look down 20" -> angle 30 -> servo 120; the clamp floor is servo 50.
+    drive_nod: true         # nod LIVE within the calibrated envelope
+    nod_sign: 1.0           # larger servo angle = head up (confirmed by eye)
+    nod_offset_deg: 50
     nod_min_deg: -40
-    nod_max_deg: 0
+    nod_max_deg: 50
   setpoint:                 # driver: udp — Arm-side reflex/smoothing service
     host: 192.168.150.183
     port: 8099
