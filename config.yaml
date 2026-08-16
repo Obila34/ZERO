@@ -881,19 +881,19 @@ head:
   # spectral 0.78-0.93, settle +0.1s; 800 is smoother still but laggier on a
   # fast hand sweep. 0 restores the old pure-slew behavior exactly.
   max_accel_dps2: 1200
-  input: head               # "face"=track faces | "hand"=hand teleop | "head"=head-motion teleop
+  input: face               # ATTENTION MODE: track faces + social gaze rhythm
+                            # ("hand"/"head" = teleop modes, kept for testing)
   limit_deg: 80             # ± pan envelope: 'completely left/right' = ±80°
   command_dwell_s: 4.0      # a voice turn holds this long, then resumes following ('stop' locks)
-  express: false            # gesture cues in replies + sentence-end look-back
-                            # (audit H3 wiring; gestures are tilt-heavy — turn
-                            # on after the nod is calibrated and driven)
+  express: true             # gesture beats in replies + sentence-end look-back
+                            # (nod live; small dips/turns while speaking)
   home_x: 0.0
   home_y: 0.0
 
   # Eyes-lead-head: the neck holds while the face is within this fraction of the
   # half-frame (the digital crop is the fast 'eye'); beyond it the neck engages.
   engage_frac: 0.1          # neck engages past ~5-7° off-centre (this cam's scale)
-  track_tilt: false         # next switch to flip once typed tilt commands verify
+  track_tilt: true          # tilt follows the face too (nod verified 2026-08-16)
   # Controller-side tilt envelope (belief space), from the supervised nod
   # calibration of 2026-08-13 + live direction check 2026-08-16: servo 50..140
   # traverses freely, and a HIGHER servo tips the GAZE DOWN (the neck rises,
