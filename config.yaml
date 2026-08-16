@@ -1000,13 +1000,41 @@ arms:
     max_hz: 10
     deadband_deg: 0.5
     timeout_s: 1.0
+  # CALIBRATION FILL-IN SHEET. Run scripts/arm_calibrate.py per joint (order
+  # below), then UNCOMMENT the joint's line and replace min/max/home with the
+  # exact numbers the script prints (it prints them in this raw command space
+  # — paste verbatim). A commented/absent joint is INERT. Steppers also need
+  # allow_steppers: true above once their lines are real.
   joints: {}
-    # Fill from calibration, e.g.:
-    #   right_wrist_joint:  {min: -35, max: 35, home: 0}
-    #   right_indexp1_joint: {min: 0, max: 60, home: 0}
+    # -- steppers (run with --stepper; arm at rest; cockpit closed) --
+    # right_bicep_joint:   {min: 0.0, max: 0.0, home: 0.0}
+    # left_bicep_joint:    {min: 0.0, max: 0.0, home: 0.0}
+    # right_elbow_joint:   {min: 0.0, max: 0.0, home: 0.0}
+    # left_elbow_joint:    {min: 0.0, max: 0.0, home: 0.0}
+    # right_up_down_joint: {min: 0.0, max: 0.0, home: 0.0}
+    # left_up_down_joint:  {min: 0.0, max: 0.0, home: 0.0}
+    # right_in_out_joint:  {min: 0.0, max: 0.0, home: 0.0}
+    # left_in_out_joint:   {min: 0.0, max: 0.0, home: 0.0}
+    # -- servos (blocked until the PCA9685 servo-power rail is fixed) --
+    # right_wrist_joint:   {min: 0.0, max: 0.0, home: 0.0}
+    # left_wrist_joint:    {min: 0.0, max: 0.0, home: 0.0}
   gestures: {}
-    # Extra/overriding gestures as keyframes once fingers are calibrated, e.g.:
-    #   open_right_hand:
-    #     - {joints: {right_indexp1_joint: 0, right_middlep1_joint: 0}, s: 0.6}
-    #   close_right_hand:
-    #     - {joints: {right_indexp1_joint: 55, right_middlep1_joint: 55}, s: 0.6}
+    # Templates to uncomment AFTER the joints above are calibrated. Replace
+    # the TODO joint names/angles once you know which joint physically lifts
+    # the arm and which direction is "up" (positive or negative).
+    # raise_right:
+    #   - {joints: {right_up_down_joint: 30}, s: 1.2}   # TODO joint + angle
+    #   - {joints: {right_up_down_joint: 30}, s: 1.5}   # hold raised
+    #   - {joints: {right_up_down_joint: "home"}, s: 1.2}
+    # raise_left:
+    #   - {joints: {left_up_down_joint: 30}, s: 1.2}    # TODO joint + angle
+    #   - {joints: {left_up_down_joint: 30}, s: 1.5}
+    #   - {joints: {left_up_down_joint: "home"}, s: 1.2}
+    # handshake:
+    #   - {joints: {right_up_down_joint: 25, right_elbow_joint: 20}, s: 1.2}
+    #   - {joints: {right_up_down_joint: 25, right_elbow_joint: 20}, s: 2.0}
+    #   - {joints: {right_up_down_joint: "home", right_elbow_joint: "home"}, s: 1.2}
+    # open_right_hand:      # needs finger servos (PCA rail) working
+    #   - {joints: {right_indexp1_joint: 0, right_middlep1_joint: 0}, s: 0.6}
+    # close_right_hand:
+    #   - {joints: {right_indexp1_joint: 55, right_middlep1_joint: 55}, s: 0.6}
