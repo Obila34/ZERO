@@ -1,8 +1,9 @@
 # Head bring-up protocol (one session, ~15 min)
 
-The nod is calibrated (2026-08-13: servo 50–140, larger servo = UP, park =
-max = servo 140, log in `calibration_nod_log.txt`) and the calibrated values
-are live in `config.yaml`. This is the single supervised session that verifies
+The nod is calibrated (2026-08-13: servo 50–140, larger servo = UP, hard max
+servo 140, rest servo 125 — lowered from the ceiling on 2026-08-16 so look-up
+works; log in `calibration_nod_log.txt`) and the calibrated values are live in
+`config.yaml`. This is the single supervised session that verifies
 motion and then progressively lights up the dark features. Run it top to
 bottom; stop at any step that fails and fix before continuing.
 
@@ -26,7 +27,7 @@ bottom; stop at any step that fails and fix before continuing.
 | *(startup)* | head settles at the park (fully raised) |
 | `look down 40 degrees` | clear dip, eases back up after ~4 s |
 | `look down 10 degrees` | small dip, same auto-return |
-| `look up` | says okay, does NOT move (park = ceiling, by design) |
+| `look up` | raises ~15° to the servo-140 ceiling, eases back after ~4 s |
 | `turn left` then `face forward` | pan unregressed, both axes home |
 
 If "look down" moves UP: flip `head.gateway.nod_sign` to -1 — but that
@@ -51,14 +52,13 @@ and recenters when you level out. Vertical range is `hand.tilt_range_deg`
 ## 4. Expression
 
 Set `head.express: true`; restart, converse by voice. Expect small nod/shake
-beats during replies and the look-back at sentence ends. Gestures with upward
-components are clamped at the park — visible ones are the downward beats.
+beats during replies and the look-back at sentence ends. Up-gestures have 15°
+of headroom above the rest pose before the servo-140 ceiling clamps them.
 
 ## 5. Afterwards
 
 - `git add -A` the config changes and commit (the calibrated config is
   currently deployed but uncommitted).
 - `git push` needs GitHub credentials on the head Pi (42+ local commits).
-- Optional widening later: lower `head.gateway.nod_offset_deg` below 50 to
-  rest the head a few degrees under the ceiling and win back up-gestures
-  ("look up", greet up-nod, think look-up) — retest step 1 after.
+- The rest pose is `head.gateway.nod_offset_deg` (35 = servo 125). Raise it
+  toward 50 for a higher rest (less up-headroom) or lower it for more.

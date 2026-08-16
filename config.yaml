@@ -895,12 +895,12 @@ head:
   engage_frac: 0.1          # neck engages past ~5-7° off-centre (this cam's scale)
   track_tilt: false         # next switch to flip once typed tilt commands verify
   # Controller-side tilt envelope (belief space), from the supervised nod
-  # calibration of 2026-08-13: servo 50..140 traversed freely, +servo = UP,
-  # park/home = servo 140 (the user's explicit ceiling-rest choice). tilt 0 =
-  # servo 140, so ALL nod motion is downward from rest ("look up" from home is
-  # a deliberate no-op; lower gateway.nod_offset_deg to win back up-headroom).
-  tilt_min_deg: -90
-  tilt_max_deg: 0
+  # calibration of 2026-08-13: servo 50..140 traverses freely, +servo = UP.
+  # Rest/home = servo 125 (tilt 0), leaving 15° of up-headroom to the servo-140
+  # hard ceiling so "look up" and up-gestures actually move (live-test feedback
+  # 2026-08-16; the original park-at-ceiling made look-up a no-op).
+  tilt_min_deg: -75
+  tilt_max_deg: 15
   source_hz: 15             # rate the neck target is pulled from Eyes' gaze
   suppress_lead_s: 0.5      # efference copy: silence novelty while moving
   resettle_dwell_s: 0.4     # re-baseline this long after the neck stops
@@ -966,12 +966,13 @@ head:
     # Nod mapping: gateway servo = 90 + angle_deg, and the driver posts
     # angle = clamp(nod_sign*tilt + nod_offset_deg, nod_min_deg, nod_max_deg).
     # CALIBRATED 2026-08-13 (supervised, log in calibration_nod_log.txt):
-    # servo 50..140 moves freely, larger servo = head UP, user chose servo 140
-    # as both the hard max AND the park. So: tilt 0 -> angle 50 -> servo 140;
-    # "look down 20" -> angle 30 -> servo 120; the clamp floor is servo 50.
+    # servo 50..140 moves freely, larger servo = head UP. Hard max stays servo
+    # 140 (nod_max 50); rest = servo 125 (offset 35) so tilt 0 -> angle 35 ->
+    # servo 125, "look up" -> up to servo 140, "look down 20" -> servo 105,
+    # clamp floor servo 50.
     drive_nod: true         # nod LIVE within the calibrated envelope
     nod_sign: 1.0           # larger servo angle = head up (confirmed by eye)
-    nod_offset_deg: 50
+    nod_offset_deg: 35
     nod_min_deg: -40
     nod_max_deg: 50
   setpoint:                 # driver: udp — Arm-side reflex/smoothing service
