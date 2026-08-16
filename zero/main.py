@@ -26,6 +26,7 @@ from zero.config import load_config
 from zero.conversation import Conversation
 from zero.events import EventBus
 from zero.factory import (
+    build_arms,
     build_corpus, build_endpointer, build_guests, build_head, build_identity,
     build_learning_loop, build_llm, build_memory, build_perception,
     build_privacy, build_proactive, build_stt, build_tools,
@@ -244,6 +245,7 @@ class Zero:
         # are up. Dark by default (head.enabled=false) so this stays None on a
         # normal run; when on, the default NullDriver still moves nothing.
         self.head = None
+        self.arms = None
         # Conversational expression (gesture cues in replies + the sentence-end
         # look-back). The hooks existed but were never called (audit H3); wired
         # into the playback loop now, still dark until head.express is on.
@@ -410,7 +412,8 @@ class Zero:
             memory=self.memory, events=self.events,
             person_id=person.person_id if person is not None else None,
             person_name=person.name if person is not None else None,
-            extras={"head": getattr(self, "head", None)},   # gaze tool, late-bound
+            extras={"head": getattr(self, "head", None),    # gaze tool, late-bound
+                    "arms": getattr(self, "arms", None)},   # arm tool, late-bound
         )
 
     def _drain_events(self) -> bool:
@@ -544,6 +547,12 @@ class Zero:
             log.warning("head unavailable in text mode: %s", e)
             self.head = None
         try:
+            if self.arms is None:
+                self.arms = build_arms(self.cfg)
+        except Exception as e:
+            log.warning("arms unavailable in text mode: %s", e)
+            self.arms = None
+        try:
             while True:
                 try:
                     text = input("you> ").strip()
@@ -585,6 +594,11 @@ class Zero:
                 self.head.stop()
             except Exception:
                 pass
+        if self.arms is not None:
+            try:
+                self.arms.stop()
+            except Exception:
+                pass
         self._end_conversation()
         self._join_memory_thread()
 
@@ -619,6 +633,13 @@ class Zero:
         except Exception as e:
             log.warning("head subsystem unavailable: %s", e)
             self.head = None
+        # Arm/hand gestures — dark unless arms.enabled, inert unless joints
+        # are calibrated in config. Same do-not-break-startup contract.
+        try:
+            self.arms = build_arms(self.cfg)
+        except Exception as e:
+            log.warning("arm subsystem unavailable: %s", e)
+            self.arms = None
         # Surprise gate (Phase 3): scores world events by prediction error —
         # the unexpected becomes episodes and wakes the narrator. Built here
         # (not __init__) because it needs the eyes to have survived startup.
@@ -652,6 +673,11 @@ class Zero:
             if self.head is not None:
                 try:
                     self.head.stop()
+                except Exception:
+                    pass
+            if self.arms is not None:
+                try:
+                    self.arms.stop()
                 except Exception:
                     pass
             if self.eyes is not None:

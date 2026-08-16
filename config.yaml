@@ -980,3 +980,33 @@ head:
   setpoint:                 # driver: udp — Arm-side reflex/smoothing service
     host: 192.168.150.183
     port: 8099
+
+# Arm/hand gestures (voice-commanded: 'wave', 'raise your arm', 'open your
+# hand'). SHIPS DARK, twice over: arms.enabled gates the whole subsystem, and
+# even enabled, a joint is INERT until it has a calibrated envelope entry in
+# arms.joints (min/max/home in gateway angle_deg command space — find them
+# with the supervised scripts/arm_calibrate.py, small steps, robot watched).
+# Steppers (elbows/biceps/shoulders) have NO encoders and zero at whatever
+# pose the Nano booted in — they stay inert even when calibrated unless
+# allow_steppers is also true. Servo hands first; steppers later, carefully.
+arms:
+  enabled: false            # master switch for the subsystem + voice commands
+  driver: null              # null = record only | http = MOVES THE ROBOT
+  rate_hz: 20               # gesture playback tick
+  max_speed_dps: 60         # per-joint speed cap during playback
+  allow_steppers: false     # keep the geared stepper joints inert
+  gateway:
+    base_url: http://100.67.233.65:5000   # same gateway as the head
+    max_hz: 10
+    deadband_deg: 0.5
+    timeout_s: 1.0
+  joints: {}
+    # Fill from calibration, e.g.:
+    #   right_wrist_joint:  {min: -35, max: 35, home: 0}
+    #   right_indexp1_joint: {min: 0, max: 60, home: 0}
+  gestures: {}
+    # Extra/overriding gestures as keyframes once fingers are calibrated, e.g.:
+    #   open_right_hand:
+    #     - {joints: {right_indexp1_joint: 0, right_middlep1_joint: 0}, s: 0.6}
+    #   close_right_hand:
+    #     - {joints: {right_indexp1_joint: 55, right_middlep1_joint: 55}, s: 0.6}

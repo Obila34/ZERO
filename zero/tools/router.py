@@ -280,6 +280,14 @@ class ToolAwareLLM:
 
             if parse_gaze_command(text) is not None:
                 return self._registry.get("gaze").safe_run({"text": text}, ctx)
+        if self._registry.get("arms") is not None:
+            # Fast lexical arm gestures ('wave', 'raise your right arm',
+            # 'open your hand') — same no-LLM pattern as gaze. High precision;
+            # ambiguous phrasings fall through to the LLM.
+            from zero.arms.commands import parse_arm_command
+
+            if parse_arm_command(text) is not None:
+                return self._registry.get("arms").safe_run({"text": text}, ctx)
         return None
 
     def _forced_websearch(self, text: str) -> str | None:

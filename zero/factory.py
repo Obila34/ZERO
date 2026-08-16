@@ -286,8 +286,33 @@ def build_tools(cfg: Config, llm: LLM, memory, events, context_provider=None):
         from zero.tools.gaze import GazeTool
 
         registry.register(GazeTool())
+    if cfg.get("arms.enabled", False):
+        # Same late-binding pattern via ToolContext.extras['arms'].
+        from zero.tools.arms import ArmTool
+
+        registry.register(ArmTool())
     wrapped = ToolAwareLLM(llm, registry, context_provider=context_provider)
     return wrapped, registry, timers
+
+
+def build_arms(cfg: Config):
+    """Build the arm/hand gesture subsystem, or None when disabled.
+
+    Ships dark (arms.enabled default FALSE), and even when enabled a joint is
+    inert until it carries a calibrated envelope in arms.joints — so turning
+    this on moves nothing until the supervised arm calibration has run."""
+    from zero.utils.logging import get_logger
+
+    log = get_logger("arms")
+    if not cfg.get("arms.enabled", False):
+        return None
+    try:
+        from zero.arms.system import ArmSystem
+
+        return ArmSystem(cfg)
+    except Exception as e:   # never let an optional subsystem break startup
+        log.warning("arms enabled but build failed — running without: %s", e)
+        return None
 
 
 def build_memory(cfg: Config):
