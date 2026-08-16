@@ -62,7 +62,7 @@ def test_centered_face_holds_the_neck():
     # a face centred in frame → the digital crop covers it, neck stays home
     eyes = FakeEyes(win=(640 / 2 - 40, 480 / 2 - 40, 80, 80))
     hs = _sys(eyes)
-    hs.set_state("listening")
+    hs._scheduler.set_state("listening", 999.0)
     for i in range(10):
         hs._source_tick(1000.0 + i * 0.07)
     ax, ay = hs._last_aim
@@ -73,7 +73,7 @@ def test_offcenter_face_engages_the_neck():
     # a face pushed to the right edge → past the engage threshold → neck turns
     eyes = FakeEyes(win=(640 * 0.85, 240 - 40, 80, 80))
     hs = _sys(eyes)
-    hs.set_state("listening")
+    hs._scheduler.set_state("listening", 999.0)
     for i in range(8):
         hs._source_tick(1000.0 + i * 0.07)
     assert abs(hs._last_aim[0]) > 1.0          # the tracker issued a real pan
@@ -83,7 +83,7 @@ def test_thinking_looks_away_open_loop():
     eyes = FakeEyes(win=(640 / 2 - 40, 480 / 2 - 40, 80, 80))
     hs = _sys(eyes)
     hs._last_aim = (0.0, 0.0)
-    hs.set_state("thinking")
+    hs._scheduler.set_state("thinking", 999.0)
     hs._source_tick(1000.0)
     # thinking averts up: the target carries a positive tilt offset. Advance one
     # slew step of the (otherwise unspun) controller to see it commit upward.
