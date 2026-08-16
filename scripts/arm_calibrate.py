@@ -39,6 +39,17 @@ LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
                    "calibration_arm_log.txt")
 
 
+def fetch_offsets(base: str) -> dict:
+    """The gateway's stored zero-offsets (/api/calibration). It ADDS these to
+    every command, so raw angle 0 is NOT 'no motion' for offset joints —
+    right_elbow_joint carries offset 304, a 27,000-step landmine."""
+    try:
+        with urllib.request.urlopen(f"{base}/api/calibration", timeout=2.0) as r:
+            return {k: float(v) for k, v in json.loads(r.read().decode()).items()}
+    except Exception:
+        return {}
+
+
 def post(base: str, joint: str, deg: float, log) -> bool:
     body = json.dumps({"name": joint, "angle_deg": deg,
                        "angle_rad": deg * math.pi / 180.0}).encode()
@@ -59,8 +70,9 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("joint", help="gateway joint name, e.g. right_wrist_joint")
     ap.add_argument("--base-url", default=None)
-    ap.add_argument("--start", type=float, default=0.0,
-                    help="starting angle_deg (default 0 = gateway neutral)")
+    ap.add_argument("--start", type=float, default=None,
+                    help="starting EFFECTIVE degrees (default: servo neutral, "
+                         "or the stepper's boot-pose zero)")
     ap.add_argument("--step", type=float, default=2.0)
     ap.add_argument("--stepper", action="store_true",
                     help="required acknowledgement to touch a stepper joint")
@@ -86,6 +98,20 @@ def main() -> int:
         return 1
     base = base.rstrip("/")
     step = min(abs(a.step), STEP_HARD_CAP)
+    offset = fetch_offsets(base).get(a.joint, 0.0)
+    is_stepper = a.joint in STEPPER_JOINTS
+    # Work in EFFECTIVE degrees (what the hardware sees = angle + offset).
+    # Steppers: effective 0 == the step counter's zero == the pose at the last
+    # Nano reset, so starting there is guaranteed no-motion. Servos: the
+    # offset IS the neutral servo angle, so effective `offset` is the neutral.
+    if a.start is not None:
+        eff = float(a.start)
+    else:
+        eff = 0.0 if is_stepper else offset
+    if offset:
+        print(f"NOTE: gateway adds a stored offset of {offset:+.1f} to this "
+              f"joint; the script compensates (commands are shown in "
+              f"effective degrees, hardware-true).")
 
     print("=" * 72)
     print(f"SUPERVISED CALIBRATION — {a.joint}")
@@ -100,13 +126,17 @@ def main() -> int:
         print("Not confirmed — nothing was moved.")
         return 1
 
-    cur = float(a.start)
+    cur = eff
     log = open(LOG, "a")
     log.write(f"# session {time.strftime('%Y-%m-%d %H:%M:%S')} joint={a.joint}\n")
-    print(f"\nFirst command asserts angle {cur:.1f} — watch for movement.")
+    if is_stepper:
+        print("\nSTEPPER ZERO CHECK: effective 0 = the arm's pose at the last "
+              "gateway restart. If the arm has been moved (cockpit or by hand) "
+              "since, RESTART THE GATEWAY first so zero = the current pose.")
+    print(f"\nFirst command asserts effective {cur:+.1f} — watch for movement.")
     if input("Send it? [y/N] ").strip().lower() != "y":
         return 1
-    if not post(base, a.joint, cur, log):
+    if not post(base, a.joint, cur - offset, log):
         return 1
 
     marks: dict[str, float] = {}
@@ -129,7 +159,7 @@ def main() -> int:
             tgt = marks.get("home", hist[0])
             while abs(cur - tgt) > 0.5:
                 cur += math.copysign(min(step, abs(tgt - cur)), tgt - cur)
-                post(base, a.joint, cur, log)
+                post(base, a.joint, cur - offset, log)
                 time.sleep(0.35)
             break
         elif c == "q":
@@ -143,15 +173,17 @@ def main() -> int:
             print(f"  refused: below your marked min ({lo:+.1f})"); continue
         if hi is not None and nxt > hi + 0.01:
             print(f"  refused: above your marked max ({hi:+.1f})"); continue
-        if post(base, a.joint, nxt, log):
+        if post(base, a.joint, nxt - offset, log):
             cur = nxt
             hist.append(cur)
 
     log.close()
     if {"min", "max", "home"} <= marks.keys():
-        print("\nPaste into config.yaml under arms.joints:\n")
-        print(f"    {a.joint}: {{min: {marks['min']:.1f}, "
-              f"max: {marks['max']:.1f}, home: {marks['home']:.1f}}}")
+        print("\nPaste into config.yaml under arms.joints (raw command space; "
+              "the gateway re-adds its stored offset):\n")
+        print(f"    {a.joint}: {{min: {marks['min'] - offset:.1f}, "
+              f"max: {marks['max'] - offset:.1f}, "
+              f"home: {marks['home'] - offset:.1f}}}")
         if a.joint in STEPPER_JOINTS:
             print("\n(stepper: also set arms.allow_steppers: true — and "
                   "remember these numbers are only valid while boot pose = "
