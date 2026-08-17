@@ -92,6 +92,14 @@ _NOT_A_NAME = {"me", "you", "it", "that", "this", "there", "them", "us", "the",
                "center", "centre", "forward", "ahead", "straight", "front"}
 
 
+# An utterance that names an ARM part is not a gaze command, however much it
+# looks like one: "rotate right bicep" matched the gaze verb + "right" and
+# turned the HEAD instead of the bicep (2026-08-17). The arm parser owns these.
+_ARM_PART = re.compile(
+    r"\b(?:bicep|biceps|elbow|elbows|forearm|shoulder|shoulders|wrist|"
+    r"wrists|finger|fingers|arm|arms)\b", re.IGNORECASE)
+
+
 def parse_gaze_command(text: str) -> dict | None:
     """Return a gaze intent dict or None. Shapes:
         {"kind": "direction", "axis": "pan"|"tilt", "sign": +/-1, "degrees": N}
@@ -102,6 +110,8 @@ def parse_gaze_command(text: str) -> dict | None:
     if not text:
         return None
     t = text.strip()
+    if _ARM_PART.search(t):
+        return None            # names an arm part -> the arm parser's business
 
     # center / face-forward first (most specific)
     if _CENTER.search(t):

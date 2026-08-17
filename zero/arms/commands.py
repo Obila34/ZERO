@@ -33,7 +33,7 @@ _RAISE = re.compile(
 _RAISE_UP = re.compile(r"\bup\b", re.IGNORECASE)
 # "put your arms down", "lower your arm", "arms down", "rest your arms"
 _DOWN = re.compile(
-    rf"\b(?:(?:put|lower|drop|rest)(?:ing)?\s+(?:down\s+)?(?:your|the)\s+"
+    rf"\b(?:(?:put|lower|drop|rest)(?:ing)?\s+(?:down\s+)?(?:your\s+|the\s+)?"
     rf"(?:{_SIDE}\s+)?(?:arm|hand)s?(?:\s+down)?|arms?\s+down)\b",
     re.IGNORECASE)
 _DOWN_WORD = re.compile(r"\b(?:down|lower|drop|rest)\b", re.IGNORECASE)
@@ -79,6 +79,10 @@ _JOINT_RE = re.compile(
     rf"\b(?:your|the)?\s*(?P<side>right|left|both)?\s*"
     rf"(?P<part>{'|'.join(sorted(_PART_JOINT, key=len, reverse=True))})s?\b",
     re.IGNORECASE)
+_BARE_RE = re.compile(
+    rf"^\s*(?:your\s+|the\s+)?(?P<side>right|left|both)?\s*"
+    rf"(?P<part>{'|'.join(sorted(_PART_JOINT, key=len, reverse=True))})s?\s+"
+    rf"(?P<dir>up|down)\b", re.IGNORECASE)
 _DEG_RE = re.compile(r"(?P<deg>\d{1,3}(?:\.\d+)?)\s*(?:deg|degrees?|°)",
                      re.IGNORECASE)
 _SMALL = re.compile(r"\b(?:a\s+(?:bit|little|touch)|slightly|small|tiny)\b",
@@ -97,6 +101,28 @@ def parse_arm_command(text: str) -> dict | None:
     if not text:
         return None
     t = text.strip()
+
+    # Bare "<part> up/down" — no verb, the way people actually talk ("arms up",
+    # "left elbow down"). Checked first: it is unambiguous.
+    b = _BARE_RE.search(t)
+    if b:
+        part = b.group("part").lower()
+        if part not in _PART_JOINT:
+            part = part.rstrip("s")
+        side = (b.group("side") or "right").lower()
+        # "arms up"/"arms down" with no side named means BOTH — a plural part
+        # or the word "both".
+        if b.group("side") is None and b.group(0).lower().find(part + "s") >= 0:
+            side = "both"
+        if part in _GENERIC_PARTS and b.group("dir").lower() == "down":
+            return {"kind": "gesture", "name": "rest"}      # "arms down"
+        sides = ("right", "left") if side == "both" else (side,)
+        deg = float(_DEG_RE.search(t).group("deg")) if _DEG_RE.search(t) else STEP_DEG
+        sign = 1.0 if b.group("dir").lower() == "up" else -1.0
+        suffix = _PART_JOINT[part]
+        return {"kind": "joint",
+                "joints": [f"{s}_{suffix}" for s in sides],
+                "degrees": sign * deg, "part": part, "side": side}
 
     # Direct joint control first: "raise your right elbow" names a specific
     # joint and must not be swallowed by the looser gesture patterns below.

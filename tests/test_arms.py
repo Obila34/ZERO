@@ -403,3 +403,32 @@ def test_speech_beat_still_obeys_estop_and_suppression():
     s._suppress_until = 0.0
     s.estop()
     assert s.express("A perfectly long sentence here", now=1000.0) is None
+
+
+def test_arm_commands_are_not_stolen_by_the_gaze_parser():
+    """2026-08-17: 'rotate right bicep' turned the HEAD, because the gaze
+    parser saw a gaze verb plus 'right'. A typo ('righ') was what made it work,
+    which is how the hijack was spotted."""
+    from zero.head.commands import parse_gaze_command as G
+
+    for phrase in ["rotate right bicep", "rotate left bicep", "raise left arm",
+                   "turn your right shoulder up", "lower right elbow"]:
+        assert G(phrase) is None, phrase          # gaze declines it
+        assert P(phrase) is not None, phrase      # arms take it
+    # and real gaze commands are untouched
+    assert G("turn right")["axis"] == "pan"
+    assert G("look left")["sign"] == -1.0
+    assert G("face forward")["kind"] == "center"
+
+
+def test_bare_part_direction_phrasings():
+    """'arms up' / 'left elbow down' — no verb, the way people actually talk.
+    These parsed as nothing and fell through to the LLM."""
+    assert P("arms up")["joints"] == ["right_up_down_joint",
+                                      "left_up_down_joint"]
+    assert P("left elbow down")["degrees"] < 0
+    assert P("elbow up")["joints"] == ["right_elbow_joint"]
+    assert P("both arms up")["side"] == "both"
+    # a limb sent down still means rest, however it is phrased
+    assert P("arms down")["name"] == "rest"
+    assert P("drop left arm")["name"] == "rest"

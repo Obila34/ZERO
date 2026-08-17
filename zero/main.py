@@ -586,12 +586,24 @@ class Zero:
                 self._corpus_log.append((None, "user", text))
                 self._t_reply_start = time.monotonic()
                 parts, first = [], True
-                for chunk in self.llm.stream(self.convo.messages()):
+                # Same degeneracy guard the voice path uses. Without it a
+                # collapsed reply ("thought thought thought...") printed 50+
+                # lines into the terminal (2026-08-17); text mode deserves the
+                # same protection as the room does.
+                import threading as _th
+                _stop = _th.Event()
+                _stream = self._guard_degenerate(
+                    self.llm.stream(self.convo.messages()), _stop)
+                for chunk in _stream:
                     if first and chunk.strip():
                         print(f"  [first token: {time.monotonic()-self._t_reply_start:.2f}s]")
                         first = False
                     parts.append(chunk)
                 reply = "".join(parts).strip()
+                if self._degenerate:
+                    self._degenerate = False
+                    reply = ""
+                    print("zero> (reply collapsed into repetition — dropped)\n")
                 if reply:
                     print(f"zero> {reply}\n")
                     self.convo.add_assistant(reply)
