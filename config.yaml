@@ -1053,6 +1053,10 @@ arms:
   min_gesture_gap_s: 12     # floor between gestures. Most turns should carry
                             # NO gesture — hands moving every sentence read as
                             # nervous, not alive. Lower for a livelier robot.
+  # Per-joint direction: +1 means "raise" moves that joint positively. Flip a
+  # joint to -1 if it turns out to move the opposite way — config, not code.
+  joint_sign: {}
+    # right_elbow_joint: -1
   allow_pointing: false     # honour [point_left]/[point_right] only when
                             # perception can actually ground a target. Off
                             # until pointing is aimed against real bearings —

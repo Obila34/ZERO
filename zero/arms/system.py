@@ -104,6 +104,10 @@ class ArmSystem:
         self._last_gesture_t = 0.0
         self._min_gap_s = float(cfg.get("arms.min_gesture_gap_s", 12.0))
         self._can_point = bool(cfg.get("arms.allow_pointing", False))
+        # Per-joint direction correction: +1 means the spoken verb's direction
+        # ("raise") matches the joint's positive rotation. Flip to -1 for any
+        # joint that turns out to move the opposite way — config, not code.
+        self._joint_sign = dict(cfg.get("arms.joint_sign") or {})
         self._gen = 0                       # bumps to preempt a running gesture
         self._lock = threading.Lock()
         self._player: threading.Thread | None = None
@@ -121,6 +125,47 @@ class ArmSystem:
             if joints and joints <= set(self._joints):
                 out.append(name)
         return sorted(out)
+
+    def move_joint(self, joints, degrees: float, *, relative: bool = True) -> list:
+        """Drive named joints by (or to) an angle — the voice path for "raise
+        your right elbow". Returns the joints actually moved, so the caller can
+        say honestly what happened; a joint with no calibrated envelope is
+        skipped rather than silently ignored.
+
+        `degrees` is in the operator's frame: positive = the direction the
+        spoken verb asked for ("raise"). Which way that is on the metal is
+        per-joint, so arms.joint_sign flips one without touching code — the
+        same pattern the nod needed.
+        """
+        if isinstance(joints, str):
+            joints = [joints]
+        if self._estop:
+            return []
+        targets, moved = {}, []
+        for name in joints:
+            spec = self._joints.get(name)
+            if spec is None:
+                log.info("arms: %s has no calibrated envelope — not moved", name)
+                continue
+            sign = float(self._joint_sign.get(name, 1.0))
+            want = float(degrees) * sign
+            base = self._pose.get(name, spec.home_deg)
+            targets[name] = spec.clamp(base + want if relative else want)
+            moved.append(name)
+        if not targets:
+            return []
+        with self._lock:
+            self._gen += 1
+            gen = self._gen
+        self._player = threading.Thread(
+            target=self._play, args=("move", [(targets, 1.0)], gen),
+            name="arm-move", daemon=True)
+        self._player.start()
+        return moved
+
+    def joint_pose(self) -> dict:
+        """Current commanded angle per calibrated joint (effective degrees)."""
+        return {k: round(v, 1) for k, v in self._pose.items()}
 
     def set_hand_state(self, left: str = "free", right: str = "free") -> None:
         """Mark a hand occupied (holding something) so no gesture uses it."""

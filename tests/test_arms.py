@@ -30,8 +30,11 @@ def test_wave_and_sides():
 
 
 def test_raise_and_lower():
-    assert P("raise your right arm")["name"] == "raise_right"
-    assert P("lift your left hand")["name"] == "raise_left"
+    # "raise your arm/hand" drives the shoulder-lift joint directly — there is
+    # no raise_* gesture, so a joint move is what can actually happen.
+    assert P("raise your right arm")["joints"] == ["right_up_down_joint"]
+    assert P("lift your left hand")["joints"] == ["left_up_down_joint"]
+    # but a limb sent down with no amount means "back to rest"
     assert P("put your arms down")["name"] == "rest"
     assert P("lower your arm")["name"] == "rest"
     assert P("arms down")["name"] == "rest"
@@ -311,3 +314,61 @@ def test_limit_frac_shrinks_the_envelope_around_home():
     j = load_joints(FakeCfg(cfg))["right_elbow_joint"]
     assert j.min_deg == -45.0 and j.max_deg == 10.0
     assert j.home_deg == 0.0
+
+
+# ── direct joint control by voice ───────────────────────────────────────────
+
+def test_joint_commands_parse_with_side_direction_and_amount():
+    r = P("raise your right elbow")
+    assert r["kind"] == "joint" and r["joints"] == ["right_elbow_joint"]
+    assert r["degrees"] > 0
+    assert P("bend your left elbow 20 degrees")["degrees"] == -20.0
+    assert P("lower your arm a bit")["degrees"] == -6.0
+    assert P("raise both shoulders")["joints"] == ["right_up_down_joint",
+                                                   "left_up_down_joint"]
+    # ordinary speech still never moves an arm
+    for phrase in ["raise the boat by two feet", "open the window",
+                   "hand me the cup", "close the door"]:
+        assert P(phrase) is None, phrase
+
+
+def test_move_joint_is_relative_clamped_and_reports_what_moved():
+    s = _armsys()
+    moved = s.move_joint("right_elbow_joint", 10.0)
+    assert moved == ["right_elbow_joint"]
+    s._player.join(timeout=2.0)
+    assert s.joint_pose()["right_elbow_joint"] == 10.0
+    s.move_joint("right_elbow_joint", 10.0)      # relative: adds to the pose
+    s._player.join(timeout=2.0)
+    assert s.joint_pose()["right_elbow_joint"] == 20.0
+    s.move_joint("right_elbow_joint", 9999.0)    # clamped to the envelope
+    s._player.join(timeout=2.0)
+    assert s.joint_pose()["right_elbow_joint"] == 40.0
+
+
+def test_uncalibrated_joint_is_reported_not_silently_dropped():
+    s = _armsys()
+    assert s.move_joint("left_bicep_joint", 10.0) == []   # not in the fixture
+
+
+def test_joint_sign_flips_direction_without_code_change():
+    s = _armsys({"arms.joint_sign": {"right_elbow_joint": -1.0}})
+    s.move_joint("right_elbow_joint", 10.0)
+    s._player.join(timeout=2.0)
+    assert s.joint_pose()["right_elbow_joint"] == -10.0
+
+
+def test_tool_moves_a_named_joint():
+    from zero.tools.arms import ArmTool
+    from zero.tools.base import ToolContext
+
+    s = _armsys()
+    ctx = ToolContext(extras={"arms": s})
+    tool = ArmTool()
+    assert "right elbow up" in tool.run({"text": "raise your right elbow"}, ctx)
+    s._player.join(timeout=2.0)
+    # the LLM's structured form
+    assert "elbow down" in tool.run(
+        {"part": "elbow", "side": "right", "degrees": -10}, ctx)
+    s._player.join(timeout=2.0)
+    assert "don't have a" in tool.run({"part": "tail"}, ctx)

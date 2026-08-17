@@ -5,13 +5,21 @@ an arm ('wave goodbye to Sam for me' is a request to speak, but a bare 'wave'
 is a request to move). Anything ambiguous returns None and falls through to
 the LLM, which can still call the arm tool.
 
-Shapes returned:  {"kind": "gesture", "name": "<gesture>"}  or None.
+Shapes returned:
+    {"kind": "gesture", "name": "<gesture>"}
+    {"kind": "joint", "joints": [...], "degrees": +/-N, "part": ..., "side": ...}
+    None
 """
 from __future__ import annotations
 
 import re
 
 _SIDE = r"(?P<side>right|left)"
+
+# Default magnitudes for a joint move with no explicit degrees.
+STEP_DEG = 15.0     # a plain "raise your elbow"
+SMALL_DEG = 6.0     # "a bit", "slightly"
+FULL_DEG = 999.0    # "all the way" — the envelope clamps it to the real stop
 
 # "wave" as an imperative — short utterances or explicit "wave your hand".
 _WAVE = re.compile(
@@ -40,6 +48,44 @@ _SHAKE = re.compile(
 _WAVE_MAX_WORDS = 5     # a bare "wave"/"wave your hand" is a command;
                         # "wave goodbye to everyone at the door" is not
 
+# ── direct joint control ────────────────────────────────────────────────────
+# "raise your right elbow", "bend your left elbow 20 degrees", "lower your arm
+# a bit". Spoken body-part words map onto gateway joints; the in/out pair and
+# the wrists have no mapping at all, so they can't be driven even by name.
+_PART_JOINT = {
+    "elbow": "elbow_joint",
+    "forearm": "elbow_joint",
+    "shoulder": "up_down_joint",
+    "arm": "up_down_joint",
+    "bicep": "bicep_joint",
+    "biceps": "bicep_joint",
+    "upper arm": "bicep_joint",
+    "hand": "up_down_joint",     # "raise your hand" = lift the whole arm
+}
+# "arm"/"hand" name a limb, not a joint. Sent DOWN with no stated amount they
+# mean "go back to rest", not "nudge 15 degrees" — so those fall through to the
+# rest gesture. A specific joint, or any explicit amount, is a real joint move.
+_GENERIC_PARTS = frozenset({"arm", "hand"})
+# Verb -> direction. "bend"/"curl" close the joint, "straighten"/"extend" open
+# it; which way the metal actually turns is per-joint calibration, corrected
+# with arms.joint_sign rather than by editing this table.
+_UP_VERB = re.compile(r"\b(?:raise|rais(?:e|ing)|lift(?:ing)?|up|straighten|"
+                      r"extend|open)\b", re.IGNORECASE)
+_DOWN_VERB = re.compile(r"\b(?:lower|drop(?:ping)?|down|bend|curl|close|"
+                        r"fold|tuck)\b", re.IGNORECASE)
+_JOINT_RE = re.compile(
+    r"\b(?:move|turn|rotate|raise|rais(?:e|ing)|lift(?:ing)?|lower|drop|bend|"
+    r"curl|straighten|extend|fold|tuck|put)\w*\b[^.?!]*?"
+    rf"\b(?:your|the)?\s*(?P<side>right|left|both)?\s*"
+    rf"(?P<part>{'|'.join(sorted(_PART_JOINT, key=len, reverse=True))})s?\b",
+    re.IGNORECASE)
+_DEG_RE = re.compile(r"(?P<deg>\d{1,3}(?:\.\d+)?)\s*(?:deg|degrees?|°)",
+                     re.IGNORECASE)
+_SMALL = re.compile(r"\b(?:a\s+(?:bit|little|touch)|slightly|small|tiny)\b",
+                    re.IGNORECASE)
+_FULL = re.compile(r"\b(?:all\s+the\s+way|fully|completely|max(?:imum)?|"
+                   r"as\s+far\s+as\s+you\s+can)\b", re.IGNORECASE)
+
 
 def _side(m, default="right") -> str:
     s = (m.groupdict().get("side") or default)
@@ -51,6 +97,37 @@ def parse_arm_command(text: str) -> dict | None:
     if not text:
         return None
     t = text.strip()
+
+    # Direct joint control first: "raise your right elbow" names a specific
+    # joint and must not be swallowed by the looser gesture patterns below.
+    m = _JOINT_RE.search(t)
+    if m:
+        part = m.group("part").lower()
+        if part not in _PART_JOINT:           # spoken plural ("shoulders")
+            part = part.rstrip("s")
+        up, down = bool(_UP_VERB.search(t)), bool(_DOWN_VERB.search(t))
+        dm = _DEG_RE.search(t)
+        full, small = bool(_FULL.search(t)), bool(_SMALL.search(t))
+        explicit = bool(dm) or full or small
+        # A limb sent DOWN with no stated amount means "back to rest", so it
+        # falls through to the rest gesture instead of nudging a joint.
+        if not (part in _GENERIC_PARTS and down and not up and not explicit):
+            if dm:
+                amount = float(dm.group("deg"))
+            elif full:
+                amount = FULL_DEG
+            elif small:
+                amount = SMALL_DEG
+            else:
+                amount = STEP_DEG             # "rotate your bicep": no
+            sign = -1.0 if (down and not up) else 1.0   # direction given, so
+            side = (m.group("side") or "right").lower()  # move it positively
+            sides = ("right", "left") if side == "both" else (side,)
+            suffix = _PART_JOINT[part]
+            return {"kind": "joint",
+                    "joints": [f"{s}_{suffix}" for s in sides],
+                    "degrees": sign * amount,
+                    "part": part, "side": side}
 
     m = _HAND.search(t)
     if m:

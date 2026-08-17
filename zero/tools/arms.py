@@ -7,7 +7,7 @@ never a silent success.
 """
 from __future__ import annotations
 
-from zero.arms.commands import parse_arm_command
+from zero.arms.commands import _PART_JOINT, parse_arm_command
 from zero.tools.base import Tool, ToolContext
 
 _SPOKEN = {
@@ -26,24 +26,49 @@ _SPOKEN = {
 
 class ArmTool(Tool):
     name = "arms"
-    description = ("Move ZERO's arms or hands with a named gesture. Use for "
-                   "'wave', 'raise your arm', 'open/close your hand', "
-                   "'arms down'.")
+    description = ("Move ZERO's arms. Either a named gesture ('wave', 'arms "
+                   "down') or one joint via part/side/degrees ('raise your "
+                   "right elbow').")
     parameters = {
         "gesture": "one of: wave_right | wave_left | raise_right | raise_left "
                    "| open_right_hand | close_right_hand | open_left_hand | "
                    "close_left_hand | handshake | rest",
+        "part": "to move one joint instead: elbow | shoulder | arm | bicep",
+        "side": "which arm for `part`: right | left | both (default right)",
+        "degrees": "how far to move `part`; negative lowers/bends (default 15)",
     }
 
     def run(self, args: dict, ctx: ToolContext) -> str:
         arms = (ctx.extras or {}).get("arms")
         if arms is None:
             return "I can't move my arms right now."
+        cmd = None
         if args.get("text"):
             cmd = parse_arm_command(str(args["text"]))
-            name = cmd["name"] if cmd else None
-        else:
-            name = str(args.get("gesture", "")).strip().lower() or None
+        elif args.get("part"):
+            part = str(args["part"]).strip().lower()
+            suffix = _PART_JOINT.get(part)
+            if suffix is None:
+                return f"I don't have a {part} I can move."
+            side = str(args.get("side", "right")).strip().lower()
+            sides = ("right", "left") if side == "both" else (side,)
+            try:
+                deg = float(args.get("degrees", 15.0))
+            except (TypeError, ValueError):
+                deg = 15.0
+            cmd = {"kind": "joint", "part": part, "side": side,
+                   "degrees": deg,
+                   "joints": [f"{s}_{suffix}" for s in sides]}
+        if cmd is not None and cmd.get("kind") == "joint":
+            moved = arms.move_joint(cmd["joints"], cmd["degrees"])
+            if not moved:
+                return (f"I can't move my {cmd['part']} yet — that joint isn't "
+                        "calibrated.")
+            way = "up" if cmd["degrees"] >= 0 else "down"
+            which = ("" if cmd["side"] == "both" else f"{cmd['side']} ")
+            return f"Okay, moving my {which}{cmd['part']} {way}."
+        name = (cmd["name"] if cmd else
+                (str(args.get("gesture", "")).strip().lower() or None))
         if not name:
             return "I didn't catch which gesture you want."
         if not arms.play(name):
