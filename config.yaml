@@ -753,6 +753,14 @@ vision:
     # the others are metadata and fail to open. If 0 ever gives no frames on a
     # re-enumeration, try 2 (the BRIO's second capture node).
   camera:
+    # The BRIO browned out mid-session on 2026-08-17 and came back as
+    # /dev/video1, which killed the run because index 0 was pinned. `prefer`
+    # hunts the camera by NAME under /dev/v4l/by-id (survives re-enumeration);
+    # `device` pins an exact path; index is the last resort. The capture loop
+    # also re-opens (and re-resolves) when frames stop, not only when they
+    # never started.
+    prefer: Logitech_BRIO
+    device: ""
     index: 0
     width: 640 # stream geometry — small so YOLO11n keeps up on the Pi
     height: 480
@@ -903,6 +911,10 @@ head:
   # Eyes-lead-head: the neck holds while the face is within this fraction of the
   # half-frame (the digital crop is the fast 'eye'); beyond it the neck engages.
   engage_frac: 0.1          # neck engages past ~5-7° off-centre (this cam's scale)
+  face_stale_s: 0.7         # the attention window FREEZES where a face was last
+                            # seen; past this long with no actual detection the
+                            # head stops treating it as a target and eases home
+                            # instead of chasing a ghost to its limit.
   track_tilt: true          # tilt follows the face too (nod verified 2026-08-16)
   # Controller-side tilt envelope (belief space), matching the 2026-08-17
   # recalibration: rest (tilt 0) = servo 133.4 and the only travel is downward

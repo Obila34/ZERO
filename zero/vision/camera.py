@@ -23,7 +23,16 @@ log = get_logger("vision.camera")
 
 class CameraStream:
     def __init__(self, index: int = 0, width: int = 640, height: int = 480,
-                 request_fps: int = 30, mjpg: bool = True):
+                 request_fps: int = 30, mjpg: bool = True,
+                 device: str = "", prefer: str = ""):
+        # A USB camera that browns out re-enumerates under a NEW node: the BRIO
+        # went /dev/video0 -> /dev/video1 mid-session on 2026-08-17 and the run
+        # died with ENODEV because the index was pinned. `device` is an explicit
+        # path (a /dev/v4l/by-id/... symlink survives re-enumeration), `prefer`
+        # is a case-insensitive substring of the camera's name to hunt for when
+        # the configured node isn't there. Index stays the last resort.
+        self._device = str(device or "")
+        self._prefer = str(prefer or "")
         self._index = int(index)
         self._width = int(width)
         self._height = int(height)
@@ -56,15 +65,36 @@ class CameraStream:
             raise self._open_error
         return self
 
+    def _resolve_target(self):
+        """What to hand VideoCapture: an explicit path, a by-id symlink for the
+        preferred camera, or the plain index. Re-evaluated on every open, so a
+        re-enumerated camera is picked up on reconnect instead of failing."""
+        import glob
+        import os
+
+        if self._device and os.path.exists(self._device):
+            return self._device
+        if self._prefer:
+            want = self._prefer.lower().replace(" ", "_")
+            for link in sorted(glob.glob("/dev/v4l/by-id/*video-index0")):
+                if want in os.path.basename(link).lower():
+                    log.info("camera: matched %r -> %s", self._prefer, link)
+                    return link
+        if self._device:
+            log.warning("camera: %s is gone — falling back to index %d",
+                        self._device, self._index)
+        return self._index
+
     def _open(self):
         import cv2
 
         backend = cv2.CAP_V4L2 if sys.platform.startswith("linux") else cv2.CAP_ANY
-        cap = cv2.VideoCapture(self._index, backend)
+        target = self._resolve_target()
+        cap = cv2.VideoCapture(target, backend)
         if not cap.isOpened():
             raise RuntimeError(
-                f"Could not open camera index {self._index}. Check the USB "
-                f"connection and that nothing else holds /dev/video{self._index}."
+                f"Could not open camera {target!r}. Check the USB connection "
+                f"and that nothing else holds it."
             )
         # MJPG first: USB webcams (e.g. the BRIO) often can't sustain raw YUYV at
         # 640x480/30, so read() returns nothing. MJPG is compressed and reliable.
@@ -96,19 +126,26 @@ class CameraStream:
             ok, frame_bgr = cap.read()
             if not ok or frame_bgr is None:
                 fails += 1
-                # If the device won't deliver frames shortly after opening — usually
-                # because a previous run left it busy (V4L2 recovers slowly after a
-                # hard kill) — close and re-open to self-heal. Retry a few times.
-                if not got_any and fails in (100, 300, 700, 1500):
-                    log.warning("camera %d: no frames yet (x%d) — re-opening...",
-                                self._index, fails)
+                # Re-open to self-heal, in two situations: no frames shortly
+                # after opening (a previous run left the device busy — V4L2
+                # recovers slowly after a hard kill), OR frames STOPPED after
+                # working, which is what a USB brown-out looks like. The second
+                # case used to be fatal: the node re-enumerated, this loop spun
+                # on a dead handle forever, and the run went blind (2026-08-17).
+                retry_at = ((100, 300, 700, 1500) if not got_any
+                            else (60, 200, 600, 1400, 3000))
+                if fails in retry_at:
+                    log.warning("camera: %d failed grabs (%s) — re-opening...",
+                                fails, "never delivered" if not got_any
+                                else "stopped delivering")
                     try:
                         cap.release()
                         time.sleep(0.3)
-                        cap = self._open()
+                        cap = self._open()      # re-resolves the device node
                         self._capture = cap
+                        log.info("camera re-opened")
                     except Exception as e:
-                        log.warning("camera %d re-open failed: %s", self._index, e)
+                        log.warning("camera re-open failed: %s", e)
                         time.sleep(0.5)
                 time.sleep(0.005)  # transient grab failure: back off and retry
                 continue
@@ -124,12 +161,27 @@ class CameraStream:
                 self._frame_id += 1
 
     def read(self):
-        """Return the latest RGB frame (a copy), or None if none yet."""
+        """Return the latest RGB frame (a copy), or None if none yet.
+
+        NOTE: this ADVANCES the shared read cursor, so read_new() will block
+        until the next grab. Extra consumers should use peek() instead.
+        """
         with self._lock:
             if self._frame is None:
                 return None
             self._last_read_id = self._frame_id
             return self._frame.copy()
+
+    def peek(self):
+        """The latest RGB frame WITHOUT touching the read cursor.
+
+        For side consumers (face tracking, teleop) that must not starve the
+        detection loop: read() marks the frame consumed, so a second reader
+        calling it in a tight loop left read_new() waiting out its whole
+        timeout every pass — perception ran at a crawl (2026-08-17).
+        """
+        with self._lock:
+            return None if self._frame is None else self._frame.copy()
 
     def read_new(self, timeout: float = 1.0):
         """Block up to ``timeout`` seconds for a frame newer than the last read."""

@@ -491,6 +491,22 @@ class Eyes:
         crop to identity and the VLM keyframes."""
         return self._framer.window if self._framer is not None else None
 
+    def attention_age(self) -> float | None:
+        """Seconds since a face was last actually DETECTED behind the attention
+        window, or None when there is no framer / it has never seen a face.
+
+        The window itself freezes in place when the face is lost, so this is the
+        only way a consumer can tell a live target from a ghost. The head uses
+        it to stop chasing a face that has gone (2026-08-17: a frozen window
+        wound the pan to its ±80° limit while the frame error never changed).
+        """
+        if self._framer is None:
+            return None
+        t = self._framer.last_face_t
+        if not t:
+            return None
+        return max(0.0, time.time() - t)
+
     def current_frame(self):
         """Latest camera frame (RGB copy), or None if nothing has been seen yet.
         Used by identity (face matching) and learning (object crops)."""
@@ -500,8 +516,11 @@ class Eyes:
         """Freshest frame straight from the camera thread (RGB copy), bypassing
         the detection loop's scene snapshot. The scene frame stalls when remote
         detection retries on backoff; real-time consumers (hand teleoperation)
-        need the live camera feed, which runs at 30 fps on its own thread."""
-        return self._camera.read()
+        need the live camera feed, which runs at 30 fps on its own thread.
+
+        peek(), not read(): this is a SIDE consumer, and marking frames consumed
+        here starves the detection loop's read_new()."""
+        return self._camera.peek()
 
     def _with_learned(self, snap) -> list:
         """Detections with learned-name overrides — from the background cache,
@@ -537,8 +556,8 @@ class Eyes:
         while not self._stop.is_set():
             t0 = time.monotonic()
             try:
-                frame = self._camera.read()
-                if frame is not None:
+                frame = self._camera.peek()   # peek: never steal the
+                if frame is not None:         # detection loop's next frame
                     self._framer.update(frame, time.time())
             except Exception as e:
                 log.debug("face track tick failed: %s", e)

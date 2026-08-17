@@ -178,3 +178,37 @@ def test_accel_profile_converges_without_overshoot():
     assert abs(xs[-1] - 40.0) < 1e-6          # converged exactly
     # velocity ramps: the first tick moves far less than the slew ceiling
     assert xs[0] <= 1200.0 * dt * dt + 1e-9
+
+
+def test_saturation_resets_on_a_constant_error_at_the_limit():
+    """The runaway seen live 2026-08-17: a frozen target holds the frame error
+    exactly constant while the aim sits at the limit. The old guard only fired
+    on a GROWING error, so nothing ever broke the loop."""
+    from zero.head.tracker import FaceTracker
+
+    class StubCtl:
+        """A neck that is always exactly where it was told to be, so the
+        tracker's settle gate is satisfied and the servo logic is isolated."""
+        def __init__(self):
+            self._p = (80.0, 0.0)
+
+        @property
+        def position(self):
+            return self._p
+
+        def set_target(self, x, y):
+            self._p = (x, y)
+
+    import time
+
+    c = StubCtl()
+    # sat_reset_after_s is small because update() reads the real monotonic
+    # clock itself — the loop below has to burn actual wall time.
+    t = FaceTracker(c, max_offset_deg=80.0, deadband=0.01, settle_delay_s=0.0,
+                    sat_reset_after_s=0.05, lead_s=0.0)
+    t._tx, t._ty = 80.0, 0.0                   # already pinned at the limit
+    face = (600.0, 240.0, 60, 60)              # same face every tick = frozen
+    for _ in range(30):
+        t.update(face, 640, 480)
+        time.sleep(0.005)
+    assert abs(t.aim[0]) < 80.0, "saturation reset never fired on a flat error"

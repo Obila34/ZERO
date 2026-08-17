@@ -155,3 +155,33 @@ def test_hand_tick_vertical_channel_gated_and_clamped():
     hs._hand.value = (0.0, 100.0, 0.9)    # absurd y still clamped to the window
     hs._hand_tick(now=0.0)
     assert hs._last_aim[1] == 25.0
+
+
+def test_stale_face_window_is_not_chased():
+    """A frozen attention window must not read as a live target (2026-08-17:
+    the head wound to its ±80° limit chasing a face that had gone)."""
+    eyes = FakeEyes(win=(600, 400, 80, 80))     # far off-centre -> would engage
+    hs = _sys(eyes, over={"head.face_stale_s": 0.7})
+    hs._scheduler.set_state("listening", 999.0)
+
+    eyes.attention_age = lambda: 0.1            # face seen 100 ms ago = live
+    for i in range(6):
+        hs._source_tick(1000.0 + i * 0.07)
+    assert hs._dbg["branch"] == "engage"
+    live_aim = hs._last_aim[0]
+    assert abs(live_aim) > 1.0                  # it did try to follow
+
+    eyes.attention_age = lambda: 3.0            # no detection for 3 s = ghost
+    for i in range(6):
+        hs._source_tick(1001.0 + i * 0.07)
+    assert hs._dbg["branch"] == "stale-face"    # stops chasing
+
+
+def test_missing_attention_age_falls_back_to_live():
+    """Eyes without the freshness signal must still track (old behaviour)."""
+    eyes = FakeEyes(win=(600, 400, 80, 80))
+    hs = _sys(eyes)
+    hs._scheduler.set_state("listening", 999.0)
+    for i in range(6):
+        hs._source_tick(1000.0 + i * 0.07)
+    assert hs._dbg["branch"] == "engage"

@@ -106,6 +106,9 @@ class HeadSystem:
         # this fraction of the half-frame — the digital crop (the 'eye') covers
         # it. Beyond it, the neck engages. ~0.2 ≈ 15° at a 35° half-FOV.
         self._engage_frac = float(cfg.get("head.engage_frac", 0.2))
+        # How long the attention window may go without a real face detection
+        # before the head stops treating it as a target (see _source_tick).
+        self._face_stale_s = float(cfg.get("head.face_stale_s", 0.7))
         # When false, the neck tracks horizontally only — the vertical offset is
         # ignored so a persistent low/high face (camera-mount offset the nod can't
         # fix) can't keep the tracker engaged and wind the tilt up.
@@ -439,9 +442,22 @@ class HeadSystem:
         eyes = self._eyes
         win = eyes.attention() if eyes is not None else None
         frame = eyes.current_frame() if eyes is not None else None
-        if win is None or frame is None:
+        # A held window is not a face. Eyes freezes the attention window where
+        # the face was last seen, and treating that as a live target made the
+        # head chase a ghost all the way to its limit — the frame error never
+        # shrank because nothing was there to re-centre (2026-08-17). Past
+        # face_stale_s with no detection, treat it as "no face" and ease home.
+        age = None
+        if eyes is not None:
+            try:
+                age = eyes.attention_age()
+            except Exception:
+                age = None
+        stale = age is not None and age > self._face_stale_s
+        if win is None or frame is None or stale:
             self._dbg["nowin"] += 1
-            self._dbg["branch"] = "no-win" if win is None else "no-frame"
+            self._dbg["branch"] = ("stale-face" if stale else
+                                   "no-win" if win is None else "no-frame")
             self._tracker.update(None, 0, 0)     # scan / ease home
             self._last_aim = self._tracker.aim
             return

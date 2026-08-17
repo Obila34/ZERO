@@ -291,6 +291,12 @@ class FaceTracker:
             return                               # HOLD the current aim
         if now - self._settle_t < self._settle_delay:
             return                               # reached; let the neck + camera settle
+        if now < self._sat_pause_until:
+            # Post-saturation settle. This used to guard only the saturation
+            # bookkeeping at the end of update(), so corrections kept flowing
+            # and the aim walked straight back to the limit it had just been
+            # rescued from — wind up, snap home, wind up again. Hold for real.
+            return
         if ex == 0.0 and ey == 0.0:
             return                               # centred (deadband/hysteresis) → hold
         self._tx = self._clamp(base_x + self._pan_sign  * self._kp_pan  * ex * self._hfov_pan  * 2.0)
@@ -307,8 +313,14 @@ class FaceTracker:
         # problem persists.
         clamped = (abs(self._tx) >= self._max - 0.1
                    or abs(self._ty) >= self._max - 0.1)
-        growing = (abs(ex) > self._prev_ex_abs + 1e-3
-                   or abs(ey) > self._prev_ey_abs + 1e-3)
+        # NOT-SHRINKING, not merely growing. The original test only fired when
+        # the error was getting worse, so the commonest runaway slipped past it:
+        # a FROZEN target (face lost, window held) holds the error dead
+        # constant while the head walks to the limit — measured 2026-08-17 as
+        # ex pinned at +0.203 across a 0°->80° sweep, with no reset. Anything
+        # that isn't actually converging counts as a fight now.
+        growing = (abs(ex) > self._prev_ex_abs - 1e-3
+                   or abs(ey) > self._prev_ey_abs - 1e-3)
         self._prev_ex_abs = abs(ex)
         self._prev_ey_abs = abs(ey)
         if now < self._sat_pause_until:

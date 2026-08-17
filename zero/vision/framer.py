@@ -58,6 +58,20 @@ class FaceFramer:
         self._lock = threading.Lock()
         self._window: tuple[int, int, int, int] | None = None
         self._primary_tid: int | None = None
+        # When the face is lost the window FREEZES in place (below), which is
+        # right for a crop but a trap for the neck: the head tracker cannot
+        # tell a held window from a live one, so it kept correcting toward a
+        # face that had gone and wound the pan to its limit (2026-08-17). This
+        # records when a face was last actually DETECTED, so callers can tell
+        # a live target from a ghost.
+        self._last_face_t = 0.0
+
+    @property
+    def last_face_t(self) -> float:
+        """Timestamp (same clock as update()'s `now`) of the last frame in
+        which a face was actually detected; 0.0 if never."""
+        with self._lock:
+            return self._last_face_t
 
     @property
     def window(self) -> tuple[int, int, int, int] | None:
@@ -92,6 +106,9 @@ class FaceFramer:
                 self._window = self._clamp(W // 2, H // 2, win_w, win_h, W, H)
 
         faces = self._detector.detect_faces(frame_rgb)
+        if faces:
+            with self._lock:
+                self._last_face_t = now
         dets = [_FaceDet("face", tuple(bbox), 1.0, pts) for bbox, pts in faces]
         self._tracker.update(dets, now)
         primary = self._pick_primary()
