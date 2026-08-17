@@ -275,7 +275,13 @@ class VoiceOrchestrator:
     def synthesize_stream(self, text: str):
         """Yield audio chunks as they're produced (real streaming for Orpheus;
         the Piper path falls back to one chunk after splicing cue clips)."""
-        text = text.strip()
+        # Gesture cues are for the arms, never for the voice. They must die
+        # here, at the one point every engine passes through: the Piper path
+        # synthesises an unrecognised [cue] as a WORD, so ZERO would say
+        # "wave" out loud instead of waving.
+        from zero.arms.cues import strip_cues
+
+        text = strip_cues(text).strip()
         if not text:
             return
         shelf = self._smile()

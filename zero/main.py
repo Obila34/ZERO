@@ -291,8 +291,21 @@ class Zero:
                 "turn your head. When someone asks you to look or turn "
                 "somewhere, use the gaze tool to do it — never claim you can't "
                 "move your head, and never just describe the movement.")
-        system_prompt = build_system_prompt(tool_block, body_block, lang_block,
-                                            web_block)
+        # Hand gestures, taught as inline cues so a gesture is anchored to the
+        # exact word it belongs to while speech still streams sentence-by-
+        # sentence. Built ONLY from gestures whose joints are calibrated, so
+        # the model is never taught something the robot can't do; with nothing
+        # calibrated this block is empty and the arms are never mentioned.
+        arms_block = ""
+        try:
+            from zero.arms.cues import prompt_block as _arm_prompt
+            from zero.arms.system import available_gestures
+
+            arms_block = _arm_prompt(available_gestures(self.cfg))
+        except Exception as e:
+            log.debug("arm prompt block unavailable: %s", e)
+        system_prompt = build_system_prompt(tool_block, body_block, arms_block,
+                                            lang_block, web_block)
         self.convo = Conversation(
             system_prompt=system_prompt,
             history_turns=self.cfg.get("llm.history_turns", 3),
@@ -2095,8 +2108,16 @@ class Zero:
         return " ".join(full).strip()
 
     def _head_express(self, sentence: str, *, boundary: bool) -> None:
-        """Forward a spoken sentence's expression cues to the head. Gated by
-        head.express; must never disturb playback, so everything is swallowed."""
+        """Forward a spoken sentence's expression cues to the body as it
+        reaches the speaker: head gestures + turn-taking gaze, and any arm
+        gesture the model cued inline. Must never disturb playback, so
+        everything here is swallowed."""
+        arms = getattr(self, "arms", None)
+        if arms is not None and sentence:
+            try:
+                arms.express(sentence)
+            except Exception:
+                pass
         if not self._head_express_on:
             return
         head = getattr(self, "head", None)

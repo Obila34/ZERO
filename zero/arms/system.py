@@ -22,20 +22,59 @@ from zero.utils.logging import get_logger
 
 log = get_logger("arms.system")
 
-# Built-in gestures reference wrists only (servo joints, offset-calibrated so
-# command 0 = the gateway's saved neutral). Hand open/close poses need the
-# supervised finger calibration first — add them in config arms.gestures.
+# Built on the SHOULDER-LIFT / BICEP / ELBOW joints only: the shoulder in-out
+# pair and the wrists are excluded from the gesture layer (driver.EXCLUDED_
+# JOINTS), so a wave here is an arm swing from the elbow, not a hand flap.
+# Offsets are home-relative, so the same definitions hold whatever each joint's
+# calibration turns out to be, and every one returns to home.
 BUILTIN_GESTURES: dict[str, list] = {
-    "wave_right": [({"right_wrist_joint": "home+25"}, 0.4),
-                   ({"right_wrist_joint": "home-25"}, 0.4),
-                   ({"right_wrist_joint": "home+25"}, 0.4),
-                   ({"right_wrist_joint": "home-25"}, 0.4),
-                   ({"right_wrist_joint": "home"}, 0.4)],
-    "wave_left": [({"left_wrist_joint": "home+25"}, 0.4),
-                  ({"left_wrist_joint": "home-25"}, 0.4),
-                  ({"left_wrist_joint": "home+25"}, 0.4),
-                  ({"left_wrist_joint": "home-25"}, 0.4),
-                  ({"left_wrist_joint": "home"}, 0.4)],
+    "wave_right": [({"right_up_down_joint": "home+35"}, 0.5),
+                   ({"right_elbow_joint": "home+20"}, 0.35),
+                   ({"right_elbow_joint": "home-20"}, 0.35),
+                   ({"right_elbow_joint": "home+20"}, 0.35),
+                   ({"right_elbow_joint": "home", "right_up_down_joint": "home"}, 0.6)],
+    "wave_left": [({"left_up_down_joint": "home+35"}, 0.5),
+                  ({"left_elbow_joint": "home+20"}, 0.35),
+                  ({"left_elbow_joint": "home-20"}, 0.35),
+                  ({"left_elbow_joint": "home+20"}, 0.35),
+                  ({"left_elbow_joint": "home", "left_up_down_joint": "home"}, 0.6)],
+    # A beat is SMALL and quick — it marks a stressed word, nothing more.
+    "beat_right": [({"right_elbow_joint": "home+10"}, 0.18),
+                   ({"right_elbow_joint": "home"}, 0.22)],
+    "beat_both": [({"right_elbow_joint": "home+10",
+                    "left_elbow_joint": "home+10"}, 0.18),
+                  ({"right_elbow_joint": "home",
+                    "left_elbow_joint": "home"}, 0.22)],
+    "shrug": [({"right_up_down_joint": "home+12",
+                "left_up_down_joint": "home+12"}, 0.45),
+              ({"right_up_down_joint": "home+12",
+                "left_up_down_joint": "home+12"}, 0.35),
+              ({"right_up_down_joint": "home",
+                "left_up_down_joint": "home"}, 0.5)],
+    "point_right": [({"right_up_down_joint": "home+30",
+                      "right_elbow_joint": "home-15"}, 0.5),
+                    ({"right_up_down_joint": "home+30",
+                      "right_elbow_joint": "home-15"}, 0.7),
+                    ({"right_up_down_joint": "home",
+                      "right_elbow_joint": "home"}, 0.6)],
+    "point_left": [({"left_up_down_joint": "home+30",
+                     "left_elbow_joint": "home-15"}, 0.5),
+                   ({"left_up_down_joint": "home+30",
+                     "left_elbow_joint": "home-15"}, 0.7),
+                   ({"left_up_down_joint": "home",
+                     "left_elbow_joint": "home"}, 0.6)],
+    "show_big": [({"right_up_down_joint": "home+25",
+                   "left_up_down_joint": "home+25"}, 0.5),
+                 ({"right_up_down_joint": "home+25",
+                   "left_up_down_joint": "home+25"}, 0.5),
+                 ({"right_up_down_joint": "home",
+                   "left_up_down_joint": "home"}, 0.55)],
+    "offer_right": [({"right_up_down_joint": "home+20",
+                      "right_elbow_joint": "home-20"}, 0.5),
+                    ({"right_up_down_joint": "home+20",
+                      "right_elbow_joint": "home-20"}, 0.8),
+                    ({"right_up_down_joint": "home",
+                      "right_elbow_joint": "home"}, 0.6)],
     "rest": [({}, 0.5)],       # special-cased: every calibrated joint -> home
 }
 
@@ -56,13 +95,79 @@ class ArmSystem:
         # pose belief: last commanded angle per joint; starts at home.
         self._pose = {n: s.home_deg for n, s in self._joints.items()}
         self._estop = False
+        # Expression gating (see express()). Gestures are opt-in per hand,
+        # suppressible wholesale when someone is close to the arms, paced so
+        # most turns stay idle, and deictics are refused unless perception has
+        # actually grounded a target.
+        self._hand_state = {"left": "free", "right": "free"}
+        self._suppress_until = 0.0
+        self._last_gesture_t = 0.0
+        self._min_gap_s = float(cfg.get("arms.min_gesture_gap_s", 12.0))
+        self._can_point = bool(cfg.get("arms.allow_pointing", False))
         self._gen = 0                       # bumps to preempt a running gesture
         self._lock = threading.Lock()
         self._player: threading.Thread | None = None
 
     # ── public surface ───────────────────────────────────────────────────────
     def gesture_names(self) -> list[str]:
-        return sorted(self._gestures)
+        """Gestures that could actually run — every joint they touch has a
+        calibrated envelope. The prompt is built from this, so the model is
+        never taught a gesture the robot cannot perform."""
+        out = []
+        for name, frames in self._gestures.items():
+            if name == "rest":
+                continue
+            joints = {j for tg, _s in frames for j in tg}
+            if joints and joints <= set(self._joints):
+                out.append(name)
+        return sorted(out)
+
+    def set_hand_state(self, left: str = "free", right: str = "free") -> None:
+        """Mark a hand occupied (holding something) so no gesture uses it."""
+        self._hand_state = {"left": str(left), "right": str(right)}
+
+    def suppress(self, seconds: float) -> None:
+        """Block gestures for a while — someone is close enough to the arms
+        that a swinging limb is not acceptable."""
+        self._suppress_until = time.monotonic() + max(0.0, float(seconds))
+
+    def express(self, text: str, *, now: float | None = None) -> str | None:
+        """Fire the gesture cued in a spoken sentence, if any, and return the
+        gesture played. The whole safety stack lives here, so it applies
+        wherever expression comes from.
+
+        Returns None (and plays nothing) when: nothing is cued, gestures are
+        suppressed or e-stopped, the gesture's hand is occupied, a deictic
+        cannot be grounded, or the pacing floor hasn't elapsed — a hand that
+        moves on every sentence reads as nervous rather than alive.
+        """
+        from zero.arms.cues import CUE_FUNCTION, CUE_TO_GESTURE, find_cues
+
+        now = time.monotonic() if now is None else now
+        cues = find_cues(text)
+        if not cues or self._estop or now < self._suppress_until:
+            return None
+        if now - self._last_gesture_t < self._min_gap_s:
+            return None                     # pacing: keep most turns idle
+        cue = cues[0]                       # one gesture per sentence, at most
+        name = CUE_TO_GESTURE.get(cue)
+        if name is None:
+            return None
+        if CUE_FUNCTION.get(cue) == "deictic" and not self._can_point:
+            return None                     # never point at an unseen target
+        hand = ("left" if name.endswith("_left") or "left" in name
+                else "right")
+        if self._hand_state.get(hand, "free") != "free":
+            return None                     # that hand is holding something
+        if not self.play(name):
+            return None                     # uncalibrated / unknown: refuse
+        self._last_gesture_t = now
+        return name
+
+    def set_pointing_allowed(self, allowed: bool) -> None:
+        """Whether a deictic cue may be honoured — set from perception, so a
+        point is only ever made toward something actually seen."""
+        self._can_point = bool(allowed)
 
     def play(self, name: str) -> bool:
         """Start a gesture (preempting any running one). False if unknown or
@@ -167,3 +272,30 @@ class ArmSystem:
                         log.debug("arm send failed: %s", e)
                 time.sleep(dt)
         log.info("arm gesture %r done", name)
+
+
+def available_gestures(cfg) -> list[str]:
+    """Gesture names whose joints are all calibrated, WITHOUT building the
+    system. Used to write the prompt: the system prompt is composed before the
+    arm subsystem exists, and the model must only ever be taught gestures the
+    robot can actually perform."""
+    if not cfg.get("arms.enabled", False):
+        return []
+    joints = set(load_joints(cfg))
+    if not joints:
+        return []
+    gestures = dict(BUILTIN_GESTURES)
+    for name, frames in (cfg.get("arms.gestures") or {}).items():
+        try:
+            gestures[str(name)] = [(dict(f["joints"]), float(f["s"]))
+                                   for f in frames]
+        except (KeyError, TypeError, ValueError):
+            continue
+    out = []
+    for name, frames in gestures.items():
+        if name == "rest":
+            continue
+        used = {j for tg, _s in frames for j in tg}
+        if used and used <= joints:
+            out.append(name)
+    return sorted(out)

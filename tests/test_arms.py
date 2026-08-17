@@ -15,7 +15,10 @@ class FakeCfg:
         return self._o.get(key, default)
 
 
-WRIST = {"right_wrist_joint": {"min": -35, "max": 35, "home": 0}}
+# Wrists are excluded from the gesture layer, so the fixtures calibrate the
+# joints gestures actually use (both steppers -> allow_steppers below).
+WRIST = {"right_up_down_joint": {"min": -40, "max": 40, "home": 0},
+         "right_elbow_joint": {"min": -35, "max": 35, "home": 0}}
 
 
 # ── command parsing ─────────────────────────────────────────────────────────
@@ -55,11 +58,12 @@ def test_uncalibrated_joints_are_inert():
 
 
 def test_stepper_gated_behind_allow_steppers():
+    # a finger is a servo joint: neither a stepper nor excluded
     cfg = {"arms.joints": {"right_bicep_joint": {"min": -10, "max": 10},
-                           **WRIST}}
+                           "right_indexp1_joint": {"min": 0, "max": 60}}}
     joints = load_joints(FakeCfg(cfg))
     assert "right_bicep_joint" not in joints        # gated
-    assert "right_wrist_joint" in joints
+    assert "right_indexp1_joint" in joints
     cfg["arms.allow_steppers"] = True
     joints = load_joints(FakeCfg(cfg))
     assert "right_bicep_joint" in joints
@@ -75,7 +79,8 @@ def test_jointspec_clamps_and_home_inside_envelope():
 
 def _system(over=None):
     base = {"arms.joints": WRIST, "arms.rate_hz": 200.0,
-            "arms.max_speed_dps": 2000.0}
+            "arms.max_speed_dps": 2000.0, "arms.allow_steppers": True,
+            "arms.min_gesture_gap_s": 0.0}
     base.update(over or {})
     sys_ = ArmSystem(FakeCfg(base))
     sys_._driver = NullArmDriver()                  # capture, never post
@@ -84,15 +89,15 @@ def _system(over=None):
 
 def test_gesture_plays_clamped_and_returns_home():
     s = _system({"arms.gestures": {
-        "poke": [{"joints": {"right_wrist_joint": 999}, "s": 0.05},
-                 {"joints": {"right_wrist_joint": "home"}, "s": 0.05}]}})
+        "poke": [{"joints": {"right_elbow_joint": 999}, "s": 0.05},
+                 {"joints": {"right_elbow_joint": "home"}, "s": 0.05}]}})
     assert s.play("poke")
     s._player.join(timeout=2.0)
     sent = s._driver.last
-    assert sent["right_wrist_joint"] == 0.0         # ended at home
-    assert s._pose["right_wrist_joint"] == 0.0
+    assert sent["right_elbow_joint"] == 0.0         # ended at home
+    assert s._pose["right_elbow_joint"] == 0.0
     # and the 999 never survived the envelope
-    assert all(v <= 35.0 for v in [s._pose["right_wrist_joint"]])
+    assert all(v <= 35.0 for v in [s._pose["right_elbow_joint"]])
 
 
 def test_unknown_gesture_refused_and_estop_blocks():
@@ -107,25 +112,25 @@ def test_unknown_gesture_refused_and_estop_blocks():
 
 def test_rest_targets_every_calibrated_joint():
     s = _system()
-    s._pose["right_wrist_joint"] = 20.0
+    s._pose["right_elbow_joint"] = 20.0
     assert s.rest()
     s._player.join(timeout=2.0)
-    assert s._pose["right_wrist_joint"] == 0.0
+    assert s._pose["right_elbow_joint"] == 0.0
 
 
 def test_uncalibrated_joint_in_gesture_is_skipped():
     s = _system({"arms.gestures": {
         "bad": [{"joints": {"left_elbow_joint": 30,
-                            "right_wrist_joint": 10}, "s": 0.05}]}})
+                            "right_elbow_joint": 10}, "s": 0.05}]}})
     assert s.play("bad")
     s._player.join(timeout=2.0)
     assert "left_elbow_joint" not in s._driver.last  # never commanded
-    assert s._driver.last["right_wrist_joint"] == 10.0
+    assert s._driver.last["right_elbow_joint"] == 10.0
 
 
 def test_preemption_stops_previous_gesture():
     s = _system({"arms.rate_hz": 50.0, "arms.gestures": {
-        "slow": [{"joints": {"right_wrist_joint": 30}, "s": 5.0}]}})
+        "slow": [{"joints": {"right_elbow_joint": 30}, "s": 5.0}]}})
     assert s.play("slow")
     time.sleep(0.1)
     t1 = s._player
@@ -157,3 +162,100 @@ def test_gesture_with_no_calibrated_joints_refused():
     s = _system({"arms.joints": {}})                 # nothing calibrated
     assert not s.play("wave_right")                  # not a silent success
     assert s.rest()                                  # rest is always allowed
+
+
+# ── the intelligence layer: cues, grounding, pacing ─────────────────────────
+
+from zero.arms.cues import find_cues, prompt_block, strip_cues
+
+
+ARMS = {"right_up_down_joint": {"min": -40, "max": 40, "home": 0},
+        "left_up_down_joint": {"min": -40, "max": 40, "home": 0},
+        "right_elbow_joint": {"min": -40, "max": 40, "home": 0},
+        "left_elbow_joint": {"min": -40, "max": 40, "home": 0}}
+
+
+def _armsys(over=None):
+    base = {"arms.joints": ARMS, "arms.allow_steppers": True,
+            "arms.rate_hz": 200.0, "arms.max_speed_dps": 2000.0,
+            "arms.min_gesture_gap_s": 0.0}
+    base.update(over or {})
+    s = ArmSystem(FakeCfg(base))
+    s._driver = NullArmDriver()
+    return s
+
+
+def test_cues_are_found_and_stripped_from_speech():
+    text = "Yeah [beat] the big one, over there."
+    assert find_cues(text) == ["[beat]"]
+    # load-bearing: an unstripped cue is SPOKEN as a word by the Piper path
+    assert strip_cues(text) == "Yeah the big one, over there."
+    assert "[" not in strip_cues("Hi there [wave] good to see you")
+
+
+def test_excluded_joints_never_load():
+    cfg = {"arms.allow_steppers": True, "arms.joints": {
+        "right_in_out_joint": {"min": -10, "max": 10},
+        "right_wrist_joint": {"min": -10, "max": 10},
+        **ARMS}}
+    joints = load_joints(FakeCfg(cfg))
+    assert "right_in_out_joint" not in joints    # operator-excluded
+    assert "right_wrist_joint" not in joints     # and the dead PCA wrists
+    assert "right_elbow_joint" in joints         # gesture joints still load
+
+
+def test_express_plays_the_cued_gesture():
+    s = _armsys()
+    assert s.express("Hi there [wave] good to see you") == "wave_right"
+    s._player.join(timeout=3.0)
+
+
+def test_no_cue_means_no_movement():
+    s = _armsys()
+    assert s.express("Just an ordinary sentence with no cue at all") is None
+
+
+def test_pacing_keeps_most_turns_idle():
+    s = _armsys({"arms.min_gesture_gap_s": 30.0})
+    assert s.express("First [beat] point", now=1000.0) == "beat_right"
+    s._player.join(timeout=2.0)
+    # a second gesture inside the floor is dropped, not queued
+    assert s.express("Second [beat] point", now=1005.0) is None
+    assert s.express("Much later [beat] point", now=1040.0) == "beat_right"
+    s._player.join(timeout=2.0)
+
+
+def test_occupied_hand_is_never_used():
+    s = _armsys()
+    s.set_hand_state(right="occupied")
+    assert s.express("Hi [wave] there") is None
+    s.set_hand_state(right="free")
+    assert s.express("Hi [wave] there") == "wave_right"
+    s._player.join(timeout=3.0)
+
+
+def test_deictic_refused_until_perception_can_ground_it():
+    s = _armsys()
+    assert s.express("It's over [point_left] there") is None   # ungrounded
+    s.set_pointing_allowed(True)
+    assert s.express("It's over [point_left] there") == "point_left"
+    s._player.join(timeout=3.0)
+
+
+def test_suppression_blocks_all_gestures():
+    s = _armsys()
+    s.suppress(60.0)                       # someone is close to the arms
+    assert s.express("Hi [wave] there") is None
+
+
+def test_only_one_gesture_per_sentence():
+    s = _armsys()
+    assert s.express("[wave] and also [shrug]") == "wave_right"
+    s._player.join(timeout=3.0)
+
+
+def test_prompt_only_teaches_performable_gestures():
+    assert prompt_block([]) == ""                 # nothing calibrated: silent
+    block = prompt_block(["beat_right", "wave_right"])
+    assert "[beat]" in block and "[wave]" in block
+    assert "[point_left]" not in block            # not available -> not taught

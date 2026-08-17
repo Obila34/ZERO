@@ -1040,6 +1040,17 @@ arms:
   rate_hz: 20               # gesture playback tick
   max_speed_dps: 60         # per-joint speed cap during playback
   allow_steppers: false     # keep the geared stepper joints inert
+  # Gesture pacing + grounding for the conversational layer. The model cues a
+  # gesture inline in its reply ([beat], [wave], ...) and the cue fires as that
+  # word reaches the speaker. NOTE: the shoulder in/out joints and the wrists
+  # are excluded from gestures in code and cannot be re-enabled from here.
+  min_gesture_gap_s: 12     # floor between gestures. Most turns should carry
+                            # NO gesture — hands moving every sentence read as
+                            # nervous, not alive. Lower for a livelier robot.
+  allow_pointing: false     # honour [point_left]/[point_right] only when
+                            # perception can actually ground a target. Off
+                            # until pointing is aimed against real bearings —
+                            # a point at nothing is worse than no point.
   gateway:
     base_url: http://100.67.233.65:5000   # same gateway as the head
     max_hz: 10

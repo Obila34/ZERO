@@ -29,6 +29,17 @@ STEPPER_JOINTS = frozenset({
     "right_bicep_joint", "left_bicep_joint",
 })
 
+# Joints the gesture layer must never drive, whatever config says. The
+# shoulder in/out pair and the wrists are excluded by operator decision
+# (2026-08-17); the wrists in particular sit on the PCA servo board whose
+# power rail is dead, so a "calibrated" entry there would be fiction. A
+# denylist rather than a config flag: this is a property of the robot right
+# now, and a stray config line should not be able to re-enable it.
+EXCLUDED_JOINTS = frozenset({
+    "right_in_out_joint", "left_in_out_joint",
+    "right_wrist_joint", "left_wrist_joint",
+})
+
 
 class JointSpec:
     __slots__ = ("name", "min_deg", "max_deg", "home_deg", "is_stepper")
@@ -185,6 +196,10 @@ def load_joints(cfg) -> dict[str, JointSpec]:
     allow_steppers = bool(cfg.get("arms.allow_steppers", False))
     joints: dict[str, JointSpec] = {}
     for name, ent in raw.items():
+        if name in EXCLUDED_JOINTS:
+            log.info("arms: %s is excluded from the gesture layer — ignored",
+                     name)
+            continue
         try:
             spec = JointSpec(str(name), ent["min"], ent["max"],
                              ent.get("home", 0.0))
