@@ -156,8 +156,10 @@ def test_arm_tool_paths():
     # fast path: raw utterance
     assert tool.run({"text": "wave your hand"}, ctx) == "Okay, waving."
     s._player.join(timeout=3.0)
-    # LLM path: named gesture, unknown -> honest refusal about calibration
-    assert "isn't calibrated" in tool.run({"gesture": "open_right_hand"}, ctx)
+    # LLM path: an unknown gesture is refused for the RIGHT reason — the hand
+    # gestures need finger servos that do not exist yet, which is not a
+    # calibration problem and should not claim to be one.
+    assert "don't have a gesture" in tool.run({"gesture": "open_right_hand"}, ctx)
     assert "didn't catch" in tool.run({"text": "tell me a story"}, ctx)
 
 
@@ -467,3 +469,38 @@ def test_gesture_offsets_follow_the_joint_sign():
     s.play("lift")
     s._player.join(timeout=2.0)
     assert s.joint_pose()["left_up_down_joint"] == -40.0
+
+
+def test_plural_without_a_side_means_both_arms():
+    """'raise your arms' raised only the RIGHT one (2026-08-17) — the single
+    most important phrasing there is."""
+    for phrase in ["raise your arms", "lift your arms", "bend your elbows",
+                   "raise your shoulders", "put your hands up"]:
+        r = P(phrase)
+        assert r["side"] == "both", phrase
+        assert len(r["joints"]) == 2, phrase
+    # a named side still wins
+    assert P("raise your right arm")["side"] == "right"
+    assert P("raise your arm")["side"] == "right"      # singular = one arm
+
+
+def test_as_high_as_you_can_is_full_range():
+    assert P("raise your arms as high as you can")["degrees"] == 999.0
+    assert P("lift your arm all the way")["degrees"] == 999.0
+
+
+def test_llm_invented_gesture_names_are_recovered():
+    """The model reaches for made-up names like 'arms_up'. Read the name as an
+    instruction rather than refusing, and never blame calibration for it."""
+    from zero.tools.arms import ArmTool
+    from zero.tools.base import ToolContext
+
+    s = _armsys()
+    ctx = ToolContext(extras={"arms": s})
+    tool = ArmTool()
+    out = tool.run({"gesture": "arms_up"}, ctx)
+    assert "moving my" in out, out
+    s._player.join(timeout=2.0)
+    # a genuinely unknown name is refused honestly, not blamed on calibration
+    bad = tool.run({"gesture": "backflip"}, ctx)
+    assert "don't have a gesture" in bad and "calibrat" not in bad

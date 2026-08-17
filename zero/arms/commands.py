@@ -87,7 +87,8 @@ _JOINT_RE = re.compile(
     r"\b(?:move|turn|rotate|raise|rais(?:e|ing)|lift(?:ing)?|lower|drop|bend|"
     r"curl|straighten|extend|fold|tuck|put)\w*\b[^.?!]*?"
     rf"\b(?:your|the)?\s*(?P<side>right|left|both)?\s*"
-    rf"(?P<part>{'|'.join(sorted(_PART_JOINT, key=len, reverse=True))})s?\b",
+    rf"(?P<part>{'|'.join(sorted(_PART_JOINT, key=len, reverse=True))})"
+    rf"(?P<plural>s)?\b",
     re.IGNORECASE)
 _BARE_RE = re.compile(
     rf"^\s*(?:your\s+|the\s+)?(?P<side>right|left|both)?\s*"
@@ -98,7 +99,8 @@ _DEG_RE = re.compile(r"(?P<deg>\d{1,3}(?:\.\d+)?)\s*(?:deg|degrees?|°)",
 _SMALL = re.compile(r"\b(?:a\s+(?:bit|little|touch)|slightly|small|tiny)\b",
                     re.IGNORECASE)
 _FULL = re.compile(r"\b(?:all\s+the\s+way|fully|completely|max(?:imum)?|"
-                   r"as\s+far\s+as\s+you\s+can)\b", re.IGNORECASE)
+                   r"as\s+(?:far|high|low)\s+(?:up\s+|down\s+)?as\s+you\s+can|"
+                   r"right\s+up|as\s+high\s+as\s+possible)\b", re.IGNORECASE)
 
 
 def _side(m, default="right") -> str:
@@ -157,7 +159,8 @@ def parse_arm_command(text: str) -> dict | None:
             else:
                 amount = STEP_DEG             # "rotate your bicep": no
             sign = -1.0 if (down and not up) else 1.0   # direction given, so
-            side = (m.group("side") or "right").lower()  # move it positively
+            side = (m.group("side") or                   # move it positively
+                    ("both" if m.group("plural") else "right")).lower()
             sides = ("right", "left") if side == "both" else (side,)
             suffix = _PART_JOINT[part]
             return {"kind": "joint",

@@ -26,16 +26,21 @@ _SPOKEN = {
 
 class ArmTool(Tool):
     name = "arms"
-    description = ("Move ZERO's arms. Either a named gesture ('wave', 'arms "
-                   "down') or one joint via part/side/degrees ('raise your "
-                   "right elbow').")
+    description = ("Move ZERO's arms — use this for ANY request to move, "
+                   "raise, lower, lift or bend an arm, shoulder, elbow or "
+                   "bicep, including follow-ups like 'higher' or 'put them "
+                   "down'. Normally set part/side/degrees; only use `gesture` "
+                   "for a named one.")
     parameters = {
-        "gesture": "one of: wave_right | wave_left | raise_right | raise_left "
-                   "| open_right_hand | close_right_hand | open_left_hand | "
-                   "close_left_hand | handshake | rest",
-        "part": "to move one joint instead: elbow | shoulder | arm | bicep",
-        "side": "which arm for `part`: right | left | both (default right)",
-        "degrees": "how far to move `part`; negative lowers/bends (default 15)",
+        "part": "what to move: arm | shoulder | elbow | bicep. 'arm' and "
+                "'shoulder' both raise/lower the whole arm.",
+        "side": "right | left | both. Use 'both' whenever the person says "
+                "'arms'/'hands' plural without naming a side.",
+        "degrees": "how far, POSITIVE to raise/straighten and NEGATIVE to "
+                   "lower/bend. ~30 is a normal move, ~60 a big one, 999 "
+                   "means as far as it goes. Omit for a normal move.",
+        "gesture": "only for a named gesture: wave_right | wave_left | rest "
+                   "(rest puts both arms back down).",
     }
 
     def run(self, args: dict, ctx: ToolContext) -> str:
@@ -66,15 +71,24 @@ class ArmTool(Tool):
                         "calibrated.")
             way = "up" if cmd["degrees"] >= 0 else "down"
             if cmd["side"] == "both":
-                what = f"both {cmd['part']}s"       # "both elbows", not "my arm"
-            else:
-                what = f"{cmd['side']} {cmd['part']}"
-            return f"Okay, moving my {what} {way}."
+                return f"Okay, moving both {cmd['part']}s {way}."
+            return f"Okay, moving my {cmd['side']} {cmd['part']} {way}."
         name = (cmd["name"] if cmd else
                 (str(args.get("gesture", "")).strip().lower() or None))
         if not name:
             return "I didn't catch which gesture you want."
+        if name not in arms.gesture_names() and name != "rest":
+            # The model invents names ("arms_up", "raise_arms"). Read the name
+            # as if it were spoken, so a near-miss still does the right thing.
+            retry = parse_arm_command(name.replace("_", " "))
+            if retry and retry.get("kind") == "joint":
+                moved = arms.move_joint(retry["joints"], retry["degrees"])
+                if moved:
+                    way = "up" if retry["degrees"] >= 0 else "down"
+                    return f"Okay, moving my {retry['part']} {way}."
+            if retry and retry.get("kind") == "gesture":
+                name = retry["name"]
         if not arms.play(name):
-            return ("I can't do that gesture yet — that part of my arms isn't "
-                    "calibrated.")
+            return ("I can't do that one — I don't have a gesture called "
+                    f"{name!r}.")
         return _SPOKEN.get(name, "Okay.")
