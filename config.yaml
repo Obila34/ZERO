@@ -1039,11 +1039,11 @@ head:
 # allow_steppers is also true. Servo hands first; steppers later, carefully.
 arms:
   enabled: true             # subsystem + voice commands + gesture cues LIVE
-  driver: null              # null = record only | http = MOVES THE ROBOT.
-                            # Still null: the URDF envelopes below are the
-                            # machine's limits, but no arm joint has been
-                            # moved under supervision yet. Flip to http for
-                            # that first watched test, not before.
+  driver: http              # null = record only | http = MOVES THE ROBOT.
+                            # LIVE from 2026-08-17. Envelopes are URDF limits
+                            # at limit_frac, NOT per-joint supervised
+                            # calibration, so treat every direction as
+                            # unverified until you have watched it move.
   rate_hz: 20               # gesture playback tick
   max_speed_dps: 60         # per-joint speed cap during playback
   allow_steppers: true      # the gesture joints (shoulder-lift/bicep/elbow)
