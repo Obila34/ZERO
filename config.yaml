@@ -712,7 +712,7 @@ vision:
     # loop updated at only 4.8 Hz (median gap 185 ms, worst 748 ms) because it
     # inherited that loop's sleep and its GPU round trip, and YuNet was
     # detecting at full 640x480 (~97 ms/frame).
-    track_hz: 10 # digital gaze on its own thread at up to this rate (0 = old
+    track_hz: 20 # digital gaze on its own thread at up to this rate (0 = old
       # in-loop behaviour). The neck cannot react faster than this.
     detect_scale: 0.5 # run face detection on a half-size copy and scale the
       # boxes back — ~4x cheaper for the same faces at conversational range.
@@ -919,10 +919,9 @@ head:
   # rotates — the loop is open-loop and stable — but a big turn does carry you
   # out of frame, which is what hold_s covers.
   mirror:
-    # OFF pending the 2026-08-17 reboot: this runs a second pose model
-    # continuously, and together with the face thread it made this the heaviest
-    # load the Pi has carried. Turn back on once the power draw is understood.
-    enabled: false
+    # Back ON: the reboot it was suspended for turned out not to be CPU —
+    # vitals caught load 1.12 of 4 cores and 54 C five seconds before death.
+    enabled: true
     deadzone: 0.2         # |signal| below this = facing forward, no override.
                           # Raise if it reacts to small talking movements.
     range_deg: 80         # a full head turn maps to this many degrees of pan
@@ -1086,7 +1085,7 @@ arms:
   # sitting, because the steppers have no encoders and zero is wherever they
   # were at the last reset — hence limit_frac below. The shoulder in/out pair
   # and the wrists are absent deliberately: excluded in code, not just here.
-  limit_frac: 0.35          # fraction of each URDF range actually usable, in
+  limit_frac: 0.6           # fraction of each URDF range actually usable, in
                             # effect until supervised motion confirms the arm
                             # rests near the modelled zero. Raise toward 1.0
                             # once verified, one step at a time.
