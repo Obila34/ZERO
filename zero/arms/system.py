@@ -294,6 +294,11 @@ class ArmSystem:
 
     # ── playback ─────────────────────────────────────────────────────────────
     def _resolve(self, target, spec) -> float | None:
+        """A gesture keyframe -> an absolute motor angle. Home-relative offsets
+        are written in JOINT space (+ = the way "raise" means), so a mirrored
+        motor gets the sign applied here; otherwise every gesture would run
+        backwards on that side."""
+        sign = float(self._joint_sign.get(spec.name, 1.0))
         if isinstance(target, (int, float)):
             return float(target)
         s = str(target).strip().lower()
@@ -301,7 +306,7 @@ class ArmSystem:
             return spec.home_deg
         if s.startswith("home+") or s.startswith("home-"):
             try:
-                return spec.home_deg + float(s[4:])
+                return spec.home_deg + sign * float(s[4:])
             except ValueError:
                 return None
         return None

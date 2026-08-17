@@ -230,6 +230,11 @@ def load_joints(cfg) -> dict[str, JointSpec]:
     # home for exactly that reason — use a fraction until supervised motion
     # has confirmed the arm really does rest near the modelled zero.
     frac = min(1.0, max(0.05, float(cfg.get("arms.limit_frac", 1.0))))
+    # Envelopes are written in JOINT space (the URDF's frame, where + is the
+    # direction "raise" means). A mirrored motor turns the other way, so its
+    # window has to mirror with it: a shoulder that lifts 106 up and 68.8 down
+    # would otherwise only manage 68.8 of lift once its sign was flipped.
+    signs = cfg.get("arms.joint_sign") or {}
     joints: dict[str, JointSpec] = {}
     for name, ent in raw.items():
         if name in EXCLUDED_JOINTS:
@@ -238,10 +243,11 @@ def load_joints(cfg) -> dict[str, JointSpec]:
             continue
         try:
             home = float(ent.get("home", 0.0))
-            spec = JointSpec(str(name),
-                             home + (float(ent["min"]) - home) * frac,
-                             home + (float(ent["max"]) - home) * frac,
-                             home)
+            lo = home + (float(ent["min"]) - home) * frac
+            hi = home + (float(ent["max"]) - home) * frac
+            if float(signs.get(name, 1.0)) < 0:      # motor mirrored
+                lo, hi = 2 * home - hi, 2 * home - lo
+            spec = JointSpec(str(name), lo, hi, home)
         except (KeyError, TypeError, ValueError) as e:
             log.warning("arms.joints.%s invalid (%s) — ignored", name, e)
             continue

@@ -1063,8 +1063,14 @@ arms:
                             # nervous, not alive. Lower for a livelier robot.
   # Per-joint direction: +1 means "raise" moves that joint positively. Flip a
   # joint to -1 if it turns out to move the opposite way — config, not code.
-  joint_sign: {}
-    # right_elbow_joint: -1
+  joint_sign:
+    # Verified on the robot 2026-08-17: raising the LEFT arm drove it the wrong
+    # way, so its shoulder motor is mirrored relative to the right. The sign
+    # flips both the commanded direction AND the joint's window, so "raise"
+    # still gets the full lift rather than the small half of an asymmetric
+    # range. Add left_elbow_joint / left_bicep_joint here if they read
+    # backwards too.
+    left_up_down_joint: -1
   allow_pointing: false     # honour [point_left]/[point_right] only when
                             # perception can actually ground a target. Off
                             # until pointing is aimed against real bearings —

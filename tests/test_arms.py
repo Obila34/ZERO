@@ -432,3 +432,38 @@ def test_bare_part_direction_phrasings():
     # a limb sent down still means rest, however it is phrased
     assert P("arms down")["name"] == "rest"
     assert P("drop left arm")["name"] == "rest"
+
+
+def test_joint_sign_mirrors_the_envelope_too():
+    """A mirrored motor needs its WINDOW mirrored with it. The shoulder is
+    asymmetric (-68.8 down, +106 up); flipping only the direction would leave
+    'raise' with the small half of the range (2026-08-17, left arm)."""
+    cfg = {"arms.allow_steppers": True, "arms.limit_frac": 1.0,
+           "arms.joints": {"left_up_down_joint": {"min": -68.8, "max": 106.0,
+                                                  "home": 0.0}},
+           "arms.joint_sign": {"left_up_down_joint": -1}}
+    j = load_joints(FakeCfg(cfg))["left_up_down_joint"]
+    assert j.min_deg == -106.0 and j.max_deg == 68.8    # mirrored
+    # and a "raise" of 30 reaches a real -30 in motor space, not a clamp
+    s = ArmSystem(FakeCfg(cfg))
+    s._driver = NullArmDriver()
+    s.move_joint("left_up_down_joint", 30.0)
+    s._player.join(timeout=2.0)
+    assert s.joint_pose()["left_up_down_joint"] == -30.0
+
+
+def test_gesture_offsets_follow_the_joint_sign():
+    """Gesture keyframes are written in joint space, so a mirrored motor must
+    run them backwards or every gesture is inverted on that side."""
+    cfg = {"arms.allow_steppers": True, "arms.limit_frac": 1.0,
+           "arms.joints": {"left_up_down_joint": {"min": -100.0, "max": 100.0,
+                                                  "home": 0.0}},
+           "arms.joint_sign": {"left_up_down_joint": -1},
+           "arms.rate_hz": 200.0, "arms.max_speed_dps": 2000.0,
+           "arms.gestures": {"lift": [
+               {"joints": {"left_up_down_joint": "home+40"}, "s": 0.05}]}}
+    s = ArmSystem(FakeCfg(cfg))
+    s._driver = NullArmDriver()
+    s.play("lift")
+    s._player.join(timeout=2.0)
+    assert s.joint_pose()["left_up_down_joint"] == -40.0
