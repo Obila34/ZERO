@@ -65,8 +65,11 @@ class ArmTool(Tool):
                 return (f"I can't move my {cmd['part']} yet — that joint isn't "
                         "calibrated.")
             way = "up" if cmd["degrees"] >= 0 else "down"
-            which = ("" if cmd["side"] == "both" else f"{cmd['side']} ")
-            return f"Okay, moving my {which}{cmd['part']} {way}."
+            if cmd["side"] == "both":
+                what = f"both {cmd['part']}s"       # "both elbows", not "my arm"
+            else:
+                what = f"{cmd['side']} {cmd['part']}"
+            return f"Okay, moving my {what} {way}."
         name = (cmd["name"] if cmd else
                 (str(args.get("gesture", "")).strip().lower() or None))
         if not name:
