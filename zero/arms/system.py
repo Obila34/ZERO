@@ -108,6 +108,11 @@ class ArmSystem:
         # ("raise") matches the joint's positive rotation. Flip to -1 for any
         # joint that turns out to move the opposite way — config, not code.
         self._joint_sign = dict(cfg.get("arms.joint_sign") or {})
+        # Speech beats: a small gesture on some spoken sentences even when the
+        # model cued nothing, so the arms are visibly alive while ZERO talks.
+        self._speech_beat = bool(cfg.get("arms.speech_beat", True))
+        self._beat_gap_s = float(cfg.get("arms.beat_gap_s", 8.0))
+        self._beat_n = 0
         self._gen = 0                       # bumps to preempt a running gesture
         self._lock = threading.Lock()
         self._player: threading.Thread | None = None
@@ -190,11 +195,25 @@ class ArmSystem:
 
         now = time.monotonic() if now is None else now
         cues = find_cues(text)
-        if not cues or self._estop or now < self._suppress_until:
+        if self._estop or now < self._suppress_until:
             return None
-        if now - self._last_gesture_t < self._min_gap_s:
+        if cues and now - self._last_gesture_t < self._min_gap_s:
             return None                     # pacing: keep most turns idle
-        cue = cues[0]                       # one gesture per sentence, at most
+        cue = cues[0] if cues else None      # one gesture per sentence, at most
+        if cue is None:
+            # Nothing cued. People's hands still move while they talk, so fire
+            # an occasional small beat of our own — otherwise the arms only
+            # ever move when the model remembers a cue, which is rarely.
+            if not self._speech_beat or len(text.split()) < 5:
+                return None
+            if now - self._last_gesture_t < self._beat_gap_s:
+                return None
+            self._beat_n += 1
+            name = "beat_both" if self._beat_n % 3 == 0 else "beat_right"
+            if not self.play(name):
+                return None
+            self._last_gesture_t = now
+            return name
         name = CUE_TO_GESTURE.get(cue)
         if name is None:
             return None

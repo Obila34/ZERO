@@ -1053,6 +1053,12 @@ arms:
   # gesture inline in its reply ([beat], [wave], ...) and the cue fires as that
   # word reaches the speaker. NOTE: the shoulder in/out joints and the wrists
   # are excluded from gestures in code and cannot be re-enabled from here.
+  # Hands move a little while people talk. speech_beat fires a small beat on
+  # a spoken sentence even when the model cued nothing, so the arms are
+  # visibly alive during a reply instead of waiting on a cue the model rarely
+  # writes. Short sentences ("Yeah.") never trigger one.
+  speech_beat: true
+  beat_gap_s: 8             # seconds between automatic speech beats
   min_gesture_gap_s: 12     # floor between gestures. Most turns should carry
                             # NO gesture — hands moving every sentence read as
                             # nervous, not alive. Lower for a livelier robot.

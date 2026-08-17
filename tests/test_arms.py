@@ -213,8 +213,8 @@ def test_express_plays_the_cued_gesture():
     s._player.join(timeout=3.0)
 
 
-def test_no_cue_means_no_movement():
-    s = _armsys()
+def test_no_cue_means_no_movement_when_speech_beats_are_off():
+    s = _armsys({"arms.speech_beat": False})
     assert s.express("Just an ordinary sentence with no cue at all") is None
 
 
@@ -372,3 +372,34 @@ def test_tool_moves_a_named_joint():
         {"part": "elbow", "side": "right", "degrees": -10}, ctx)
     s._player.join(timeout=2.0)
     assert "don't have a" in tool.run({"part": "tail"}, ctx)
+
+
+def test_speech_beat_moves_the_arms_while_talking():
+    """The model rarely writes a cue, so an uncued sentence still gets an
+    occasional small beat — otherwise the arms never move during a reply."""
+    s = _armsys({"arms.speech_beat": True, "arms.beat_gap_s": 5.0})
+    got = s.express("That is a reasonably long spoken sentence", now=1000.0)
+    assert got in ("beat_right", "beat_both")
+    s._player.join(timeout=2.0)
+    # paced: the very next sentence does not also beat
+    assert s.express("And another sentence right behind it", now=1001.0) is None
+    # but a later one does
+    assert s.express("And one more after the gap has passed", now=1010.0)
+
+
+def test_speech_beat_skips_short_sentences_and_can_be_disabled():
+    s = _armsys({"arms.speech_beat": True, "arms.beat_gap_s": 0.0})
+    assert s.express("Yeah.", now=1000.0) is None          # too short to beat
+    off = _armsys({"arms.speech_beat": False, "arms.beat_gap_s": 0.0})
+    assert off.express("A perfectly long sentence here", now=1000.0) is None
+
+
+def test_speech_beat_still_obeys_estop_and_suppression():
+    s = _armsys({"arms.speech_beat": True, "arms.beat_gap_s": 0.0})
+    # set the window directly: suppress() stamps the REAL monotonic clock,
+    # which the fake `now` below would sail straight past.
+    s._suppress_until = 2000.0
+    assert s.express("A perfectly long sentence here", now=1000.0) is None
+    s._suppress_until = 0.0
+    s.estop()
+    assert s.express("A perfectly long sentence here", now=1000.0) is None
