@@ -219,12 +219,30 @@ class ArmSystem:
             return None                     # pacing: keep most turns idle
         cue = cues[0] if cues else None      # one gesture per sentence, at most
         if cue is None:
-            # Nothing cued. People's hands still move while they talk, so fire
-            # an occasional small beat of our own — otherwise the arms only
-            # ever move when the model remembers a cue, which is rarely.
-            if not self._speech_beat or len(text.split()) < 5:
-                return None
+            # Nothing cued — which is nearly always, because the model rarely
+            # writes one. Read the sentence itself: a greeting wants a wave, "I
+            # don't know" a shrug, "huge" a size gesture, "over there" a point.
+            # Without this only the beat below ever fires and the other four
+            # gesture classes never happen at all.
+            from zero.arms.cues import infer_gesture
+
             if now - self._last_gesture_t < self._beat_gap_s:
+                return None
+            inferred = infer_gesture(text)
+            if inferred is not None:
+                name, word_i = inferred
+                if name.startswith("point") and not self._can_point:
+                    inferred = None          # never point at an unseen target
+                elif self._hand_state.get(
+                        "left" if name.endswith("_left") else "right",
+                        "free") != "free":
+                    inferred = None          # that hand is holding something
+                elif self._play_at(name, word_i):
+                    self._last_gesture_t = now
+                    return name
+            # Nothing the words called for: people's hands still move while
+            # they talk, so fall back to an occasional beat.
+            if not self._speech_beat or len(text.split()) < 5:
                 return None
             self._beat_n += 1
             name = "beat_both" if self._beat_n % 3 == 0 else "beat_right"
@@ -273,6 +291,20 @@ class ArmSystem:
             return self.play(name)
         if not self._can_play(name):
             return False               # check BEFORE promising, not after
+        t = threading.Timer(delay, self.play, args=(name,))
+        t.daemon = True
+        self._timer = t
+        t.start()
+        return True
+
+    def _play_at(self, name: str, word_index: int) -> bool:
+        """Schedule a gesture's stroke onto a known word index."""
+        delay = max(0.0, word_index / max(0.1, self._words_per_s)
+                    - self._prep_lead_s)
+        if delay < 0.02:
+            return self.play(name)
+        if not self._can_play(name):
+            return False
         t = threading.Timer(delay, self.play, args=(name,))
         t.daemon = True
         self._timer = t

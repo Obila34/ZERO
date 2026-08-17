@@ -602,3 +602,53 @@ def test_chained_gestures_do_not_retract_between_strokes():
     assert held > 15.0, held             # still raised, not retracted
     s.play("lift")                        # chain: preempts during the hold
     s._player.join(timeout=3.0)
+
+
+# ── every gesture class actually reachable from real speech ────────────────
+
+def test_all_gesture_classes_fire_from_sentence_meaning():
+    """Without inference only the beat ever fires and the other four classes
+    are dead code, because the model almost never writes a cue."""
+    from zero.arms.cues import infer_gesture
+
+    cases = [("Hey there, good to see you", "wave_right"),      # emblematic
+             ("Honestly I don't know", "shrug"),                # emblematic
+             ("It made a huge difference", "show_big"),         # iconic
+             ("Here you go", "offer_right"),                    # emblematic
+             ("The cup is over there", "point_right")]          # deictic
+    for text, want in cases:
+        got = infer_gesture(text)
+        assert got is not None and got[0] == want, (text, got)
+
+
+def test_inference_stays_quiet_on_ordinary_speech():
+    from zero.arms.cues import infer_gesture
+
+    for text in ["Yeah that sounds about right", "The meeting is on Tuesday",
+                 "I finished the report this morning", "It's raining again"]:
+        assert infer_gesture(text) is None, text
+
+
+def test_inferred_gesture_is_played_and_paced():
+    s = _armsys({"arms.beat_gap_s": 30.0})
+    assert s.express("Hey there, good to see you", now=1000.0) == "wave_right"
+    s._player.join(timeout=4.0)
+    # paced like any other gesture — no second one inside the gap
+    assert s.express("Here you go", now=1002.0) is None
+    assert s.express("Honestly I don't know", now=1040.0) == "shrug"
+    s._player.join(timeout=4.0)
+
+
+def test_inferred_point_still_needs_a_grounded_target():
+    s = _armsys({"arms.beat_gap_s": 0.0})
+    assert s.express("The cup is over there", now=1000.0) != "point_right"
+    s.set_pointing_allowed(True)
+    assert s.express("The cup is over there", now=1010.0) == "point_right"
+    s._player.join(timeout=4.0)
+
+
+def test_an_explicit_cue_still_wins_over_inference():
+    s = _armsys({"arms.beat_gap_s": 0.0})
+    # the sentence would infer a wave; the cue asks for a shrug
+    assert s.express("Hey there [shrug] good to see you", now=1000.0) == "shrug"
+    s._player.join(timeout=4.0)
