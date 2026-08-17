@@ -139,6 +139,38 @@ class HeadSystem:
                 gain=gain,
                 gain_y=float(cfg.get("head.hand.gain_y", 1.0)),
                 deadzone_y=float(cfg.get("head.hand.deadzone_y", 0.15)))
+        # MIRROR: ZERO's pan follows YOUR head's yaw across the full envelope,
+        # layered over face tracking rather than replacing it — face forward
+        # and it attends to you, turn your head and it turns with you. Runs
+        # alongside `input: face` (the teleop modes above are still their own
+        # thing). The yaw signal is nose-vs-ear-line geometry, which does NOT
+        # change when ZERO rotates its own head, so this is open-loop and
+        # cannot chase its own tail; but it DOES need you in frame, hence the
+        # hold below when a big turn carries you out of view.
+        self._mirror = None
+        self._mirror_hold = None      # last commanded mirror pan, or None
+        self._mirror_until = 0.0      # how long that hold survives signal loss
+        if bool(cfg.get("head.mirror.enabled", False)) and self._hand is None:
+            try:
+                self._mirror = HandPoseSource(
+                    cfg.resolve_path("head.hand.model_path",
+                                     "models/yolo11n-pose.onnx"),
+                    keypoint="head",
+                    conf=float(cfg.get("head.hand.conf", 0.5)),
+                    kp_conf=float(cfg.get("head.hand.kp_conf", 0.3)),
+                    min_shoulder_frac=float(
+                        cfg.get("head.hand.min_shoulder_frac", 0.10)),
+                    deadzone=0.0,     # deadzone applied to the mapped angle
+                    min_cutoff=float(cfg.get("head.hand.min_cutoff", 1.5)),
+                    beta=float(cfg.get("head.hand.beta", 0.5)),
+                    mirror=bool(cfg.get("head.hand.mirror", False)),
+                    gain=float(cfg.get("head.mirror.gain", 2.0)))
+            except Exception as e:
+                log.warning("head mirror unavailable: %s", e)
+                self._mirror = None
+        self._mirror_deadzone = float(cfg.get("head.mirror.deadzone", 0.2))
+        self._mirror_range = float(cfg.get("head.mirror.range_deg", 80.0))
+        self._mirror_hold_s = float(cfg.get("head.mirror.hold_s", 2.5))
         # Vertical teleop channel — kill switch + its own conservative range.
         # Ships dark: even with the nod driven, the follow stays horizontal
         # until head.hand.tilt is turned on after the supervised calibration.
@@ -178,6 +210,8 @@ class HeadSystem:
         self._controller.start()
         if self._hand is not None and self._eyes is not None:
             self._hand.start(self._eyes)     # background pose thread (~8 fps)
+        if self._mirror is not None and self._eyes is not None:
+            self._mirror.start(self._eyes)   # same pose thread, head-yaw mode
         # Always run the source loop — even with no camera it carries out
         # commanded gaze (voice/typed "turn left", "stop", ...). Head-FOLLOW and
         # face tracking need eyes and idle-home without them; commands do not.
@@ -192,6 +226,8 @@ class HeadSystem:
         self._src_stop.set()
         if self._hand is not None:
             self._hand.stop()
+        if self._mirror is not None:
+            self._mirror.stop()
         try:
             # Ease to home before releasing, and actually WAIT for it: the
             # gateway holds the last commanded pose forever (no watchdog), so
@@ -307,6 +343,9 @@ class HeadSystem:
         self._cmd_hold = False
         if self._hand is not None:
             self._hand.reset_filters()   # avoid a jump when the follow resumes
+        if self._mirror is not None:
+            self._mirror.reset_filters()
+            self._mirror_hold = None
         self._scheduler.set_state(self._scheduler.state, time.monotonic())
         what = "following you" if self._input in ("hand", "head") else "tracking"
         return f"Okay, {what} again."
@@ -388,6 +427,35 @@ class HeadSystem:
             self._dbg["branch"] = "hand-lost"
         # else: brief dropout within grace -> hold the last target
 
+    def _mirror_target(self, now: float):
+        """Pan angle your head yaw is asking for, or None to leave the neck to
+        face tracking. Small movements are ignored so ordinary conversational
+        head-bobbing doesn't twitch the neck; past the deadzone the mapping is
+        proportional, so a bigger turn means a bigger turn.
+
+        A large mirror turn carries you out of the camera's view, which kills
+        the very signal that asked for it — so the last angle is HELD for
+        hold_s after the signal drops, then released back to face tracking
+        (which brings the head round and re-acquires you). Without the hold
+        the neck would snap back the instant it obeyed."""
+        x, _y, conf = self._mirror.value
+        if conf > 0.0:
+            if abs(x) < self._mirror_deadzone:
+                self._mirror_hold = None      # facing forward -> attend to me
+                return None
+            # Re-span so the deadzone isn't a step: at the threshold the turn
+            # starts from 0 and reaches the full range at |x| = 1.
+            span = max(1e-3, 1.0 - self._mirror_deadzone)
+            mag = (abs(x) - self._mirror_deadzone) / span
+            pan = (1.0 if x > 0 else -1.0) * min(1.0, mag) * self._mirror_range
+            self._mirror_hold = pan
+            self._mirror_until = now + self._mirror_hold_s
+            return pan
+        if self._mirror_hold is not None and now < self._mirror_until:
+            return self._mirror_hold          # turned away — hold the pose
+        self._mirror_hold = None
+        return None
+
     def _gate(self) -> str:
         if self._estop:
             return "freeze"
@@ -429,6 +497,16 @@ class HeadSystem:
         if self._input in ("hand", "head"):
             self._hand_tick(now)
             return
+        if self._mirror is not None:
+            pan = self._mirror_target(now)
+            if pan is not None:
+                _cx, cy = self._controller.position   # keep the current tilt
+                aim = self._controller.clamp_to_envelope(pan, cy)
+                self._controller.set_target(*aim)
+                self._last_aim = aim
+                self._dbg["branch"] = "mirror"
+                self._dbg["aim"] = (round(aim[0], 1), round(aim[1], 1))
+                return
         bias = self._scheduler.tick(now)
         if not bias.on_face:
             # Aversion (or thinking): hold the last face aim plus a small offset,

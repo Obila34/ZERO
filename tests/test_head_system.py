@@ -185,3 +185,76 @@ def test_missing_attention_age_falls_back_to_live():
     for i in range(6):
         hs._source_tick(1000.0 + i * 0.07)
     assert hs._dbg["branch"] == "engage"
+
+
+class FakeMirror:
+    """Stands in for the head-yaw pose source: (x, y, conf)."""
+    def __init__(self, x=0.0, conf=1.0):
+        self.value = (x, 0.0, conf)
+
+    def set(self, x, conf=1.0):
+        self.value = (x, 0.0, conf)
+
+    def reset_filters(self):
+        pass
+
+
+def _mirror_sys(**over):
+    base = {"head.mirror.deadzone": 0.2, "head.mirror.range_deg": 80.0,
+            "head.mirror.hold_s": 2.5}
+    base.update(over)
+    hs = _sys(FakeEyes(win=(300, 200, 80, 80)), over=base)
+    hs._mirror = FakeMirror()
+    return hs
+
+
+def test_small_head_movements_are_ignored():
+    hs = _mirror_sys()
+    hs._mirror.set(0.15)                       # inside the deadzone
+    assert hs._mirror_target(1000.0) is None
+
+
+def test_big_turn_maps_proportionally_across_the_range():
+    hs = _mirror_sys()
+    hs._mirror.set(1.0)                        # full turn -> full range
+    assert hs._mirror_target(1000.0) == 80.0
+    hs._mirror.set(-1.0)                       # and symmetric the other way
+    assert hs._mirror_target(1000.0) == -80.0
+    # just past the deadzone starts from ~0, not a step to a big angle
+    hs._mirror.set(0.21)
+    assert 0.0 < hs._mirror_target(1000.0) < 5.0
+    # and it is monotonic: further turn, bigger angle
+    hs._mirror.set(0.6)
+    mid = hs._mirror_target(1000.0)
+    hs._mirror.set(0.8)
+    assert hs._mirror_target(1000.0) > mid
+
+
+def test_turn_is_held_when_you_leave_the_frame_then_released():
+    hs = _mirror_sys()
+    hs._mirror.set(1.0)
+    assert hs._mirror_target(1000.0) == 80.0
+    hs._mirror.set(0.0, conf=0.0)              # turned away -> signal lost
+    assert hs._mirror_target(1001.0) == 80.0   # held, not snapped back
+    assert hs._mirror_target(1004.0) is None   # past hold_s -> face tracking
+
+
+def test_facing_forward_hands_the_neck_back_to_attention():
+    hs = _mirror_sys()
+    hs._mirror.set(1.0)
+    hs._mirror_target(1000.0)
+    hs._mirror.set(0.0)                        # squared up again
+    assert hs._mirror_target(1000.5) is None
+    # and the source tick then runs the face-tracking branch
+    hs._scheduler.set_state("listening", 999.0)
+    hs._source_tick(1000.6)
+    assert hs._dbg["branch"] != "mirror"
+
+
+def test_mirror_drives_the_neck_and_respects_the_envelope():
+    hs = _mirror_sys()
+    hs._mirror.set(1.0)
+    hs._scheduler.set_state("listening", 999.0)
+    hs._source_tick(1000.0)
+    assert hs._dbg["branch"] == "mirror"
+    assert hs._last_aim[0] == 45.0             # clamped to default limit_deg

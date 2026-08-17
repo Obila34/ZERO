@@ -911,6 +911,22 @@ head:
   # Eyes-lead-head: the neck holds while the face is within this fraction of the
   # half-frame (the digital crop is the fast 'eye'); beyond it the neck engages.
   engage_frac: 0.1          # neck engages past ~5-7° off-centre (this cam's scale)
+  # MIRROR — ZERO's pan follows YOUR head yaw, layered over face tracking:
+  # face it and it attends to you; turn your head and it turns with you, across
+  # the full pan envelope, proportional to how far you turned. Small movements
+  # are ignored so conversational head-bobbing doesn't twitch the neck.
+  # The yaw signal is nose-vs-ear-line geometry, so it doesn't change as ZERO
+  # rotates — the loop is open-loop and stable — but a big turn does carry you
+  # out of frame, which is what hold_s covers.
+  mirror:
+    enabled: true
+    deadzone: 0.2         # |signal| below this = facing forward, no override.
+                          # Raise if it reacts to small talking movements.
+    range_deg: 80         # a full head turn maps to this many degrees of pan
+    gain: 2.0             # sensitivity of the nose-vs-ears yaw signal
+    hold_s: 2.5           # hold the turn this long after you leave the frame,
+                          # then release to face tracking (which re-acquires).
+                          # Without it the neck snaps back the moment it obeys.
   face_stale_s: 0.7         # the attention window FREEZES where a face was last
                             # seen; past this long with no actual detection the
                             # head stops treating it as a target and eases home
