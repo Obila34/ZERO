@@ -259,3 +259,55 @@ def test_prompt_only_teaches_performable_gestures():
     block = prompt_block(["beat_right", "wave_right"])
     assert "[beat]" in block and "[wave]" in block
     assert "[point_left]" not in block            # not available -> not taught
+
+
+def test_driver_subtracts_gateway_offsets_and_waits_for_them():
+    """The gateway ADDS its stored offset before converting to steps, so a raw
+    0 on a joint offset by -150 commands a 150-degree move. The driver works
+    in effective degrees and must refuse to post until it knows the offsets."""
+    import json as _json
+    import threading as _th
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    posts, offsets_served = [], {"right_elbow_joint": 50.0}
+
+    class H(BaseHTTPRequestHandler):
+        def do_GET(self):
+            body = _json.dumps(offsets_served).encode()
+            self.send_response(200); self.end_headers(); self.wfile.write(body)
+
+        def do_POST(self):
+            n = int(self.headers.get("Content-Length", 0))
+            posts.append(_json.loads(self.rfile.read(n)))
+            self.send_response(200); self.end_headers(); self.wfile.write(b"{}")
+
+        def log_message(self, *a):
+            pass
+
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
+    _th.Thread(target=srv.serve_forever, daemon=True).start()
+    from zero.arms.driver import HttpArmDriver, JointSpec
+
+    d = HttpArmDriver(base_url=f"http://127.0.0.1:{srv.server_address[1]}",
+                      joints={"right_elbow_joint": JointSpec(
+                          "right_elbow_joint", -40, 40, 0)},
+                      max_hz=200.0, deadband_deg=0.1, timeout_s=1.0)
+    try:
+        d.send({"right_elbow_joint": 10.0})     # effective +10
+        t0 = time.monotonic()
+        while not posts and time.monotonic() - t0 < 3.0:
+            time.sleep(0.01)
+        assert posts, "nothing posted"
+        # 10 effective - 50 offset = -40 raw, so the gateway re-adds to +10
+        assert abs(posts[-1]["angle_deg"] - (-40.0)) < 1e-6
+    finally:
+        d.close(); srv.shutdown(); srv.server_close()
+
+
+def test_limit_frac_shrinks_the_envelope_around_home():
+    cfg = {"arms.allow_steppers": True, "arms.limit_frac": 0.5,
+           "arms.joints": {"right_elbow_joint": {"min": -90.0, "max": 20.0,
+                                                 "home": 0.0}}}
+    j = load_joints(FakeCfg(cfg))["right_elbow_joint"]
+    assert j.min_deg == -45.0 and j.max_deg == 10.0
+    assert j.home_deg == 0.0

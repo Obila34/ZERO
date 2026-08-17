@@ -1035,11 +1035,17 @@ head:
 # pose the Nano booted in — they stay inert even when calibrated unless
 # allow_steppers is also true. Servo hands first; steppers later, carefully.
 arms:
-  enabled: false            # master switch for the subsystem + voice commands
-  driver: null              # null = record only | http = MOVES THE ROBOT
+  enabled: true             # subsystem + voice commands + gesture cues LIVE
+  driver: null              # null = record only | http = MOVES THE ROBOT.
+                            # Still null: the URDF envelopes below are the
+                            # machine's limits, but no arm joint has been
+                            # moved under supervision yet. Flip to http for
+                            # that first watched test, not before.
   rate_hz: 20               # gesture playback tick
   max_speed_dps: 60         # per-joint speed cap during playback
-  allow_steppers: false     # keep the geared stepper joints inert
+  allow_steppers: true      # the gesture joints (shoulder-lift/bicep/elbow)
+                            # are all steppers, so this must be on for any of
+                            # them to load. driver:null is what holds motion.
   # Gesture pacing + grounding for the conversational layer. The model cues a
   # gesture inline in its reply ([beat], [wave], ...) and the cue fires as that
   # word reaches the speaker. NOTE: the shoulder in/out joints and the wrists
@@ -1061,19 +1067,23 @@ arms:
   # exact numbers the script prints (it prints them in this raw command space
   # — paste verbatim). A commented/absent joint is INERT. Steppers also need
   # allow_steppers: true above once their lines are real.
-  joints: {}
-    # -- steppers (run with --stepper; arm at rest; cockpit closed) --
-    # right_bicep_joint:   {min: 0.0, max: 0.0, home: 0.0}
-    # left_bicep_joint:    {min: 0.0, max: 0.0, home: 0.0}
-    # right_elbow_joint:   {min: 0.0, max: 0.0, home: 0.0}
-    # left_elbow_joint:    {min: 0.0, max: 0.0, home: 0.0}
-    # right_up_down_joint: {min: 0.0, max: 0.0, home: 0.0}
-    # left_up_down_joint:  {min: 0.0, max: 0.0, home: 0.0}
-    # right_in_out_joint:  {min: 0.0, max: 0.0, home: 0.0}
-    # left_in_out_joint:   {min: 0.0, max: 0.0, home: 0.0}
-    # -- servos (blocked until the PCA9685 servo-power rail is fixed) --
-    # right_wrist_joint:   {min: 0.0, max: 0.0, home: 0.0}
-    # left_wrist_joint:    {min: 0.0, max: 0.0, home: 0.0}
+  # Envelopes from the robot's own URDF on the Arm Pi
+  # (~/AF1_Workspace/robot_description/humanoid.urdf), converted rad -> deg.
+  # These are MECHANICAL travel limits; they do not say where the arm is
+  # sitting, because the steppers have no encoders and zero is wherever they
+  # were at the last reset — hence limit_frac below. The shoulder in/out pair
+  # and the wrists are absent deliberately: excluded in code, not just here.
+  limit_frac: 0.35          # fraction of each URDF range actually usable, in
+                            # effect until supervised motion confirms the arm
+                            # rests near the modelled zero. Raise toward 1.0
+                            # once verified, one step at a time.
+  joints:
+    right_up_down_joint: {min: -68.8, max: 106.0, home: 0.0}   # shoulder lift
+    left_up_down_joint:  {min: -68.8, max: 106.0, home: 0.0}
+    right_bicep_joint:   {min: -74.9, max:  47.7, home: 0.0}   # upper-arm roll
+    left_bicep_joint:    {min: -120.3, max: 120.3, home: 0.0}
+    right_elbow_joint:   {min: -90.5, max:  19.5, home: 0.0}
+    left_elbow_joint:    {min: -90.5, max:  19.5, home: 0.0}
   gestures: {}
     # Templates to uncomment AFTER the joints above are calibrated. Replace
     # the TODO joint names/angles once you know which joint physically lifts

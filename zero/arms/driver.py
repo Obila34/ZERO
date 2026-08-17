@@ -88,6 +88,15 @@ class HttpArmDriver:
         self._min_interval = 1.0 / max(1.0, float(max_hz))
         self._deadband = float(deadband_deg)
         self._timeout = float(timeout_s)
+        # The gateway ADDS its stored per-joint offset before converting to
+        # steps, and those offsets are large: right_up_down sat at -150 on
+        # 2026-08-17, so posting a raw 0 would have commanded the shoulder 150
+        # degrees away from where it booted. This driver therefore works in
+        # EFFECTIVE degrees — degrees from the motor's zero, which for these
+        # encoderless steppers is the pose they were in at the last reset —
+        # and subtracts the offset on the way out. Nothing is posted until the
+        # offsets are known: guessing them is how you break an arm.
+        self._offsets: dict[str, float] | None = None
         self._sent: dict[str, float] = {}      # last ACKNOWLEDGED angle per joint
         self._pending: dict[str, float] = {}
         self._fails = 0
@@ -161,8 +170,28 @@ class HttpArmDriver:
                 self._wake.set()
                 time.sleep(min(2.0, 0.2 * self._fails))
 
+    def _fetch_offsets(self) -> bool:
+        """Read the gateway's stored zero-offsets. Until this succeeds the
+        driver stays mute — see the note in __init__."""
+        if self._offsets is not None:
+            return True
+        try:
+            with urllib.request.urlopen(f"{self._base}/api/calibration",
+                                        timeout=self._timeout) as r:
+                self._offsets = {k: float(v)
+                                 for k, v in json.loads(r.read().decode()).items()}
+            log.info("arm gateway offsets loaded (%d joints)", len(self._offsets))
+            return True
+        except Exception as e:
+            log.warning("arm offsets unavailable (%s) — NOT moving: a command "
+                        "sent without them lands wherever the offset says", e)
+            return False
+
     def _post(self, joint: str, deg: float) -> bool:
         import math
+        if not self._fetch_offsets():
+            return False
+        deg = deg - self._offsets.get(joint, 0.0)    # effective -> raw command
         body = json.dumps({"name": joint, "angle_deg": deg,
                            "angle_rad": deg * math.pi / 180.0}).encode()
         req = urllib.request.Request(
@@ -194,6 +223,13 @@ def load_joints(cfg) -> dict[str, JointSpec]:
     `arms.allow_steppers` — their zero is wherever the Nano booted."""
     raw = cfg.get("arms.joints") or {}
     allow_steppers = bool(cfg.get("arms.allow_steppers", False))
+    # Envelopes come from the robot's URDF, which describes each joint's
+    # mechanical travel. What it CANNOT tell us is where inside that travel the
+    # arm happens to be sitting: these steppers have no encoders, so zero is
+    # wherever they were at the last reset. frac shrinks the envelope around
+    # home for exactly that reason — use a fraction until supervised motion
+    # has confirmed the arm really does rest near the modelled zero.
+    frac = min(1.0, max(0.05, float(cfg.get("arms.limit_frac", 1.0))))
     joints: dict[str, JointSpec] = {}
     for name, ent in raw.items():
         if name in EXCLUDED_JOINTS:
@@ -201,8 +237,11 @@ def load_joints(cfg) -> dict[str, JointSpec]:
                      name)
             continue
         try:
-            spec = JointSpec(str(name), ent["min"], ent["max"],
-                             ent.get("home", 0.0))
+            home = float(ent.get("home", 0.0))
+            spec = JointSpec(str(name),
+                             home + (float(ent["min"]) - home) * frac,
+                             home + (float(ent["max"]) - home) * frac,
+                             home)
         except (KeyError, TypeError, ValueError) as e:
             log.warning("arms.joints.%s invalid (%s) — ignored", name, e)
             continue
