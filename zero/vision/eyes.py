@@ -52,6 +52,7 @@ class Eyes:
                  *, color_top_n: int = 5, max_items: int = 6,
                  use_gpu: bool = True, multimodal: bool = False,
                  jpeg_quality: int = 80, detect_interval_s: float = 0.0,
+                 face_track_hz: float = 0.0,
                  frames_per_look: int = 2, look_window_s: float = 1.0,
                  vlm_fallback: bool = False,
                  preview: bool = False, preview_scale: float = 1.0,
@@ -71,6 +72,13 @@ class Eyes:
         self._multimodal = bool(multimodal)
         self._jpeg_quality = int(jpeg_quality)
         self._detect_interval = float(detect_interval_s)
+        # Face tracking on its OWN thread. In the detection loop it inherited
+        # that loop's pace — the detect_interval sleep plus a GPU round trip —
+        # so the head learned where a face was only ~5x/s and tracked blind
+        # between updates. >0 runs the digital gaze independently at up to this
+        # rate off the raw camera feed; 0 keeps the legacy in-loop behaviour.
+        self._face_track_hz = float(face_track_hz)
+        self._face_thread: Optional[threading.Thread] = None
         self._frames_per_look = max(1, int(frames_per_look))
         self._look_window_s = float(look_window_s)
         self._vlm_fallback = bool(vlm_fallback)
@@ -189,6 +197,10 @@ class Eyes:
         self._started_at = time.time()
         self._thread = threading.Thread(target=self._loop, name="Eyes", daemon=True)
         self._thread.start()
+        if self._framer is not None and self._face_track_hz > 0:
+            self._face_thread = threading.Thread(
+                target=self._face_loop, name="EyesFace", daemon=True)
+            self._face_thread.start()
         if self._learned is not None:
             self._ann_thread = threading.Thread(
                 target=self._annotate_loop, name="EyesAnnotate", daemon=True)
@@ -207,6 +219,9 @@ class Eyes:
         if self._ann_thread is not None:
             self._ann_thread.join(timeout=2.0)
             self._ann_thread = None
+        if self._face_thread is not None:
+            self._face_thread.join(timeout=2.0)
+            self._face_thread = None
         self._camera.stop()
         if self._preview_sink is not None:
             self._preview_sink.close()
@@ -293,8 +308,8 @@ class Eyes:
             # YuNet) and it is the closed-loop signal the head follows, so it must
             # stay fresh while the neck is moving — otherwise pursuit can't see the
             # face re-centre and winds up to the limit.
-            if self._framer is not None:
-                self._framer.update(frame, now)   # never raises
+            if self._framer is not None and self._face_track_hz <= 0:
+                self._framer.update(frame, now)   # never raises (legacy path)
             if self._preview_sink is not None and self._preview_sink.ok:
                 self._preview_sink.show(
                     frame, detections,
@@ -512,6 +527,24 @@ class Eyes:
         q = self._ann_key_q
         return (det.label.lower(), (x + w // 2) // q, (y + h // 2) // q,
                 w // q, h // q)
+
+    def _face_loop(self) -> None:
+        """Digital gaze on its own thread — the closed-loop signal the neck
+        follows, kept fresh independently of object detection. Reads the RAW
+        camera feed (the scene snapshot stalls while remote detection retries)
+        and never raises: a broken framer must not take perception with it."""
+        period = 1.0 / max(1.0, self._face_track_hz)
+        while not self._stop.is_set():
+            t0 = time.monotonic()
+            try:
+                frame = self._camera.read()
+                if frame is not None:
+                    self._framer.update(frame, time.time())
+            except Exception as e:
+                log.debug("face track tick failed: %s", e)
+            wait = period - (time.monotonic() - t0)
+            if wait > 0:
+                self._stop.wait(wait)
 
     def _annotate_loop(self) -> None:
         """Background learned-object annotation, instance-cached: each object

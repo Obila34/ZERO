@@ -707,6 +707,16 @@ vision:
     window_frac: 0.45 # window size as a fraction of each frame dimension
     confirm_s: 0.4 # face must persist this long before the gaze locks on
     lost_s: 2.0 # gaze holds a briefly-lost face this long (head turns, blinks)
+    # HOW FAST THE HEAD LEARNS WHERE YOUR FACE IS — the real limit on tracking
+    # responsiveness. Measured 2026-08-17: face tracking inside the detection
+    # loop updated at only 4.8 Hz (median gap 185 ms, worst 748 ms) because it
+    # inherited that loop's sleep and its GPU round trip, and YuNet was
+    # detecting at full 640x480 (~97 ms/frame).
+    track_hz: 20 # digital gaze on its own thread at up to this rate (0 = old
+      # in-loop behaviour). The neck cannot react faster than this.
+    detect_scale: 0.5 # run face detection on a half-size copy and scale the
+      # boxes back — ~4x cheaper for the same faces at conversational range.
+      # 1.0 = full resolution (slower). Identity/enrolment are unaffected.
 
   # Live preview: SEE what ZERO sees (camera feed + detection boxes) while it runs.
   preview: true
@@ -935,7 +945,10 @@ head:
     tilt_sign: 1.0          # the one-look sign test: flip if error GROWS on turn
     half_fov_pan_deg: 35
     half_fov_tilt_deg: 25
-    settle_delay_s: 0.2     # beat between corrections (quicker follow)
+    settle_delay_s: 0.08    # beat between corrections. This is a deliberate
+                            # wait for the neck+camera to catch up before
+                            # correcting again; it only needs to cover one
+                            # face-position update, now ~50 ms (was ~200 ms).
     lead_s: 0.12            # predictive lead (was 0.30 — big leads jumped on noise)
 
   social:                   # GazeScheduler — the turn-taking layer
@@ -956,10 +969,15 @@ head:
     base_url: http://100.67.233.65:5000
     pan_joint: head_tilt_joint    # firmware joint names (resolve on calibration)
     tilt_joint: head_nod_joint
-    max_hz: 15
-    deadband_deg: 0.4
+    max_hz: 28              # posts/sec to the gateway. At 15 the driver was
+                            # itself the speed limit: the controller advances
+                            # up to 14.7 deg between posts at 220 deg/s, above
+                            # the 12 deg max_jump, so every fast move got
+                            # walked and capped near 180 deg/s. 28 keeps each
+                            # post's delta under the cap.
+    deadband_deg: 0.3       # smaller = finer corrections still get posted
     timeout_s: 0.5
-    max_jump_deg: 12        # max hardware move per post from last-ACKED pose —
+    max_jump_deg: 16        # max hardware move per post from last-ACKED pose —
                             # after an outage the driver WALKS to the target
                             # instead of whipping (slew only exists in belief)
     # Nod mapping: gateway servo = 90 + angle_deg, and the driver posts

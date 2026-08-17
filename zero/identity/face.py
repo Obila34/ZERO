@@ -72,13 +72,20 @@ class YuNetDetector:
     """
 
     def __init__(self, model_path: str, min_size: int = 60,
-                 score_threshold: float = 0.8):
+                 score_threshold: float = 0.8, detect_scale: float = 1.0):
         import cv2
 
         if not Path(model_path).exists():
             raise FileNotFoundError(f"yunet model not found: {model_path}")
         self._cv2 = cv2
         self.min_size = int(min_size)
+        # Detection cost scales with PIXELS, and setInputSize() below hands the
+        # net the frame's full resolution — 640x480 measured ~97 ms on a Pi 4,
+        # which capped face tracking at ~10 Hz. detect_scale <1 runs the net on
+        # a downscaled copy and scales the boxes back: 0.5 is ~4x cheaper for
+        # the same faces at conversational distance. 1.0 = unchanged (identity
+        # and enrolment keep full resolution, where accuracy matters most).
+        self._scale = min(1.0, max(0.1, float(detect_scale)))
         # 0.8: real faces score ~0.9 even small/rotated; the sub-0.7 tail is
         # false positives — and a false face could get ENROLLED or framed.
         self._det = cv2.FaceDetectorYN.create(
@@ -92,16 +99,23 @@ class YuNetDetector:
         cv2 = self._cv2
         H, W = frame_rgb.shape[:2]
         bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
+        s = self._scale
+        if s < 1.0:
+            bgr = cv2.resize(bgr, (max(1, int(W * s)), max(1, int(H * s))),
+                             interpolation=cv2.INTER_LINEAR)
+        dh, dw = bgr.shape[:2]
         with self._lock:
-            self._det.setInputSize((W, H))
+            self._det.setInputSize((dw, dh))
             _, faces = self._det.detect(bgr)
+        inv = 1.0 / s if s < 1.0 else 1.0
         out = []
         for row in (faces if faces is not None else []):
-            x, y, w, h = row[:4]
+            x, y, w, h = (v * inv for v in row[:4])   # back to frame coords
             if min(w, h) < self.min_size:
                 continue
             bbox = (int(x), int(y), int(w), int(h))
-            pts = _order_5pt(np.array(row[4:14], dtype=np.float32).reshape(5, 2))
+            pts = _order_5pt(
+                np.array(row[4:14], dtype=np.float32).reshape(5, 2) * inv)
             out.append((bbox, pts))
         return sorted(out, key=lambda f: f[0][2] * f[0][3], reverse=True)
 

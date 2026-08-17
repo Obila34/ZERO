@@ -546,7 +546,8 @@ def build_vision(cfg: Config):
                 # nothing to follow. The 0.8 score threshold still rejects the
                 # false positives (real faces score ~0.9).
                 YuNetDetector(str(det_path),
-                              min_size=cfg.get("vision.attention.min_face_px", 32)),
+                              min_size=cfg.get("vision.attention.min_face_px", 32),
+                              detect_scale=cfg.get("vision.attention.detect_scale", 0.5)),
                 window_frac=cfg.get("vision.attention.window_frac", 0.45),
                 confirm_s=cfg.get("vision.attention.confirm_s", 0.4),
                 lost_s=cfg.get("vision.attention.lost_s", 2.0),
@@ -562,6 +563,7 @@ def build_vision(cfg: Config):
         multimodal=cfg.get("vision.multimodal", False),
         jpeg_quality=cfg.get("vision.gpu.jpeg_quality", 80),
         detect_interval_s=cfg.get("vision.detect_interval_s", 0.0),
+        face_track_hz=cfg.get("vision.attention.track_hz", 0.0),
         frames_per_look=cfg.get("vision.frames_per_look", 2),
         look_window_s=cfg.get("vision.look_window_s", 1.0),
         vlm_fallback=cfg.get("vision.gpu.vlm_fallback", False),
