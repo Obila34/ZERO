@@ -110,6 +110,8 @@ class ArmSystem:
         self._joint_sign = dict(cfg.get("arms.joint_sign") or {})
         # Speech beats: a small gesture on some spoken sentences even when the
         # model cued nothing, so the arms are visibly alive while ZERO talks.
+        from zero.arms.commands import set_default_step
+        set_default_step(float(cfg.get("arms.step_deg", 30.0)))
         self._speech_beat = bool(cfg.get("arms.speech_beat", True))
         self._beat_gap_s = float(cfg.get("arms.beat_gap_s", 8.0))
         self._beat_n = 0

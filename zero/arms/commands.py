@@ -16,10 +16,20 @@ import re
 
 _SIDE = r"(?P<side>right|left)"
 
-# Default magnitudes for a joint move with no explicit degrees.
-STEP_DEG = 15.0     # a plain "raise your elbow"
-SMALL_DEG = 6.0     # "a bit", "slightly"
+# Default magnitudes for a joint move with no explicit degrees. 15 was measured
+# as too small to read as movement across a room (2026-08-17) — the joint moved
+# exactly as commanded, it just did not LOOK like anything.
+STEP_DEG = 30.0     # a plain "raise your elbow"
+SMALL_DEG = 10.0    # "a bit", "slightly"
 FULL_DEG = 999.0    # "all the way" — the envelope clamps it to the real stop
+
+
+def set_default_step(deg: float) -> None:
+    """Override the default move size from config (arms.step_deg), so how big
+    a plain "raise your arm" is can be tuned without editing code."""
+    global STEP_DEG, SMALL_DEG
+    STEP_DEG = float(deg)
+    SMALL_DEG = max(2.0, float(deg) / 3.0)
 
 # "wave" as an imperative — short utterances or explicit "wave your hand".
 _WAVE = re.compile(

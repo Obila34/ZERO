@@ -2,7 +2,7 @@
 honesty — all headless (NullArmDriver / in-process fake gateway)."""
 import time
 
-from zero.arms.commands import parse_arm_command as P
+from zero.arms.commands import SMALL_DEG, parse_arm_command as P
 from zero.arms.driver import JointSpec, NullArmDriver, load_joints
 from zero.arms.system import ArmSystem
 
@@ -323,7 +323,7 @@ def test_joint_commands_parse_with_side_direction_and_amount():
     assert r["kind"] == "joint" and r["joints"] == ["right_elbow_joint"]
     assert r["degrees"] > 0
     assert P("bend your left elbow 20 degrees")["degrees"] == -20.0
-    assert P("lower your arm a bit")["degrees"] == -6.0
+    assert P("lower your arm a bit")["degrees"] == -SMALL_DEG
     assert P("raise both shoulders")["joints"] == ["right_up_down_joint",
                                                    "left_up_down_joint"]
     # ordinary speech still never moves an arm

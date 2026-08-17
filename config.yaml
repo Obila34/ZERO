@@ -1085,7 +1085,10 @@ arms:
   # sitting, because the steppers have no encoders and zero is wherever they
   # were at the last reset — hence limit_frac below. The shoulder in/out pair
   # and the wrists are absent deliberately: excluded in code, not just here.
-  limit_frac: 0.6           # fraction of each URDF range actually usable, in
+  step_deg: 30              # how far a plain "raise your elbow" moves. 15 was
+                            # measured as too small to read as movement; say an
+                            # explicit "40 degrees" to override per command.
+  limit_frac: 1.0           # fraction of each URDF range actually usable, in
                             # effect until supervised motion confirms the arm
                             # rests near the modelled zero. Raise toward 1.0
                             # once verified, one step at a time.
