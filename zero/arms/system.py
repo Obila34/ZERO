@@ -122,6 +122,14 @@ class ArmSystem:
         self._speech_beat = bool(cfg.get("arms.speech_beat", True))
         self._beat_gap_s = float(cfg.get("arms.beat_gap_s", 8.0))
         self._beat_n = 0
+        # Gesture units: how long a stroke is held before retracting. A
+        # following gesture inside this window cancels the retraction, so the
+        # arm flows between gestures instead of returning to rest each time.
+        self._unit_hold_s = float(cfg.get("arms.unit_hold_s", 1.2))
+        # Speech pacing, for putting the stroke on its word (see express()).
+        self._words_per_s = float(cfg.get("arms.words_per_sec", 2.8))
+        self._prep_lead_s = float(cfg.get("arms.prep_lead_s", 0.25))
+        self._timer = None
         self._gen = 0                       # bumps to preempt a running gesture
         self._lock = threading.Lock()
         self._player: threading.Thread | None = None
@@ -200,7 +208,8 @@ class ArmSystem:
         cannot be grounded, or the pacing floor hasn't elapsed — a hand that
         moves on every sentence reads as nervous rather than alive.
         """
-        from zero.arms.cues import CUE_FUNCTION, CUE_TO_GESTURE, find_cues
+        from zero.arms.cues import (CUE_FUNCTION, CUE_TO_GESTURE, cue_positions,
+                                    find_cues)
 
         now = time.monotonic() if now is None else now
         cues = find_cues(text)
@@ -219,7 +228,7 @@ class ArmSystem:
                 return None
             self._beat_n += 1
             name = "beat_both" if self._beat_n % 3 == 0 else "beat_right"
-            if not self.play(name):
+            if not self._play_on_word(name, text, None):
                 return None
             self._last_gesture_t = now
             return name
@@ -232,10 +241,52 @@ class ArmSystem:
                 else "right")
         if self._hand_state.get(hand, "free") != "free":
             return None                     # that hand is holding something
-        if not self.play(name):
+        if not self._play_on_word(name, text, cue):
             return None                     # uncalibrated / unknown: refuse
         self._last_gesture_t = now
         return name
+
+    def _play_on_word(self, name: str, text: str, cue: str | None) -> bool:
+        """Start the gesture so its STROKE lands on the word it belongs to.
+
+        McNeill's phonological synchrony rule: the stroke coincides with, or
+        slightly precedes, the stressed syllable of its word — and never
+        follows it. So the gesture waits until that word is about to be
+        spoken, minus a preparation lead, because the arm must already be on
+        its way before the word arrives. Firing at sentence onset (what this
+        did before) put the stroke seconds early on a long sentence.
+        """
+        from zero.arms.cues import cue_positions
+
+        delay = 0.0
+        if cue is not None:
+            for c, idx, _total in cue_positions(text):
+                if c == cue:
+                    delay = idx / max(0.1, self._words_per_s)
+                    break
+        else:
+            # An uncued speech beat has no affiliate word, so put it on the
+            # phrase's first stressed beat rather than the opening syllable.
+            delay = 2.0 / max(0.1, self._words_per_s)
+        delay = max(0.0, delay - self._prep_lead_s)
+        if delay < 0.02:
+            return self.play(name)
+        if not self._can_play(name):
+            return False               # check BEFORE promising, not after
+        t = threading.Timer(delay, self.play, args=(name,))
+        t.daemon = True
+        self._timer = t
+        t.start()
+        return True
+
+    def _can_play(self, name: str) -> bool:
+        """Whether play(name) would succeed, without starting it."""
+        frames = self._gestures.get(name)
+        if frames is None or self._estop:
+            return False
+        if name == "rest":
+            return True
+        return any(j in self._joints for tg, _s in frames for j in tg)
 
     def set_pointing_allowed(self, allowed: bool) -> None:
         """Whether a deictic cue may be honoured — set from perception, so a
@@ -319,61 +370,76 @@ class ArmSystem:
         return None
 
     def _play(self, name: str, frames: list, gen: int) -> None:
+        """Run a gesture as Kendon phases, with human motion kinematics.
+
+        Each frame is driven by the MINIMUM-JERK profile that natural reaching
+        follows — a bell-shaped velocity curve, rather than the constant-speed
+        chase this used to do, which reads as machinery. The frame's duration
+        is stretched if the move could not be made inside it at max_speed_dps,
+        so a gesture can no longer arrive half-made.
+
+        The final frame is the RETRACTION, and it is deliberately deferred:
+        Kendon's gesture units show that when gestures come in sequence the
+        retraction is shortened or dropped entirely, the hand staying up
+        between strokes. So the stroke is held for unit_hold_s first, and if
+        another gesture preempts during that hold, this one never retracts —
+        the arm flows from one gesture into the next instead of bobbing back
+        to rest between every one.
+        """
         dt = 1.0 / max(1.0, self._rate)
-        step_cap = self._max_dps * dt
+        stroke, retract = (frames[:-1], frames[-1:]) if len(frames) > 1 else (frames, [])
         log.info("arm gesture %r (%d frame(s))", name, len(frames))
-        for targets, hold_s in frames:
-            goal: dict[str, float] = {}
-            for jname, tgt in targets.items():
-                spec = self._joints.get(jname)
-                if spec is None:
-                    continue                # uncalibrated — inert by design
-                v = self._resolve(tgt, spec)
-                if v is not None:
-                    goal[jname] = spec.clamp(v)
-            t_end = time.monotonic() + max(0.05, float(hold_s))
+        if not self._run_frames(stroke, gen, dt):
+            return
+        if retract:
+            # Post-stroke hold — the window in which a following gesture can
+            # cancel the retraction and chain into this one.
+            t_end = time.monotonic() + self._unit_hold_s
             while time.monotonic() < t_end:
                 with self._lock:
                     if gen != self._gen:
-                        return              # preempted / e-stopped
-                moved = {}
-                for jname, tgt in goal.items():
-                    cur = self._pose[jname]
-                    if cur != tgt:
-                        step = max(-step_cap, min(step_cap, tgt - cur))
-                        self._pose[jname] = cur + step
-                        moved[jname] = self._pose[jname]
-                if moved:
-                    try:
-                        self._driver.send(moved)
-                    except Exception as e:
-                        log.debug("arm send failed: %s", e)
+                        return          # chained: leave the hand where it is
                 time.sleep(dt)
+            self._run_frames(retract, gen, dt)
         log.info("arm gesture %r done", name)
 
-
-def available_gestures(cfg) -> list[str]:
-    """Gesture names whose joints are all calibrated, WITHOUT building the
-    system. Used to write the prompt: the system prompt is composed before the
-    arm subsystem exists, and the model must only ever be taught gestures the
-    robot can actually perform."""
-    if not cfg.get("arms.enabled", False):
-        return []
-    joints = set(load_joints(cfg))
-    if not joints:
-        return []
-    gestures = dict(BUILTIN_GESTURES)
-    for name, frames in (cfg.get("arms.gestures") or {}).items():
-        try:
-            gestures[str(name)] = [(dict(f["joints"]), float(f["s"]))
-                                   for f in frames]
-        except (KeyError, TypeError, ValueError):
-            continue
-    out = []
-    for name, frames in gestures.items():
-        if name == "rest":
-            continue
-        used = {j for tg, _s in frames for j in tg}
-        if used and used <= joints:
-            out.append(name)
-    return sorted(out)
+    def _run_frames(self, frames: list, gen: int, dt: float) -> bool:
+        """Play frames on a minimum-jerk profile. False if preempted."""
+        for targets, dur in frames:
+            goal = {}
+            for jname, tgt in targets.items():
+                spec = self._joints.get(jname)
+                if spec is None:
+                    continue            # uncalibrated — inert by design
+                v = self._resolve(tgt, spec)
+                if v is not None:
+                    goal[jname] = spec.clamp(v)
+            if not goal:
+                continue
+            start = {j: self._pose.get(j, 0.0) for j in goal}
+            far = max(abs(goal[j] - start[j]) for j in goal)
+            # Minimum jerk peaks at 1.875 * distance / duration. Stretch the
+            # frame if that would exceed the joint speed cap, so the gesture
+            # completes instead of being cut off mid-move.
+            dur = max(float(dur), 1.875 * far / max(1e-6, self._max_dps))
+            t0 = time.monotonic()
+            while True:
+                with self._lock:
+                    if gen != self._gen:
+                        return False
+                tau = min(1.0, (time.monotonic() - t0) / dur)
+                # 10t^3 - 15t^4 + 6t^5: the minimum-jerk position profile,
+                # zero velocity AND zero acceleration at both ends.
+                ease = tau * tau * tau * (10.0 + tau * (-15.0 + 6.0 * tau))
+                moved = {}
+                for j, g in goal.items():
+                    self._pose[j] = start[j] + (g - start[j]) * ease
+                    moved[j] = self._pose[j]
+                try:
+                    self._driver.send(moved)
+                except Exception as e:
+                    log.debug("arm send failed: %s", e)
+                if tau >= 1.0:
+                    break
+                time.sleep(dt)
+        return True

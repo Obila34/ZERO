@@ -1066,6 +1066,17 @@ arms:
   # writes. Short sentences ("Yeah.") never trigger one.
   speech_beat: true
   beat_gap_s: 8             # seconds between automatic speech beats
+  # Gesture-speech coordination, from the gesture-studies literature:
+  #  * the STROKE lands on the word the cue sits against, never after it
+  #    (McNeill's phonological synchrony rule), so the gesture is scheduled
+  #    from the cue's word position rather than fired at sentence onset;
+  #  * preparation has to be under way before that word arrives, hence a lead;
+  #  * consecutive gestures do NOT retract between strokes (Kendon's gesture
+  #    units) — the hand stays up for unit_hold_s and a following gesture
+  #    cancels the retraction entirely.
+  words_per_sec: 2.8        # speaking rate used to place the stroke
+  prep_lead_s: 0.25         # start the arm moving this early
+  unit_hold_s: 1.2          # hold a stroke this long before retracting
   min_gesture_gap_s: 12     # floor between gestures. Most turns should carry
                             # NO gesture — hands moving every sentence read as
                             # nervous, not alive. Lower for a livelier robot.

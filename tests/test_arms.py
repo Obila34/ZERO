@@ -183,7 +183,12 @@ ARMS = {"right_up_down_joint": {"min": -40, "max": 40, "home": 0},
 def _armsys(over=None):
     base = {"arms.joints": ARMS, "arms.allow_steppers": True,
             "arms.rate_hz": 200.0, "arms.max_speed_dps": 2000.0,
-            "arms.min_gesture_gap_s": 0.0}
+            "arms.min_gesture_gap_s": 0.0,
+            # Strokes are normally SCHEDULED onto their word; an absurd
+            # speaking rate collapses that delay so these tests can assert
+            # on playback synchronously. The timing itself is covered by
+            # test_stroke_is_scheduled_onto_the_cued_word.
+            "arms.words_per_sec": 1000.0, "arms.prep_lead_s": 0.0}
     base.update(over or {})
     s = ArmSystem(FakeCfg(base))
     s._driver = NullArmDriver()
@@ -536,3 +541,64 @@ def test_speech_beats_use_a_joint_you_can_actually_see():
                    for t in tg.values()
                    if isinstance(t, str) and len(t) > 4)
         assert peak >= 15.0, f"{beat} peak {peak} deg is too small to see"
+
+
+# ── gesture/speech coordination (see the literature notes in cues.py) ───────
+
+def test_stroke_is_scheduled_onto_the_cued_word():
+    """McNeill's phonological synchrony rule: the stroke lands on its word.
+    Firing at sentence onset put the stroke seconds early on a long sentence."""
+    from zero.arms.cues import cue_positions
+
+    late = "one two three four five six seven [beat] eight nine"
+    cue, idx, total = cue_positions(late)[0]
+    assert idx == 7 and total == 9
+    s = _armsys({"arms.words_per_sec": 2.0, "arms.prep_lead_s": 0.25})
+    fired = []
+    s.play = lambda n: fired.append((n, time.monotonic())) or True
+    t0 = time.monotonic()
+    assert s._play_on_word("beat_right", late, "[beat]")
+    # 7 words at 2/s = 3.5 s, minus the 0.25 s preparation lead
+    assert s._timer is not None
+    assert 3.0 < s._timer.interval < 3.5, s._timer.interval
+    s._timer.cancel()
+    # a cue on the FIRST word fires immediately, no timer
+    s._timer = None
+    assert s._play_on_word("beat_right", "[beat] right away now", "[beat]")
+    assert s._timer is None and fired
+
+
+def test_a_gesture_that_cannot_run_is_refused_before_it_is_promised():
+    s = _armsys({"arms.words_per_sec": 2.0})
+    long = "one two three four five [beat] six"
+    assert s._play_on_word("no_such_gesture", long, "[beat]") is False
+
+
+def test_minimum_jerk_profile_starts_and_ends_gently():
+    """Natural reaching is bell-shaped, not constant speed. The profile must
+    have near-zero velocity at both ends and its peak in the middle."""
+    def ease(t):
+        return t * t * t * (10.0 + t * (-15.0 + 6.0 * t))
+
+    assert ease(0.0) == 0.0 and abs(ease(1.0) - 1.0) < 1e-9
+    assert abs(ease(0.5) - 0.5) < 1e-9                     # symmetric
+    first = ease(0.05) - ease(0.0)                          # start velocity
+    mid = ease(0.55) - ease(0.50)                           # peak velocity
+    last = ease(1.0) - ease(0.95)                           # end velocity
+    assert mid > 8 * first and mid > 8 * last               # bell-shaped
+
+
+def test_chained_gestures_do_not_retract_between_strokes():
+    """Kendon: with gestures in sequence the retraction is dropped — the hand
+    stays up. A gesture preempted during its post-stroke hold must leave the
+    arm where it is rather than bobbing home."""
+    s = _armsys({"arms.unit_hold_s": 2.0, "arms.rate_hz": 100.0,
+                 "arms.gestures": {"lift": [
+                     {"joints": {"right_up_down_joint": "home+20"}, "s": 0.05},
+                     {"joints": {"right_up_down_joint": "home"}, "s": 0.05}]}})
+    assert s.play("lift")
+    time.sleep(0.4)                       # stroke done, now in the hold
+    held = s.joint_pose()["right_up_down_joint"]
+    assert held > 15.0, held             # still raised, not retracted
+    s.play("lift")                        # chain: preempts during the hold
+    s._player.join(timeout=3.0)

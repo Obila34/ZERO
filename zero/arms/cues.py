@@ -69,6 +69,30 @@ def find_cues(text: str) -> list[str]:
     return [m.group(0).lower() for m in _CUE_RE.finditer(text.lower())]
 
 
+def cue_positions(text: str) -> list[tuple[str, int, int]]:
+    """[(cue, word_index, total_words)] — WHERE in the sentence each cue sits.
+
+    This is the timing information: McNeill's phonological synchrony rule says
+    the stroke coincides with, or slightly precedes, the stressed syllable of
+    the word it belongs to, and never follows it. The cue's word position is
+    what lets the stroke be scheduled onto that word instead of firing at the
+    start of the sentence regardless.
+    """
+    if not text:
+        return []
+    out, words = [], 0
+    for tok in text.split():
+        low = tok.lower()
+        hit = _CUE_RE.fullmatch(low) or _CUE_RE.search(low)
+        if hit and low.startswith("["):
+            out.append((hit.group(0), words, 0))   # cue stands alone
+        else:
+            words += 1
+            if hit:                                # cue attached to a word
+                out.append((hit.group(0), max(0, words - 1), 0))
+    return [(c, i, words) for c, i, _ in out]
+
+
 def strip_cues(text: str) -> str:
     """The same text with gesture cues removed, for the speech path.
 
