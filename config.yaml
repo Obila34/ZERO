@@ -1050,7 +1050,9 @@ arms:
                             # calibration, so treat every direction as
                             # unverified until you have watched it move.
   rate_hz: 20               # gesture playback tick
-  max_speed_dps: 60         # per-joint speed cap during playback
+  max_speed_dps: 120        # per-joint speed cap during playback. 60 was slow
+                            # enough that a gesture frame ended before the
+                            # joint arrived, leaving the move half-made.
   allow_steppers: true      # the gesture joints (shoulder-lift/bicep/elbow)
                             # are all steppers, so this must be on for any of
                             # them to load. driver:null is what holds motion.

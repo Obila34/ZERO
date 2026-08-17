@@ -504,3 +504,35 @@ def test_llm_invented_gesture_names_are_recovered():
     # a genuinely unknown name is refused honestly, not blamed on calibration
     bad = tool.run({"gesture": "backflip"}, ctx)
     assert "don't have a gesture" in bad and "calibrat" not in bad
+
+
+def test_every_builtin_gesture_frame_can_finish_in_its_time():
+    """A frame that ends before the joint arrives leaves the gesture half-made
+    — the wave under-travelled and the beat was a 10-degree elbow twitch
+    nobody could see (2026-08-17). Guard the whole table, not one gesture."""
+    from zero.arms.system import BUILTIN_GESTURES
+
+    speed = 120.0            # config arms.max_speed_dps
+    for name, frames in BUILTIN_GESTURES.items():
+        for targets, dur in frames:
+            for joint, t in targets.items():
+                if isinstance(t, str) and t.startswith("home") and len(t) > 4:
+                    need = abs(float(t[4:]))
+                    assert speed * dur >= need, (
+                        f"{name}/{joint}: {need} deg needs "
+                        f"{need / speed:.2f}s but the frame is {dur}s")
+
+
+def test_speech_beats_use_a_joint_you_can_actually_see():
+    """The beat must move the SHOULDER: the elbow's whole range is 19.5 deg,
+    so an elbow-only beat is invisible across a room."""
+    from zero.arms.system import BUILTIN_GESTURES
+
+    for beat in ("beat_right", "beat_both"):
+        joints = {j for tg, _s in BUILTIN_GESTURES[beat] for j in tg}
+        assert any("up_down" in j for j in joints), f"{beat} moves no shoulder"
+        peak = max(abs(float(t[4:]))
+                   for tg, _s in BUILTIN_GESTURES[beat]
+                   for t in tg.values()
+                   if isinstance(t, str) and len(t) > 4)
+        assert peak >= 15.0, f"{beat} peak {peak} deg is too small to see"
