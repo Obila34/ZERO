@@ -682,7 +682,12 @@ vision:
   # background (perception is never on the critical path); the wake word that
   # starts a conversation makes ZERO *attend* to what it's already seeing.
   enabled:
-    true # Back on 2026-08-17 after the USB bisect and a port change.
+    false # BRIO OFF 2026-08-18. It is the last power variable: it declares
+    # 500 mA off the Pi's own rail, resets on the xhci bus every boot, and the
+    # machine keeps dying instantly with no kernel output during load spikes.
+    # Killing it removes that draw entirely. Costs face tracking, head
+    # mirroring and all visual context; voice, head commands and arms are
+    # unaffected. Set true again once the camera is on a POWERED hub.
     # needs a camera + requirements-vision.txt installed.
     # Off = voice-only (unchanged pipeline).
     # The camera is found by NAME (vision.camera.prefer), not by port or index,
