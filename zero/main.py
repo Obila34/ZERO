@@ -9,6 +9,23 @@ generated — the main trick for keeping a fully-local pipeline feeling responsi
 """
 from __future__ import annotations
 
+import os as _os
+
+# CPU thread ceiling, set BEFORE any math/ONNX library is imported — they read
+# these once, at import, and default to every core.
+#
+# Why this exists: the head Pi hard-reset repeatedly, and on 2026-08-18 the
+# black-box recorder caught it happening. Load climbed 0.02 -> 5.48 and the
+# die temperature 42 -> 59 C in one minute as startup loaded the wake word,
+# VAD, turn detector and ONNX models across all four cores; the journal then
+# stopped mid-line with no panic, no OOM and no shutdown — the signature of
+# the SoC losing power, not of software failing. Peak CPU is peak current, so
+# capping the threads lowers the current spike that collapses the 5 V rail.
+# This is a MITIGATION, not the fix: the fix is a supply that holds up.
+for _v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
+           "NUMEXPR_NUM_THREADS", "VECLIB_MAXIMUM_THREADS"):
+    _os.environ.setdefault(_v, _os.environ.get("ZERO_CPU_THREADS", "2"))
+
 import argparse
 import contextlib
 import itertools
