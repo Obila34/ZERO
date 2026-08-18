@@ -58,6 +58,68 @@ def _decode(word: str) -> str:
     return " ".join(parts) or "ok"
 
 
+def _mem() -> str:
+    try:
+        vals = {}
+        for line in open("/proc/meminfo"):
+            k, v = line.split(":", 1)
+            vals[k] = int(v.split()[0]) // 1024
+        return f"mem_avail={vals.get('MemAvailable', 0)}M"
+    except Exception:
+        return "mem_avail=?"
+
+
+def _usb() -> str:
+    """Which USB devices are present. The BRIO dropping off the bus is the
+    single most repeated event in this robot's logs, so its presence is worth
+    a column: if it vanishes just before a reset, that is the answer."""
+    import glob
+    names = []
+    for d in sorted(glob.glob("/sys/bus/usb/devices/1-1.*")):
+        try:
+            with open(os.path.join(d, "product")) as f:
+                names.append(f.read().strip().split()[-1][:8])
+        except Exception:
+            pass
+    return "usb=" + (",".join(names) if names else "NONE")
+
+
+def _top() -> str:
+    try:
+        out = subprocess.run(["ps", "-eo", "pcpu,comm", "--sort=-pcpu"],
+                             capture_output=True, text=True, timeout=2.0)
+        line = out.stdout.strip().splitlines()[1].split()
+        return f"top={line[1]}:{line[0]}%"
+    except Exception:
+        return "top=?"
+
+
+_dmesg_seen: set = set()
+
+
+def _kernel_new() -> str:
+    """NEW kernel messages since the last sample. dmesg is readable without
+    root here and is wiped by a reboot, so copying it to disk as we go is the
+    only way its final words survive a hard reset — the system journal on this
+    Pi lives in RAM and dies with it."""
+    try:
+        out = subprocess.run(["dmesg"], capture_output=True, text=True,
+                             timeout=3.0).stdout.splitlines()
+    except Exception:
+        return ""
+    fresh = []
+    for line in out[-80:]:
+        key = line[:160]
+        if key not in _dmesg_seen:
+            _dmesg_seen.add(key)
+            low = line.lower()
+            if any(w in low for w in ("error", "fail", "reset", "disconnect",
+                                      "usb", "under", "throttl", "oom",
+                                      "hung", "panic", "warn", "xhci", "mmc")):
+                fresh.append(line.strip())
+    return "\n".join(f"    KERN {x}" for x in fresh[-6:])
+
+
 def sample() -> str:
     load = os.getloadavg()
     try:
@@ -67,9 +129,11 @@ def sample() -> str:
         temp = float("nan")
     thr = _decode(_vcgencmd("get_throttled"))
     volt = _vcgencmd("measure_volts").replace("volt=", "")
-    return (f"{time.strftime('%Y-%m-%d %H:%M:%S')} "
+    line = (f"{time.strftime('%Y-%m-%d %H:%M:%S')} "
             f"load={load[0]:.2f},{load[1]:.2f} temp={temp:.1f}C "
-            f"core={volt} power={thr}")
+            f"core={volt} power={thr} {_mem()} {_usb()} {_top()}")
+    kern = _kernel_new()
+    return line + ("\n" + kern if kern else "")
 
 
 def main() -> int:
@@ -84,7 +148,7 @@ def main() -> int:
                 f.write(line + "\n")
                 f.flush()          # flush every line: a crash must not lose it
                 os.fsync(f.fileno())
-                print(line, end="\r")
+                print(line.splitlines()[0][:150], end="\r")
                 time.sleep(every)
         except KeyboardInterrupt:
             print("\nstopped")
