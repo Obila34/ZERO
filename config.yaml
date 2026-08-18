@@ -682,14 +682,13 @@ vision:
   # background (perception is never on the critical path); the wake word that
   # starts a conversation makes ZERO *attend* to what it's already seeing.
   enabled:
-    false # TEMPORARY — USB/camera bisect for the 2026-08-17 hard resets.
-    # The BRIO re-enumerated once and dmesg shows xhci resets; a USB stall can
-    # block systemd long enough for the 1-min hardware watchdog to reset the
-    # board, which matches every symptom (no logs, cool, unloaded, unclean fs).
-    # Run 15-20 min like this: NO crash implicates USB (fix = powered hub);
-    # a crash anyway exonerates the camera and points elsewhere.
-    # SET BACK TO true AFTERWARDS — this costs face tracking, head mirroring
-    # and all visual context. Voice, head commands and arms still work.
+    true # Back on 2026-08-17 after the USB bisect and a port change.
+    # needs a camera + requirements-vision.txt installed.
+    # Off = voice-only (unchanged pipeline).
+    # The camera is found by NAME (vision.camera.prefer), not by port or index,
+    # so moving it to a different USB socket needs no config change: the
+    # /dev/v4l/by-id symlink is built from vendor/product/SERIAL. Verified
+    # across a port swap on 2026-08-17.
 
   # Set true ONLY if llm.model is a vision-capable build (e.g. a multimodal Gemma
   # 3 / Qwen2-VL). Then the keyframe itself is handed to the LLM on visual turns.
