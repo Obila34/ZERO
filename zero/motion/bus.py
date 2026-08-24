@@ -90,8 +90,12 @@ class BusJoint:
 class MotionBus:
     """One writer, one clock, one e-stop for all 23 joints."""
 
-    def __init__(self, transport, *, rate_hz: float = 30.0):
+    def __init__(self, transport, *, rate_hz: float = 30.0, blackbox=None):
         self._transport = transport
+        # Optional JointAngleLog — every ACKNOWLEDGED post is recorded with
+        # the track that won the joint. The black box must never be able to
+        # stall the bus: it throttles and swallows its own failures.
+        self._blackbox = blackbox
         self._interval = 1.0 / max(1.0, float(rate_hz))
         self._joints: dict[str, BusJoint] = {}
         # targets[track][joint] = effective degrees. A joint key present in a
@@ -241,16 +245,18 @@ class MotionBus:
         # Resolve under the lock; post outside it (HTTP must never block a
         # producer's write call).
         with self._lock:
-            resolved: dict[str, tuple[BusJoint, float]] = {}
+            resolved: dict[str, tuple[BusJoint, float, str]] = {}
             for name, spec in self._joints.items():
                 track = self._owner_locked(name)
                 if track is None:
                     continue
-                resolved[name] = (spec, self._targets[track][name])
+                resolved[name] = (spec, self._targets[track][name], track)
         batch: dict[str, float] = {}        # effective deg, batch-capable
         singles: dict[str, tuple[BusJoint, float]] = {}
+        owners: dict[str, str] = {}
         pending = False
-        for name, (spec, target) in resolved.items():
+        for name, (spec, target, track) in resolved.items():
+            owners[name] = track
             acked = self._posted.get(name)
             step = target
             if acked is not None:
@@ -278,6 +284,9 @@ class MotionBus:
             if self._transport.post_pose(
                     {n: round(v, 2) for n, v in batch.items()}):
                 self._posted.update(batch)
+                if self._blackbox is not None:
+                    for n, v in batch.items():
+                        self._blackbox.log(n, v, owners.get(n, "?"))
             else:
                 ok_all = False
                 pending = True
@@ -286,6 +295,8 @@ class MotionBus:
                 if spec.use_offset else step
             if self._transport.post_joint(name, round(wire, 2)):
                 self._posted[name] = step
+                if self._blackbox is not None:
+                    self._blackbox.log(name, step, owners.get(name, "?"))
             else:
                 ok_all = False
                 pending = True
@@ -318,3 +329,8 @@ class MotionBus:
             self._transport.close()
         except Exception:
             pass
+        if self._blackbox is not None:
+            try:
+                self._blackbox.close()
+            except Exception:
+                pass

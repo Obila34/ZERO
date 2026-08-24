@@ -43,8 +43,19 @@ def get_bus(cfg) -> MotionBus:
                             "ROBOT via %s", transport._base)
             else:
                 transport = NullTransport()
+            blackbox = None
+            if bool(cfg.get("motion.blackbox.enabled", True)):
+                try:
+                    from zero.motion.blackbox import JointAngleLog
+
+                    blackbox = JointAngleLog(
+                        cfg.get("motion.blackbox.db_path",
+                                "zero_joints.sqlite"))
+                except Exception as e:   # recording must never block motion
+                    log.warning("joint black box unavailable: %s", e)
             _bus = MotionBus(transport,
-                             rate_hz=float(cfg.get("motion.rate_hz", 30.0)))
+                             rate_hz=float(cfg.get("motion.rate_hz", 30.0)),
+                             blackbox=blackbox)
         return _bus
 
 

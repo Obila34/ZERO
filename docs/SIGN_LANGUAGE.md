@@ -72,17 +72,35 @@ hardcoded) tells the model to be honest about these.
 3. Review on the robot with the signer watching; flip `review:
    signer-approved`.
 
-## Phase 5 — stepper bring-up (NOT in this build, supervised only)
+## Phase 5 — stepper bring-up (2026-08-24)
 
-Prereqs before `arms.allow_steppers: true` goes back on:
-- [ ] verify whether `/api/pose_cmd` applies the stored stepper offsets the
-      way `/api/joint_cmd` does (unverified — the bus deliberately keeps
-      steppers on joint_cmd with offset subtraction until then)
-- [ ] supervised per-joint calibration (`scripts/arm_calibrate.py`), human
-      watching, small steps
-- [ ] confirm resting pose vs URDF zero (no encoders — zero is wherever the
-      Nano booted), set `arms.limit_frac` accordingly
-- [ ] then: signing stance (shoulder/elbow raise), Z-trace, P/Q downward
-      orientation, and lexicon `arm:` segments come alive automatically —
-      the sign engine already emits them and the bus drops them with a log
-      until the joints register.
+- [x] **Steppers enabled** (`arms.allow_steppers: true`). The operator
+      accepted the URDF envelopes as-is in place of a fresh supervised
+      sweep — they carry real runtime history from the 2026-08-17 live
+      period, and boot-zero was verified (arm at rest at the 13:11 EAT
+      gateway restart; no stepper commanded since). Signing stance,
+      shoulder/elbow gestures and lexicon `arm:` segments are live.
+- [x] **Joint-angle black box** (`zero_joints.sqlite`): the MotionBus
+      records every acknowledged post with the track that won the joint;
+      `scripts/joint_snapshot.py` snapshots gateway telemetry into the same
+      table (`--last` prints the newest row per joint). Boot-default
+      telemetry rows are excluded, not converted into fictitious angles.
+- [x] `scripts/arm_calibrate.py` emission bug fixed: it printed envelopes
+      in raw command space, which the driver would have offset-corrected a
+      SECOND time (108 deg off on right_bicep). It now emits effective
+      degrees verbatim, plus a mirrored-motor question that emits
+      `arms.joint_sign` entries.
+- [ ] **pose_cmd offset behaviour — still unverified.** Steppers stay on
+      joint_cmd (the bus enforces this). `scripts/pose_probe.py
+      left_bicep_joint --effective 10` answers it in one supervised minute:
+      parks via joint_cmd, fires the identical raw value via pose_cmd — no
+      motion = offsets applied, a ~16 deg step = offset-blind.
+- [ ] **in/out shoulder pair — inert until a sign check.** The operator
+      lifted the code exclusion (the KSL signing stance needs the pair),
+      but it has never moved under ZERO and its direction is unknown; a
+      wrong guess drives the arm into the torso. Two minutes of
+      `arm_calibrate.py right_in_out_joint --stepper` with eyes on the
+      robot, then uncomment its envelope in config.yaml.
+- [ ] Z-trace and P/Q downward orientation need the bicep/forearm rotation
+      path authored (lexicon `arm:` segments) — possible now that the
+      biceps are live.

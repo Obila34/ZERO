@@ -1043,8 +1043,10 @@ head:
 # Arm/hand gestures (voice-commanded: 'wave', 'raise your arm', 'open your
 # hand'). SHIPS DARK, twice over: arms.enabled gates the whole subsystem, and
 # even enabled, a joint is INERT until it has a calibrated envelope entry in
-# arms.joints (min/max/home in gateway angle_deg command space — find them
-# with the supervised scripts/arm_calibrate.py, small steps, robot watched).
+# arms.joints (min/max/home in EFFECTIVE degrees — hardware-true, offset-
+# free; the driver subtracts the gateway's stored offset at the wire — find
+# them with the supervised scripts/arm_calibrate.py, small steps, robot
+# watched).
 # Steppers (elbows/biceps/shoulders) have NO encoders and zero at whatever
 # pose the Nano booted in — they stay inert even when calibrated unless
 # allow_steppers is also true. Servo hands first; steppers later, carefully.
@@ -1062,6 +1064,10 @@ motion:
   gateway:
     base_url: http://100.67.233.65:5000   # same gateway as head/arms
     timeout_s: 0.7
+  blackbox:                 # joint-angle black box: every ACKNOWLEDGED post,
+    enabled: true           # with the track that won the joint, in SQLite —
+    db_path: zero_joints.sqlite   # plus telemetry snapshots from
+                            # scripts/joint_snapshot.py (source='telemetry').
 
 # ── Sign language (KSL) ─────────────────────────────────────────────────────
 # Fingerspelling on both hands via the manual alphabet (zero/sign/handshapes
@@ -1105,13 +1111,14 @@ arms:
   max_speed_dps: 120        # per-joint speed cap during playback. 60 was slow
                             # enough that a gesture frame ended before the
                             # joint arrived, leaving the move half-made.
-  allow_steppers: false     # STEPPERS GATED DARK (2026-08-24 sign build):
-                            # the shoulder/bicep/elbow steppers stay inert
-                            # until the supervised Phase-5 bring-up — no
-                            # encoders, no homing, and pose_cmd's offset
-                            # behaviour is unverified. The hands (PCA servos)
-                            # are NOT steppers and stay live. Flip back on
-                            # only at the robot, watching it.
+  allow_steppers: true      # STEPPERS LIVE (Phase 5, 2026-08-24): operator
+                            # accepted the URDF envelopes as-is — they carry
+                            # real runtime history from the 2026-08-17 live
+                            # period, and boot-zero was verified at rest
+                            # before enabling. pose_cmd offset behaviour is
+                            # STILL unverified, so the bus keeps steppers on
+                            # joint_cmd (see zero/motion/transport.py); every
+                            # command is recorded in the joint black box.
   # Gesture pacing + grounding for the conversational layer. The model cues a
   # gesture inline in its reply ([beat], [wave], ...) and the cue fires as that
   # word reaches the speaker. NOTE: the shoulder in/out joints and the wrists
@@ -1157,8 +1164,9 @@ arms:
     timeout_s: 1.0
   # CALIBRATION FILL-IN SHEET. Run scripts/arm_calibrate.py per joint (order
   # below), then UNCOMMENT the joint's line and replace min/max/home with the
-  # exact numbers the script prints (it prints them in this raw command space
-  # — paste verbatim). A commented/absent joint is INERT. Steppers also need
+  # exact numbers the script prints (EFFECTIVE degrees since 2026-08-24 —
+  # paste verbatim; the script's old raw-command-space emission was a bug
+  # that would have double-subtracted the gateway offset). A commented/absent joint is INERT. Steppers also need
   # allow_steppers: true above once their lines are real.
   # Envelopes from the robot's own URDF on the Arm Pi
   # (~/AF1_Workspace/robot_description/humanoid.urdf), converted rad -> deg.
@@ -1174,6 +1182,15 @@ arms:
                             # rests near the modelled zero. Raise toward 1.0
                             # once verified, one step at a time.
   joints:
+    # The in/out pair re-entered scope at the operator's Phase-5 decision
+    # (2026-08-24) — EXCLUDED_JOINTS no longer blocks it — but it has NEVER
+    # moved under ZERO and even its direction is unknown, so it stays inert
+    # (no envelope) until a two-minute supervised sign check:
+    #   .venv/bin/python scripts/arm_calibrate.py right_in_out_joint --stepper
+    # then uncomment with the printed numbers. A guessed sign here drives
+    # the arm INTO the torso; nothing is worth that.
+    # right_in_out_joint: {min: ..., max: ..., home: 0.0}
+    # left_in_out_joint:  {min: ..., max: ..., home: 0.0}
     right_up_down_joint: {min: -68.8, max: 106.0, home: 0.0}   # shoulder lift
     left_up_down_joint:  {min: -68.8, max: 106.0, home: 0.0}
     right_bicep_joint:   {min: -74.9, max:  47.7, home: 0.0}   # upper-arm roll

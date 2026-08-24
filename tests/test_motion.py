@@ -162,3 +162,51 @@ def test_bus_head_driver_ports_the_nod_mapping():
     drv.send(10.0, -10.0)
     assert _wait(lambda: t.posted.get("head_nod_joint") == 53.4)
     bus.close()
+
+
+# ── the joint-angle black box ───────────────────────────────────────────────
+
+def test_blackbox_records_acked_posts_with_owning_track(tmp_path):
+    from zero.motion.blackbox import JointAngleLog
+
+    box = JointAngleLog(str(tmp_path / "joints.sqlite"))
+    t = NullTransport()
+    bus = MotionBus(t, rate_hz=500.0, blackbox=box)
+    bus.register(BusJoint("j", min_deg=0, max_deg=90))
+    bus.write("sign", {"j": 40.0})
+    assert _wait(lambda: t.posted.get("j") == 40.0)
+    assert _wait(lambda: "j" in box.last_angles())
+    deg, _ts, src = box.last_angles()["j"]
+    assert deg == 40.0 and src == "sign"
+    bus.close()
+
+
+def test_blackbox_throttles_noise_but_keeps_big_hops(tmp_path):
+    import sqlite3
+
+    from zero.motion.blackbox import JointAngleLog
+
+    db = str(tmp_path / "joints.sqlite")
+    box = JointAngleLog(db)
+    box.log("j", 10.0, "gaze")
+    box.log("j", 10.05, "gaze")       # sub-deadband jitter — dropped
+    box.log("j", 10.1, "gaze")        # still noise — dropped
+    box.log("j", 40.0, "gaze")        # big hop — always recorded
+    n = sqlite3.connect(db).execute(
+        "SELECT COUNT(*) FROM joint_angles").fetchone()[0]
+    assert n == 2
+    box.close()
+
+
+def test_blackbox_snapshot_and_broken_disk_never_raise(tmp_path):
+    from zero.motion.blackbox import JointAngleLog
+
+    box = JointAngleLog(str(tmp_path / "joints.sqlite"))
+    assert box.snapshot({"a": 1.0, "b": 2.0}, "telemetry") == 2
+    assert box.last_angles()["b"][0] == 2.0
+    box.close()
+    # a dead DB records nothing and raises nothing — motion must not care
+    dead = JointAngleLog("/nonexistent-dir/x/joints.sqlite")
+    dead.log("j", 1.0, "gaze")
+    assert dead.snapshot({"j": 1.0}, "t") == 0
+    assert dead.last_angles() == {}

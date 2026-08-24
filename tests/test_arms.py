@@ -214,16 +214,25 @@ def test_cues_are_found_and_stripped_from_speech():
 
 
 def test_excluded_joints_never_load():
+    # EXCLUDED_JOINTS is empty as of the 2026-08-24 Phase-5 session (wrists
+    # revived, in/out re-scoped by the operator) — so exercise the MECHANISM
+    # with a monkeypatched denylist: an excluded joint must never load, even
+    # explicitly configured.
+    import zero.arms.driver as drv
+
     cfg = {"arms.allow_steppers": True, "arms.joints": {
         "right_in_out_joint": {"min": -10, "max": 10},
         "right_wrist_joint": {"min": -10, "max": 10},
         **ARMS}}
-    joints = load_joints(FakeCfg(cfg))
-    assert "right_in_out_joint" not in joints    # operator-excluded
-    # The wrists were excluded while the PCA rail was dead; it is alive again
-    # (2026-08-24) and the sign engine needs them — they load now, with the
-    # config override winning over the firmware default.
-    assert "right_wrist_joint" in joints
+    assert drv.EXCLUDED_JOINTS == frozenset()    # current robot state
+    orig = drv.EXCLUDED_JOINTS
+    drv.EXCLUDED_JOINTS = frozenset({"right_in_out_joint"})
+    try:
+        joints = load_joints(FakeCfg(cfg))
+        assert "right_in_out_joint" not in joints     # denylist wins
+        assert "right_wrist_joint" in joints
+    finally:
+        drv.EXCLUDED_JOINTS = orig
     assert "right_elbow_joint" in joints         # gesture joints still load
 
 

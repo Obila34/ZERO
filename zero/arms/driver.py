@@ -29,16 +29,15 @@ STEPPER_JOINTS = frozenset({
     "right_bicep_joint", "left_bicep_joint",
 })
 
-# Joints the gesture layer must never drive, whatever config says. The
-# shoulder in/out pair is excluded by operator decision (2026-08-17). The
-# wrists were here too while the PCA servo rail was dead; the rail is alive
-# again (verified against live gateway telemetry, 2026-08-24 — the sign work
-# depends on it), so the wrists and fingers are back in play. A denylist
-# rather than a config flag: this is a property of the robot right now, and
+# Joints the gesture layer must never drive, whatever config says — a
+# denylist rather than a config flag: it describes the robot right now, and
 # a stray config line should not be able to re-enable an excluded joint.
-EXCLUDED_JOINTS = frozenset({
-    "right_in_out_joint", "left_in_out_joint",
-})
+# Currently EMPTY: the wrists came back when the PCA rail revived
+# (2026-08-24), and the shoulder in/out pair re-entered scope at the
+# operator's Phase-5 decision (2026-08-24 session — the KSL signing stance
+# needs it). The mechanism stays: put a joint name here the day its
+# hardware is not to be trusted.
+EXCLUDED_JOINTS = frozenset()
 
 
 class JointSpec:

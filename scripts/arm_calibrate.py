@@ -179,11 +179,27 @@ def main() -> int:
 
     log.close()
     if {"min", "max", "home"} <= marks.keys():
-        print("\nPaste into config.yaml under arms.joints (raw command space; "
-              "the gateway re-adds its stored offset):\n")
-        print(f"    {a.joint}: {{min: {marks['min'] - offset:.1f}, "
-              f"max: {marks['max'] - offset:.1f}, "
-              f"home: {marks['home'] - offset:.1f}}}")
+        # EFFECTIVE degrees, verbatim — the same space the driver clamps in
+        # before subtracting the gateway offset at the wire. (This used to
+        # emit raw command space, marks - offset: pasted into config, the
+        # driver would subtract the offset a SECOND time and every command
+        # landed `offset` degrees off — 108 deg on right_bicep. Never
+        # convert here.)
+        print("\nPaste into config.yaml under arms.joints (EFFECTIVE "
+              "degrees — the driver handles the gateway offset):\n")
+        print(f"    {a.joint}: {{min: {marks['min']:.1f}, "
+              f"max: {marks['max']:.1f}, "
+              f"home: {marks['home']:.1f}}}")
+        # Direction: the gesture layer's convention is + = the direction the
+        # spoken verb "raise"/"lift" means (URDF-positive). A mirrored motor
+        # needs arms.joint_sign, not hand-edited envelopes.
+        ans = input("\nDid '+' steps move the joint the way RAISE/LIFT "
+                    "should? [y/n/skip] ").strip().lower()
+        if ans == "n":
+            print("Mirrored motor — ALSO paste under arms.joint_sign:\n")
+            print(f"    {a.joint}: -1")
+            print("(keep the envelope above as printed; joint_sign mirrors "
+                  "the window for you)")
         if a.joint in STEPPER_JOINTS:
             print("\n(stepper: also set arms.allow_steppers: true — and "
                   "remember these numbers are only valid while boot pose = "
