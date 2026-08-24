@@ -210,3 +210,42 @@ def test_blackbox_snapshot_and_broken_disk_never_raise(tmp_path):
     dead.log("j", 1.0, "gaze")
     assert dead.snapshot({"j": 1.0}, "t") == 0
     assert dead.last_angles() == {}
+
+
+def test_gateway_effective_excludes_boot_defaults_and_adds_offsets():
+    from zero.motion.blackbox import gateway_effective
+
+    tel = {
+        # boot cluster: three joints initialised at the same second, raw 0
+        "a": {"angle_deg": 0.0, "timestamp": 1000.0},
+        "b": {"angle_deg": 0.0, "timestamp": 1000.2},
+        "c": {"angle_deg": 0.0, "timestamp": 1000.4},
+        # really commanded joints
+        "d": {"angle_deg": 12.0, "timestamp": 2000.0},
+        "e": {"angle_deg": 0.0, "timestamp": 3000.0},   # commanded TO zero
+        "null": {"angle_deg": 0.0, "timestamp": 1000.0},
+    }
+    off = {"d": -73.0, "e": 5.0, "a": -108.0}
+    eff = gateway_effective(tel, off)
+    assert "a" not in eff and "b" not in eff and "c" not in eff
+    assert "null" not in eff
+    assert eff["d"] == -61.0               # raw + offset
+    assert eff["e"] == 5.0                 # zero was COMMANDED — kept
+
+
+def test_blackbox_dedupe_is_per_source_so_frames_never_ping_pong(tmp_path):
+    import sqlite3
+
+    from zero.motion.blackbox import JointAngleLog
+
+    db = str(tmp_path / "j.sqlite")
+    box = JointAngleLog(db)
+    # bus frame and telemetry frame disagree by a constant (head_nod case):
+    # alternating writes must NOT re-log forever
+    for _ in range(5):
+        box.log("head_nod_joint", 43.4, "gaze")
+        box.log("head_nod_joint", 65.1, "telemetry")
+    n = sqlite3.connect(db).execute(
+        "SELECT COUNT(*) FROM joint_angles").fetchone()[0]
+    assert n == 2                          # one row per source, not ten
+    box.close()

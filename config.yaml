@@ -1068,6 +1068,9 @@ motion:
     enabled: true           # with the track that won the joint, in SQLite —
     db_path: zero_joints.sqlite   # plus telemetry snapshots from
                             # scripts/joint_snapshot.py (source='telemetry').
+    poll_s: 60              # continuous gateway-telemetry sampling (http
+                            # only, change-only rows): catches motion ZERO
+                            # did not command, e.g. cockpit sessions. 0 = off.
 
 # ── Sign language (KSL) ─────────────────────────────────────────────────────
 # Fingerspelling on both hands via the manual alphabet (zero/sign/handshapes

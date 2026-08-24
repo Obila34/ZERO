@@ -32,7 +32,7 @@ import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from zero.motion.blackbox import JointAngleLog  # noqa: E402
+from zero.motion.blackbox import JointAngleLog, gateway_effective  # noqa: E402
 
 
 def main() -> int:
@@ -66,37 +66,24 @@ def main() -> int:
         return 1
 
     now = time.time()
-    # Boot-default detection: joints never commanded since the gateway
-    # restarted all share the restart's initialisation timestamp and echo
-    # raw 0.0. For an encoderless stepper that row is NOT a position —
-    # recording raw+offset for it would plant a fictitious angle (a bicep
-    # "at -108" that is actually hanging at rest). Find the largest cluster
-    # of identical init seconds and exclude those rows from the DB.
-    from collections import Counter
-    stamps = Counter(round(float(v.get("timestamp", 0)))
-                     for j, v in tel.items()
-                     if isinstance(v, dict) and float(v.get("angle_deg", 1)) == 0.0)
-    boot_ts = stamps.most_common(1)[0][0] if stamps else None
-    boot_cluster = boot_ts if boot_ts and stamps[boot_ts] >= 3 else None
-
-    effective = {}
+    # Boot-default exclusion + effective conversion live in ONE place
+    # (zero.motion.blackbox.gateway_effective), shared with the continuous
+    # TelemetrySampler so the rule can never drift between the two.
+    effective = gateway_effective(tel, off)
     print(f"{'joint':28s} {'raw':>8s} {'offset':>7s} {'effective':>9s}  last commanded")
     for j, v in sorted(tel.items()):
         if j == "null" or not isinstance(v, dict):
             continue
         raw = float(v.get("angle_deg", 0.0))
         o = off.get(j, 0.0)
-        ts = float(v.get("timestamp", now))
-        age = now - ts
+        age = now - float(v.get("timestamp", now))
         when = (f"{age/60:.0f} min ago" if age < 5400
                 else f"{age/3600:.1f} h ago")
-        if raw == 0.0 and boot_cluster is not None and round(ts) == boot_cluster:
+        if j not in effective:
             print(f"{j:28s} {raw:8.1f} {o:7.1f} {'—':>9s}  boot default "
                   f"(no command since restart, {when})")
             continue
-        eff = raw + o
-        effective[j] = eff
-        print(f"{j:28s} {raw:8.1f} {o:7.1f} {eff:9.1f}  {when}")
+        print(f"{j:28s} {raw:8.1f} {o:7.1f} {effective[j]:9.1f}  {when}")
     n = box.snapshot(effective, "telemetry")
     print(f"\n{n} row(s) recorded to {a.db} "
           f"({len(tel) - 1 - n} boot-default row(s) excluded)")

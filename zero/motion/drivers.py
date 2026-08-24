@@ -22,6 +22,7 @@ from zero.utils.logging import get_logger
 log = get_logger("motion.drivers")
 
 _bus: MotionBus | None = None
+_sampler = None
 _bus_lock = threading.Lock()
 
 
@@ -56,13 +57,26 @@ def get_bus(cfg) -> MotionBus:
             _bus = MotionBus(transport,
                              rate_hz=float(cfg.get("motion.rate_hz", 30.0)),
                              blackbox=blackbox)
+            # Continuous telemetry sampling (http only — with a null
+            # transport there is no robot to sample): catches motion ZERO
+            # did not command, e.g. someone driving from the AF-1 cockpit.
+            global _sampler
+            poll_s = float(cfg.get("motion.blackbox.poll_s", 60.0))
+            if kind == "http" and blackbox is not None and poll_s > 0:
+                from zero.motion.blackbox import TelemetrySampler
+
+                _sampler = TelemetrySampler(
+                    blackbox, transport._base, period_s=poll_s)
         return _bus
 
 
 def reset_bus() -> None:
     """Tear down the shared bus (tests, shutdown)."""
-    global _bus
+    global _bus, _sampler
     with _bus_lock:
+        if _sampler is not None:
+            _sampler.stop()
+            _sampler = None
         if _bus is not None:
             _bus.close()
             _bus = None

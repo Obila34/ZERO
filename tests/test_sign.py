@@ -341,3 +341,49 @@ def test_stance_steppers_move_at_their_own_slower_cap():
     # 40 deg at min-jerk under a 90 dps cap needs >= 1.875*40/90 = 0.83 s
     # each way; well over the ~0.1 s the letters themselves need.
     assert took >= 1.5, f"stance moved too fast: {took:.2f}s"
+
+
+def test_service_stop_eases_everything_home_not_abandons_it():
+    """The shutdown guarantee: stop() mid-spell EASES raised joints back to
+    rest — open hands, stance down — instead of freezing the letter in the
+    air. This is what makes `systemctl stop zero` leave the robot at its
+    original angles."""
+    eng, bus, t = _stance_engine()
+    eng.spell("CALIBRATION")               # long word — plenty of mid-air
+    # wait until the stance is up AND a letter is actually on the hand
+    end = time.monotonic() + 5.0
+    while time.monotonic() < end:
+        if (t.posted.get("right_in_out_joint", 0.0) > 20.0
+                and t.posted.get("left_indexp1_joint", 90.0) < 60.0):
+            break
+        time.sleep(0.01)
+    assert t.posted.get("right_in_out_joint", 0.0) > 20.0
+    assert t.posted.get("left_indexp1_joint", 90.0) < 60.0   # mid-letter
+    n_before = len(t.posts)
+    eng.stop()                             # blocks until lowered
+    time.sleep(0.1)
+    assert bus.owner("right_in_out_joint") != "sign"
+    assert abs(t.posted["right_in_out_joint"]) < 1.0        # stance down
+    assert abs(t.posted["left_in_out_joint"]) < 1.0
+    assert abs(t.posted["left_indexp1_joint"] - 90.0) < 2.0  # hand open
+    # ...and it EASED there: several intermediate posts, not one hop
+    lowering = [p["right_in_out_joint"] for p in t.posts[n_before:]
+                if "right_in_out_joint" in p]
+    assert len(lowering) >= 5
+
+
+def test_estop_stop_releases_without_moving():
+    """Under e-stop, stop() must NOT drive anything home — an e-stop means
+    do not move, including to go to rest."""
+    eng, bus, t = _stance_engine()
+    eng.spell("HI")
+    end = time.monotonic() + 5.0
+    while time.monotonic() < end and \
+            t.posted.get("right_in_out_joint", 0.0) < 20.0:
+        time.sleep(0.01)
+    bus.estop()
+    frozen = dict(t.posted)
+    eng.stop()
+    time.sleep(0.1)
+    assert t.posted == frozen              # nothing moved after the e-stop
+    assert bus.owner("right_in_out_joint") != "sign"

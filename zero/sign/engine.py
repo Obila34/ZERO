@@ -151,8 +151,29 @@ class SignEngine:
         self._player.start()
 
     def stop(self) -> None:
+        """Shutdown: preempt playback, then EASE everything sign has
+        raised back to rest — open hands, stance down — before releasing.
+        Blocks for the ease (a couple of seconds at stepper speed):
+        stopping the service must never abandon the arms mid-air with a
+        letter frozen on the hands. Under e-stop it releases without
+        moving — an e-stop means do NOT move, including to go home."""
         with self._lock:
             self._gen += 1               # kill any running playback
+            gen = self._gen
+        p = self._player
+        if p is not None and p.is_alive():
+            p.join(timeout=1.0)          # let the preempt land
+        if not self._bus.estopped:
+            targets: dict[str, float] = {}
+            for j, cur in self._pose.items():
+                spec = self._bus.spec(j)
+                if spec is not None and abs(cur - spec.home_deg) > 0.5:
+                    targets[j] = spec.home_deg
+            if targets:
+                dt = 1.0 / max(1.0, self._rate)
+                # _ease_to stretches for the stepper cap, so a raised
+                # stance comes down at stance_speed_dps, not in one hop.
+                self._ease_to(targets, 0.8, gen, dt)
         self._bus.release("sign")
 
     def status(self) -> dict:

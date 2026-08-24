@@ -660,14 +660,17 @@ class Zero:
                 self.head.stop()
             except Exception:
                 pass
-        if self.arms is not None:
-            try:
-                self.arms.stop()
-            except Exception:
-                pass
+        # Order matters: sign OWNS the raised joints (highest-priority
+        # track), so it must ease them down and release before the arms'
+        # rest can reach the wire.
         if self.sign is not None:
             try:
                 self.sign.stop()
+            except Exception:
+                pass
+        if self.arms is not None:
+            try:
+                self.arms.stop()
             except Exception:
                 pass
         self._end_conversation()
@@ -752,14 +755,15 @@ class Zero:
                     self.head.stop()
                 except Exception:
                     pass
-            if self.arms is not None:
-                try:
-                    self.arms.stop()
-                except Exception:
-                    pass
+            # Sign first — it owns the raised joints (see run_text's stop).
             if self.sign is not None:
                 try:
                     self.sign.stop()
+                except Exception:
+                    pass
+            if self.arms is not None:
+                try:
+                    self.arms.stop()
                 except Exception:
                     pass
             if self.eyes is not None:
