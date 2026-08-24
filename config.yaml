@@ -1,1148 +1,530 @@
-# ZERO configuration — every engine is selectable here so the pipeline never
-# needs a code change to swap a stage (local today, cloud later).
-
 audio:
-  sample_rate: 16000 # 16 kHz mono everywhere in the pipeline
-  block_ms: 30 # frame size for capture / VAD
+  sample_rate: 16000
+  block_ms: 30
   input_device: pipewire
-    # 0 input channels until the mic is unmuted at
-    # the ALSA layer (alsamixer -c 3, F4=capture).
-  input_gain:
-    15.0 # RAISED from 6.0. At 6.0 a real session measured utterance
-    # rms 119-553 (median ~260) with peaks 1682-9429 — about 10x too
-    # quiet. Consequences were concrete: vad.energy_threshold (150)
-    # sat right at speaking level so quiet sentence-openings were
-    # missed, the wake word logged NEAR MISS at peak rms 138-259, and
-    # barge_in_min_rms (250) was ABOVE typical speech, which is why
-    # interrupting was unreliable.
-    # 15.0 = 2.5x, chosen against the PEAKS not the rms: the loudest
-    # observed peak (9429) lands at ~23.6k, still clear of 32767. A
-    # bigger jump would hit rms 2000+ but clip every loud syllable,
-    # and clipping breaks the VAD far worse than quiet audio does.
-    # Tune from the "utterance: rms=" logs: aim rms ~1000-3000 at this
-    # distance, peak well under 32767. If it still feels quiet, move
-    # the mic closer before raising this again — distance costs
-    # signal-to-noise that gain cannot buy back.
-  output_gain:
-    2.2 # BASE speaker level, multiplied under the dynamic gains (room
-    # loudness, and any "talk quietly"/"speak up" the person asked for).
-    # Raised because the venue reported it as hard to hear. Output is
-    # hard-clipped after gain, so a boost gets louder rather than
-    # distorting — but if it starts sounding harsh on peaks, come down
-    # to ~1.8. Also check the OS mixer (alsamixer / wpctl) is not the
-    # thing holding it back before raising this further.
-  output_device:
-    pipewire # routes to PipeWire's default sink = the BT speaker
-    # (needs the pipewire-alsa package). Use Headphones for 3.5mm jack.
-
-  # Room sense: the ambient noise floor is measured continuously from idle mic
-  # frames, and drives three things that were previously fixed constants tuned
-  # in one quiet room — how loud ZERO speaks (people get louder in noise
-  # without noticing; a machine that doesn't sounds meek), how loud you must be
-  # to interrupt it, and how loud a frame must be to count as speech.
+  input_gain: 6.0
+  output_gain: 2.2
+  output_device: pipewire
   room:
-    quiet_rms: 120 # at/below this the room is quiet -> nominal (or softer) voice
-    loud_rms: 900 # at this the room is a busy hall -> max_boost voice
-    max_boost: 1.6 # loudest ZERO gets in a noisy room
-    min_boost: 0.75 # softest it gets in a silent one
-
-  # Acoustic echo cancellation (speex): subtract ZERO's own playback from the
-  # mic so barge-in hears YOU, not its echo. Needs `pip install speexdsp`
-  # (apt install libspeexdsp-dev first). Works with WIRED output (stable
-  # delay); leave OFF for Bluetooth (drifting latency defeats the filter).
+    quiet_rms: 120
+    loud_rms: 900
+    max_boost: 1.6
+    min_boost: 0.75
   aec:
     enabled: false
-    filter_ms: 200 # echo tail the filter can absorb (raise for a live room)
-
+    filter_ms: 200
 privacy:
-  # Bystander handling for voices ZERO does not recognise:
-  #   open    = answered and remembered (single-user household)
-  #   guarded = answered, but nothing they say is stored long-term  <- default
-  #   strict  = unknown voices are not engaged at all
-  # Known (enrolled) people always get full service. Erasure is always
-  # honoured: "forget that", "forget everything about me".
   bystander_mode: guarded
-  indicator_gpio_pin: # LED pin for the visible "I'm listening" signal
-    # (e.g. 17). Blank = log-only indicator.
-
+  indicator_gpio_pin: null
 control:
-  # The AF1 fusion surface (zero/control.py) — an HTTP control plane inside the
-  # ZERO process so the AF1 cockpit can push a talk turn / a spoken line / a
-  # status probe at the SAME brain the mic loop runs. LAN-only by design: it
-  # rides the zero.service unit, no extra daemon, no terminal.
   enabled: true
-  host: 0.0.0.0 # listen on the LAN (AF1 reaches the Pi at 192.168.150.202)
+  host: 0.0.0.0
   port: 8090
-  person_id: 1 # memory owner for AF1 turns (AF1 is the logged-in operator)
-
+  person_id: 1
 conversation:
-  # After waking once, ZERO stays in a flowing conversation (no wake word between
-  # turns). It sleeps after this much continuous silence, or on a stop phrase.
   sleep_timeout_ms: 30000
-
-  # Reply in the language spoken to: Swahili / English code-switching flows
-  # naturally (persona-level; pairs with stt.language below).
-  multilingual: true
-
-  # Barge-in: while ZERO is speaking, the mic stays live — say the wake word OR
-  # just talk over it to cut the reply off. Speech barge-in is echo-aware: it
-  # learns the reply's own echo level first, then triggers on sustained speech
-  # well above it, and the interrupting words are fed straight into the next
-  # turn (no need to repeat yourself). Set false to disable all barge-in.
-  barge_in: true
-  barge_in_on_speech:
-    true # re-enabled: the old false-trigger problem (ZERO hearing its own
-    # echo) is now handled by envelope correlation — the mic envelope is
-    # compared against what the speaker ACTUALLY played (at any lag up to
-    # ~400ms, so Bluetooth's drifting latency doesn't matter). Echo moves
-    # WITH the reply; a person doesn't.
-  barge_in_learn_ms: 900 # echo-floor learning window at reply start
-  barge_in_speech_ms: 300 # sustained speech needed to trigger the interrupt
-  barge_in_ratio:
-    1.6 # foreground must be this x louder than the echo floor. At normal
-    # speaking levels (rms ~500-850 at gain 6) 2.0 made interruption
-    # impossible whenever the reply echo topped ~400 rms. Watch the
-    # "barge-in armed: ... speech gate" log line: your voice must beat
-    # the gate. Self-triggers = raise; never triggers = lower.
-  barge_in_min_rms: 250 # absolute int16 RMS floor for foreground speech
-  barge_in_voiced_ratio:
-    0.55 # fraction of the interruption that must be SPEECH-shaped before the
-    # reply is ducked at all. Loudness alone is not enough in a crowded
-    # room: a cough or a passing group cleared the old gate and audibly
-    # ducked the reply (`interruption '' -> noise` in the logs). Raise
-    # toward 0.7 in a noisier hall; lower if real interruptions are missed.
-  barge_in_wake_threshold:
-    0.35 # wake-word bar WHILE A REPLY IS PLAYING (idle keeps wake.threshold).
-    # Asymmetric on purpose: mid-reply, a false wake merely stops ZERO talking,
-    # while a miss means someone said the wake word to cut it off and was
-    # ignored — a live session logged scores 0.33/0.41 against the idle 0.50
-    # doing exactly that. Raise back toward 0.5 if replies start cutting out
-    # on random speech.
-  barge_in_gate_ceiling:
-    1200 # HARD ceiling on the interrupt gate. The echo floor is learned from
-    # the first 900ms of playback on the assumption that it is all echo — and
-    # that fails exactly when it matters: someone already talking as the reply
-    # starts gets learned AS the floor. A real session logged floor 1099
-    # (normally 61-226) and a gate of 1758, above the speaker's own voice, so
-    # barge-in was impossible for the rest of that reply and nothing errored.
-    # Correlation filtering now excludes non-echo frames; this is the backstop.
-  barge_in_floor_percentile:
-    80 # echo floor = this percentile of recent echo RMS (was: max of the
-    # learn window — one loud syllable early in the reply wedged the gate
-    # above the user's voice). Lower = easier to interrupt.
-  barge_in_env_corr:
-    0.65 # mic-vs-played envelope correlation above this = own echo, never a
-    # trigger. Raise toward 1.0 if real interruptions get eaten; lower if
-    # echo still self-triggers.
-  barge_in_duck:
-    1.0 # NO dip while an interruption is assessed. Tried 0.35 (collapsed the
-    # voice, read as a glitch) and 0.75 (still audible) — both made the
-    # sentence ZERO is finishing trail off quieter, which is exactly the
-    # moment it should sound normal, because a queued interruption means
-    # "I will answer you after this thought". A person does not fade out
-    # mid-sentence when someone starts talking. Volume that MEANS something
-    # is handled separately: "talk quietly" / "speak up" set a level that
-    # persists and multiplies with the room. Set below 1.0 to bring the dip
-    # back if you disagree once you have heard it.
-  afterthought_ms:
-    350 # a remark this long, finishing in the gap BEFORE the reply's first
-    # audio ("...oh and make it two"), is merged into the pending turn —
-    # the reply restarts with the completed thought. Also the safety net
-    # for early_commit cutting a turn short.
-  # CLOSE-MIC PROFILE (handheld/headset mic): speaker bleed sits far below
-  # your voice, so interruption can be much more sensitive. Suggested:
-  #   barge_in_speech_ms: 200, barge_in_ratio: 1.2, barge_in_min_rms: 200
-  # The envelope-correlation guard stays on as the safety net either way.
-
-  # What an interruption MEANS (zero/audio/interrupt.py): corrections ("no,
-  # I meant—", "wait, stop") cut the reply mid-word; backchannels ("yeah",
-  # "mhm") are waved through and the reply continues; anything else is a new
-  # thought — ZERO finishes its current SENTENCE, then answers it (the queued
-  # words are already transcribed, so that answer starts instantly).
-
-  # Active listening: during a LONG user turn, at a pause the turn model says
-  # is mid-thought, murmur a quiet "Mm-hmm." like a human listener. Hard-gated
-  # (length + cooldown + turn-model confidence) so it never talks over a
-  # finished question.
+  multilingual: false
+  barge_in: false
+  barge_in_on_speech: false
+  barge_in_learn_ms: 900
+  barge_in_speech_ms: 300
+  barge_in_ratio: 1.6
+  barge_in_min_rms: 250
+  barge_in_voiced_ratio: 0.55
+  barge_in_wake_threshold: 0.35
+  barge_in_gate_ceiling: 1200
+  barge_in_floor_percentile: 80
+  barge_in_env_corr: 0.65
+  barge_in_duck: 1.0
+  afterthought_ms: 350
   backchannel:
     enabled: true
-    min_speech_ms: 4000 # only inside genuinely long turns (stories)
-    cooldown_ms: 8000 # at most one murmur per this window
-    max_turn_prob: 0.4 # only when P(turn complete) is LOW (clearly mid-thought)
-
-  # Tiny neutral backchannel that fits ANY input (a committal "let me think" on a
-  # casual "how are you" breaks the illusion). Played only sometimes, and only if
-  # the real reply's audio hasn't already arrived within the grace window — a
-  # fast answer is never delayed by a filler.
+    min_speech_ms: 4000
+    cooldown_ms: 8000
+    max_turn_prob: 0.4
   filler_probability: 0.25
   filler_grace_ms: 600
   fillers:
-    question: ["Mm.", "Okay.", "Hmm."]
-    default: ["Mm.", "Right.", "Okay."]
-    ack: ["Mm-hmm.", "Sure."]
-
-  # In-session compaction: on a long session, trimmed-away turns are folded into a
-  # short rolling summary (off the hot path) instead of being dropped. Context
-  # stays bounded — persona + memory + this summary + `llm.history_turns` live
-  # turns — so the shared GPU's KV cache stays small however long you talk, and the
-  # thread is preserved rather than forgotten.
+    question:
+    - Mm.
+    - Okay.
+    - Hmm.
+    default:
+    - Mm.
+    - Right.
+    - Okay.
+    ack:
+    - Mm-hmm.
+    - Sure.
   compaction:
     enabled: true
-    max_summary_chars: 600 # cap on the rolling summary injected into the prompt
-
+    max_summary_chars: 600
 memory:
-  enabled: true # remember durable facts across sessions (SQLite)
-  path: zero_memory.sqlite # single file on disk; survives reboots
-  max_facts:
-    20 # cap injected facts so the prompt stays small/fast. Was 30 — trimmed
-    # as part of cutting cold-prefill cost; the activation ranking means the
-    # 20 that survive are the ones that were actually being used.
-  recent_episodes:
-    3 # one-line summaries of recent conversations injected at
-    # the start, so ZERO recalls the ARC of past chats (0 = off)
-  max_stored_facts: 200 # storage caps (oldest pruned) so the DB never grows
-  max_stored_episodes: 100 # forever — injection caps above only limit the prompt
-
-  # Human-like recall: memories are activation-ranked (relevance x recency x
-  # importance, Generative-Agents style) instead of dumped wholesale. Semantic
-  # relevance needs embeddings; the GPU Ollama provides them over the existing
-  # tunnel, with an offline hashing fallback so recall degrades, never breaks.
+  enabled: true
+  path: zero_memory.sqlite
+  max_facts: 20
+  recent_episodes: 3
+  max_stored_facts: 200
+  max_stored_episodes: 100
   embeddings:
-    backend: auto # auto (ollama if a host is set, else hash) | ollama | hash | off
-    ollama_host:
-      http://127.0.0.1:11435 # MUST point at Ollama, not the chat model. When
-      # llm.host moved to vLLM the embedder followed it and started asking
-      # vLLM for /api/embeddings, which it does not serve — semantic recall
-      # silently fell back to hash matching every session. This is the
-      # tunnel to Ollama on zerolabs1, which still holds nomic-embed-text.
-    # A DEDICATED embedding model — a chat model (gemma) can't serve
-    # /api/embeddings, which silently degraded recall to hash-matching.
-    # One-time setup on the GPU node:  ollama pull nomic-embed-text
-    # The model is tiny (~275MB) and pinned resident (keep_alive -1) so embeds
-    # never load-churn against the chat model. If the GPU is so tight that both
-    # can't stay loaded (watch `ollama ps`), set OLLAMA_MAX_LOADED_MODELS=2 in
-    # the Ollama service env — or set backend: hash to take embeds off the GPU.
+    backend: auto
+    ollama_host: http://127.0.0.1:11435
     ollama_model: nomic-embed-text
-    timeout_s: 3.0 # embeds sit near the reply path: fail FAST into hash, never stall
-    slow_ms: 800 # embeds consistently slower than this = the GPU has no headroom;
-      # auto-degrade to hash for the session (a slow embed also forces
-      # the CHAT model to reload — that was the ~6s first-token lag)
-    hash_dim: 256 # fallback hashing-embedder dimension
+    timeout_s: 3.0
+    slow_ms: 800
+    hash_dim: 256
   retrieval:
-    top_k: 6 # memories surfaced per recall
-    half_life_days: 14 # recency decay half-life
-    min_activation: 0.05 # below this a memory doesn't surface at all
-    budget_ms: 200 # hard per-turn budget for recall; over-budget = skip the
-      # note this turn. Was 300 — with the vision note now served from a
-      # background cache (never inline), recall is the only remaining
-      # blocking cost in the context stage, and 200ms keeps the whole
-      # `vision+recall` stage under the 200ms target on non-visual turns.
-      # Keeps memory OFF the reply's critical path (a slow GPU embed was
-      # costing ~6s of first-token latency).
+    top_k: 6
+    half_life_days: 14
+    min_activation: 0.05
+    budget_ms: 200
   forgetting:
-    enabled: true # gentle decay: old + unimportant + never-recalled
-    max_age_days: 90 # ...memories fade after this long untouched
-
-  # Durable "last time we spoke" record, one per person, updated in place and
-  # marked protected — exempt from decay, age-out and the episodic cap. When a
-  # recognised voice returns (even years later) ZERO greets them with what you
-  # last discussed and picks the thread back up. Attribution is by VOICE (see
-  # identity.session), so the record belongs to whoever actually spoke.
+    enabled: true
+    max_age_days: 90
   last_conversation:
     enabled: true
-
 learning:
-  # Few-shot object learning: "this is a french press" binds the current
-  # object crop's embedding to the name — no retraining, grows past COCO-80.
   objects:
     enabled: true
     db_path: zero_objects.sqlite
-    clip_model_path: # optional CLIP image-encoder ONNX; blank = the
-      # offline histogram embedder (color+shape)
-    match_threshold: 0.80 # cosine needed to override a detector label (local hist)
-    match_threshold_clip: 0.72 # threshold when the remote CLIP embedder is active
+    clip_model_path: null
+    match_threshold: 0.8
+    match_threshold_clip: 0.72
     max_samples_per_object: 5
-    unknown_conf:
-      0.45 # detections below this and unlearned count as
-      # "unfamiliar" -> curiosity queue
-  # Curiosity: while ALONE, learn silently (consolidate memory, log unknown
-  # objects, queue questions); ask when a known person is around. ZERO never
-  # talks to an empty room.
+    unknown_conf: 0.45
   curiosity:
     enabled: true
     db_path: zero_curiosity.sqlite
     max_pending: 20
-  # Interaction corpus: every day-to-day conversation is appended (per speaker,
-  # as JSONL) as raw material for periodic OFFLINE fine-tunes — how people phrase
-  # things, code-switch, accents. Split per speaker (voice-owned), so one
-  # person's speech never contaminates another's training data. Gated by privacy:
-  # a session ZERO may not remember is one it won't record. Turn into a training
-  # set with scripts/export_corpus.py — see docs/TRAINING.md.
   corpus:
     enabled: true
     dir: data/corpus
-
-  # The experience spine (Phase 3): every turn / surprising scene event /
-  # proactive attempt becomes ONE reward+surprise-tagged episode row. Nightly
-  # consolidation (scripts/consolidate.py + zero-consolidate.timer) distills
-  # them into memory and reward-weighted training data, then marks them done.
   episodes:
     enabled: true
     db_path: zero_episodes.sqlite
-
-  # Offline LoRA fine-tune command run by the nightly consolidation on the
-  # reward-weighted export (data/train/chat.jsonl). Left null: training needs
-  # GPU headroom the shared card doesn't have — see docs/TRAINING.md.
   training:
     cmd: null
-
 perception:
-  # ── GPU offload (Phase 8): the Pi is a FRONTEND ────────────────────────────
-  # Heavy senses run on the GPU via /perceive/* on the vision server (:8000,
-  # the same SSH tunnel): YOLO11x detection, SCRFD+ArcFace faces, ECAPA voice
-  # embeddings, CLIP object embeddings. Every stage keeps its local engine as
-  # a lazily-built fallback, so a dropped tunnel degrades (smaller local
-  # models) instead of blinding ZERO — and recovers per-call.
   remote:
     enabled: true
-    base_url: http://127.0.0.1:8000 # vision server through the tunnel
-    timeout_s:
-      1.5 # was 5.0. These sit on the REPLY path: a vision service that is up
-      # but slow stalled a turn for the full timeout before falling back. If
-      # the GPU cannot answer in 1.5s it is useless for a live conversation
-      # and the local model is the better answer. # face/speaker/CLIP calls
-    detect_timeout_s:
-      2.0 # was 10.0 — a single slow detect blocked a reply for ten seconds. # detection (first call loads YOLO11x)
+    base_url: http://127.0.0.1:8000
+    timeout_s: 1.5
+    detect_timeout_s: 2.0
     jpeg_quality: 80
-
-  # Reading HOW things are said. Affect fuses voice prosody + a text valence
-  # lexicon (+ facial expression if an FER+ ONNX is configured); only notable,
-  # confident reads reach the LLM — as tone guidance, never spoken diagnosis.
   affect:
     enabled: true
-    face_model_path: # optional FER+ ONNX (64x64 gray); blank = voice+text only
-  # Turn-level diarization: notice when a DIFFERENT person takes over,
-  # using the per-utterance voice embeddings identity already computes.
+    face_model_path: null
   diarize:
     enabled: true
-    change_threshold: 0.40 # consecutive-turn voice cosine below this = new speaker
-
+    change_threshold: 0.4
 proactive:
-  # ZERO speaking without a wake word — a time-aware greeting when someone
-  # appears, a queued curiosity question or an ambient remark when they linger.
-  # Still gated hard: cooldowns, a global hourly cap, and quiet hours keep it
-  # from being annoying. Timers/reminders the user set always announce.
-  enabled: true
-  engage_unknown:
-    true # greet/engage ANYONE the camera sees, not just
-    # enrolled faces. false = known people only.
-  quiet_hours: [22, 7] # no proactive speech from 22:00 to 07:00 ([] = off)
-  greet_cooldown_s: 14400 # re-greet the same person at most every 4h
-  curiosity_cooldown_s: 1800 # at most one curiosity question per 30 min
-  remark_cooldown_s: 300 # at most one ambient remark per 5 min
-  max_per_hour: 6 # global proactive utterance cap (hard ceiling)
-  presence_reset_s: 1200 # away this long -> next arrival greets again
-  check_interval_s: 3.0 # idle watcher tick
-  linger_s: 45 # person present this long before a question/remark
-
+  enabled: false
+  engage_unknown: true
+  quiet_hours:
+  - 22
+  - 7
+  greet_cooldown_s: 14400
+  curiosity_cooldown_s: 1800
+  remark_cooldown_s: 300
+  max_per_hour: 6
+  presence_reset_s: 1200
+  check_interval_s: 3.0
+  linger_s: 45
 preferences:
-  enabled:
-    true # "speak slower" / "keep it short" -> stored as
-    # standing behaviour + engine knobs where possible
-
-tools:
-  # The hands: real actions routed in three tiers — regex intents (instant),
-  # LLM JSON tool calls (flexible), plain chat (everything else). The allow
-  # list is the safety boundary: a tool not named here cannot run.
   enabled: true
-  allow: [time, timer, reminder, remember, recall, web_search, gaze, arms]
-
-  # Live internet access. Points at a search endpoint returning JSON
-  # {results:[{title,url,content}]} — a self-hosted SearXNG is the easy private
-  # option (docker run searxng/searxng, then use its /search?format=json). The
-  # LLM decides when to call it; results are handed back for it to phrase in
-  # ZERO's own voice, and if the endpoint is unreachable it says so rather than
-  # inventing an answer. Off by default until you have an endpoint reachable.
+tools:
+  enabled: true
+  allow:
+  - time
+  - timer
+  - reminder
+  - remember
+  - recall
+  - web_search
+  - gaze
+  - arms
   websearch:
-    enabled: true # SearXNG on the GPU node, reached over the tunnel (:8080)
+    enabled: true
     url: http://127.0.0.1:8080/search
     timeout_s: 8.0
     max_results: 3
-
 identity:
-  # "Who is this?" — multi-person recognition fusing FACE and VOICE embeddings
-  # (same embed->cosine->threshold pattern as voiceid, but a registry of people
-  # instead of one owner). Enrol conversationally: "I'm David" / "my name is
-  # David". Each channel degrades independently: missing face model ->
-  # voice-only, missing voice model -> face-only, neither -> anonymous mode.
   enabled: true
   db_path: zero_identity.sqlite
-  max_samples_per_kind: 5 # stored embedding samples per person per channel
-  reinforce_threshold: 0.70 # confident joint matches refresh stored samples
-  # Sessions are owned by VOICE: the speaker's voice decides whose memories a turn
-  # belongs to (anonymous when the voice is unsure — see fusion.voice_threshold).
-  # The face is perception only — logged and used for the "I can see you" note, but
-  # it never decides whose session this is. A different enrolled voice taking over
-  # mid-conversation becomes the new owner (live handover, per turn).
-  # Provisional identities for people ZERO hasn't been introduced to. Instead of
-  # collapsing every stranger into one anonymous bucket, each unfamiliar VOICE is
-  # clustered by its embedding into a stable guest (a negative id: guest-1,
-  # guest-2, ...). Different strangers — and their training data — stay separate;
-  # a guest who later gives a name is enrolled as a real person from then on.
+  max_samples_per_kind: 5
+  reinforce_threshold: 0.7
   guests:
-    enabled:
-      false # EXHIBITION: OFF. Guest clustering mints a provisional identity
-      # per unfamiliar voice, but match_threshold (0.55) is stricter than a
-      # real person's own turn-to-turn variation — Sam scored 0.46-0.60
-      # against his OWN enrolled profile — so a new guest was created on
-      # nearly every turn (guest-69..74 in one short session). With hundreds
-      # of visitors that churns the DB and slows every identity lookup for
-      # no benefit: nothing downstream needs a stranger to have a stable id.
-      # Enrolled people (Sam) are recognised by the person registry below,
-      # which is a SEPARATE path and is unaffected by this.
+    enabled: false
     db_path: zero_guests.sqlite
-    match_threshold: 0.55 # voice cosine to treat two utterances as the same guest
+    match_threshold: 0.55
     max_guests: 50
-    # Quality gates — a turn must prove it's REAL speech before it can mint or
-    # match a guest. Whisper hallucinates plausible text from near-silence
-    # (subtitle credits, 'Obrigado'), and those were creating phantom guests.
-    min_words: 2 # transcript must have at least this many words
-    min_ms: 1200 # utterance must be at least this long
-    min_rms: 150 # ...and at least this loud (int16 RMS)
-  budget_ms:
-    150 # HARD cap on identity work in the reply path. Voice embedding +
-    # diarization + registry lookup measured ~0.5-1.0s and were a third of
-    # the end-to-end latency. Past this the turn replies anyway using the
-    # identity already known (it rarely changes mid-conversation) and the
-    # result lands for the next turn — the work still completes, it just
-    # stops being something you wait for.
+    min_words: 2
+    min_ms: 1200
+    min_rms: 150
+  budget_ms: 150
   session:
     voice_only: true
-    # Durable memory (facts + the per-person last-conversation) is written for a
-    # turn only when its voice match clears THIS bar — stricter than the live
-    # accept (fusion.voice_threshold), so a borderline turn can't persist into the
-    # wrong person's permanent memory. Live conversation still responds at the
-    # lower bar; only what gets *saved* is held to the higher one. Turns below it
-    # are folded into an anonymous bucket, not mis-credited to a nearby speaker.
     write_min_score: 0.55
   voice:
-    model_path: models/voiceid/voxceleb_ECAPA512_LM.onnx # reuses the voiceid model
+    model_path: models/voiceid/voxceleb_ECAPA512_LM.onnx
   face:
-    # ArcFace-style ONNX face embedder (512-d), e.g. w600k_r50.onnx from
-    # InsightFace buffalo_l. Blank/missing = voice-only identity.
     model_path: models/identity/arcface.onnx
-    min_size: 60 # smallest face (px) worth matching
-    # Local face detection/alignment tiers (the fallback path when the GPU
-    # tunnel is down). YuNet = room-scale detector + 5-point ArcFace alignment
-    # (runs on cv2, no extra wheel); MediaPipe FaceLandmarker refines those 5
-    # points per face crop (iris-accurate). Missing files or wheels demote
-    # tier by tier down to Haar — never an error.
+    min_size: 60
     detector_path: models/face/yunet_2023mar.onnx
     landmarker_path: models/face/face_landmarker.task
   fusion:
-    w_face: 0.55 # weights are normalized; face is the steadier signal
+    w_face: 0.55
     w_voice: 0.45
-    threshold: 0.50 # fused (both channels agree) accept
-    face_threshold: 0.42 # single-channel accepts are stricter by nature
+    threshold: 0.5
+    face_threshold: 0.42
     voice_threshold: 0.45
-
 voiceid:
-  # "Only my voice" — verify each utterance is the enrolled owner before acting.
-  # Enroll once on the device:  python test_voiceid.py enroll
-  enabled: false # flip to true AFTER you've enrolled + downloaded the model
+  enabled: false
   model_path: models/voiceid/voxceleb_ECAPA512_LM.onnx
   profile_path: voiceprint.npy
-  threshold: 0.45 # owner ~0.55-0.70, others ~0.25-0.35 (tuned on PC)
-
+  threshold: 0.45
 wake:
   engine: openwakeword
-  # openWakeWord ships pretrained words; for a true "Hey Zero" train a custom model.
-  # Start with a built-in like "hey_jarvis" to prove the pipeline, then swap.
   model: hey_jarvis
-  threshold: 0.5
-
+  threshold: 0.15
 vad:
-  engine:
-    ten # ten (TEN VAD, neural, via WebAssembly — sharpest, ~7% of one Pi
-    # core) <- chosen | webrtc (energy-based, catches quiet mics, no deps) |
-    # silero (ONNX, sharper than webrtc but can miss a quiet mic).
-    # All three fall back to webrtc if their model/runtime is missing.
-  # TEN VAD runs from its official WebAssembly build (there is NO native
-  # ARM64/Linux build — the pip package raises "Unsupported platform" on the
-  # Pi). wasm is byte-for-byte identical to native (validated). Needs wasmtime.
+  engine: ten
   ten_wasm_model: models/vad/ten_vad.wasm
-  ten_threshold:
-    0.5 # P(speech) per 16 ms frame to count as voice. Raise to reject more
-    # background/noise; lower to catch quieter/softer speech.
-  silero_model: models/vad/silero_vad.onnx # downloaded by setup_pi.sh
-  silero_threshold:
-    0.3 # speech-probability to accept (default silero is
-    # 0.5; lower = more sensitive, for quiet mics)
-  # Audio-first end-of-turn detection (Pipecat Smart Turn v3, ONNX on the CPU).
-  # Decides "has the speaker actually finished?" from prosody/rhythm in the
-  # waveform at each pause — replacing the text-only ends_mid_thought heuristic,
-  # so the endpoint no longer waits on a transcript. none = text heuristic only.
-  turn_detector: smart_turn # smart_turn | none
+  ten_threshold: 0.35
+  silero_model: models/vad/silero_vad.onnx
+  silero_threshold: 0.3
+  turn_detector: smart_turn
   smart_turn_model: models/turn/smart-turn-v3.2-cpu.onnx
-  smart_turn_threshold:
-    0.5 # P(turn complete) >= this -> commit; below -> hold as mid-thought.
-    # Raise to hold longer (fewer early cut-offs); lower to commit sooner.
-  # Predictive endpointing: when Smart Turn is CONFIDENT the thought is done
-  # at the ~180ms pause mark, commit right there — the human ~200ms turn gap —
-  # instead of waiting out the full silence_ms. The silence window remains the
-  # fallback whenever the model is absent or unsure.
-  early_commit: true
-  early_commit_threshold:
-    0.85 # P(turn complete) needed to commit at the 180ms mark. Raise if ZERO
-    # ever jumps in before you've finished; lower for snappier replies.
-  silence_ms: 450 # trailing silence that ends an utterance (adaptive: see below)
-  semantic_hold:
-    true # endpoint intelligence: the early (speculative) transcript of a
-    # pause is checked — if it ends mid-thought ("...and", "...the",
-    # a trailing "..."), ZERO waits one extra silence window instead
-    # of cutting you off mid-sentence.
-  semantic_hold_wait_ms:
-    600 # if the speculative transcript hasn't arrived when the endpoint is
-    # due, wait up to this long for it instead of racing the STT round
-    # trip. The race was why half-sentences got shipped: the "is this
-    # finished?" answer landed ~200ms after the endpoint had committed.
-    # Finished sentences still commit the moment the transcript says so.
-  min_speech_for_fast_end_ms:
-    600 # utterances with less speech than this wait DOUBLE the
-    # silence before ending — slow starters ("um...") aren't cut
-    # off, finished sentences still commit fast. 0 = off.
-  aggressiveness: 2 # webrtc 0-3; 2 lets the VAD catch quieter/softer speech
-    # (3 was rejecting too much once the gain dropped)
-  energy_threshold:
-    150 # int16 RMS a single frame must exceed to count as speech.
-    # LOW on purpose: the webrtc VAD is the real speech detector,
-    # this is just a gentle floor so silence/hum can't start a
-    # capture. Was 350 — a wall that dropped real speech.
-  min_utterance_rms:
-    30 # PROXIMITY GATE: drop a whole utterance quieter than this
-    # on average. Kept very LOW: sad/tired people speak quietly,
-    # and dropping their words is a human-feel bug. 0 = off.
-  max_utterance_ms: 15000 # hard cap so STT input stays bounded
-  speech_pad_ms: 200 # keep a little audio either side of speech
-
+  smart_turn_threshold: 0.5
+  early_commit: false
+  early_commit_threshold: 0.85
+  silence_ms: 750
+  semantic_hold: true
+  semantic_hold_wait_ms: 600
+  min_speech_for_fast_end_ms: 600
+  aggressiveness: 2
+  energy_threshold: 70
+  min_utterance_rms: 20
+  max_utterance_ms: 15000
+  speech_pad_ms: 200
 stt:
-  # GPU offload: send audio to large-v3-turbo on the GPU (Whisper server over the
-  # SSH tunnel). Turbo-quality at ~1s, instead of 29s on the Pi CPU.
-  engine:
-    kyutai # <- CUT OVER for STREAMING. In batch mode Whisper won (472ms vs
-    # 1173ms), but that comparison fed Kyutai a finished clip — the job it is
-    # worst at. Streaming, the recognition happens WHILE you talk, so only the
-    # lookahead tail is left at the end. Whisper cannot do that: it needs the
-    # complete clip before it can start.
-    # NOTE: Kyutai is EN/FR only — this drops Swahili (accepted).
-    # ROLLBACK: `engine: remote`. fallback below is remote Whisper, so a dead
-    # Kyutai still gets transcribed rather than dropping the turn.
-    # remote (Whisper large-v3-turbo, multilingual incl. SWAHILI) |
-    # kyutai (streaming WebSocket, ~word-by-word, but EN/FR ONLY — the
-    #   deployed model is stt-1b-en_fr and has NO Swahili) |
-    # whispercpp (local CPU fallback)
-    # Switching to kyutai trades Swahili for latency. stt.fallback below is
-    # 'remote', so if Kyutai is down Whisper still answers.
-  # Live streaming ASR: the mic feeds the recogniser WHILE you talk, so the
-  # transcript is written by the time you stop instead of starting then.
-  # Needs a streaming engine (kyutai); ignored by Whisper/whispercpp.
+  engine: google
   streaming: true
-  finalize_timeout: 3.0 # max wait for the tail of the transcript to flush
+  finalize_timeout: 3.0
   kyutai:
-    url: ws://100.100.95.12:8090 # zerolabs2 over the tailnet (binds 0.0.0.0)
+    url: ws://100.100.95.12:8090
     api_key: public_token
     timeout: 30
   remote_url: http://127.0.0.1:9000/transcribe
   remote_timeout: 30
-  language:
-    auto # blank = server default (en) | sw | auto (Whisper detects —
-    # best for English/Swahili code-switching; matches
-    # conversation.multilingual above)
-  # If the remote fails (tunnel down), fail over to this local engine per-utterance
-  # — built lazily on first failure; the remote is retried every turn so quality
-  # comes back the moment the tunnel does. Needs the whispercpp model + pywhispercpp
-  # installed. Blank = no fallback (failures are logged and the utterance dropped).
-  fallback:
-    remote # GPU Whisper — if the Kyutai socket dies mid-turn this still
-    # transcribes fast. NOT whispercpp: that is the Pi's CPU engine at ~29s
-    # per utterance, which is a broken robot rather than a fallback.
-
-  # --- local fallback (engine: whispercpp) ---
-  # base.en is the CPU sweet spot (~1.5s). large-v3-turbo on the Pi CPU = 29s/clip.
+  language: en
+  fallback: remote
   model: base.en
   model_path: models/whisper/ggml-base.en.bin
-  threads: 4 # use all 4 Pi cores during transcription
-  audio_ctx: 768 # cap encoder window (0=full/30s). 768 ~halves encode for short turns
-  # Biases the decoder toward conversational phrasing, cutting single-phoneme
-  # mishears like "what's your aim" -> "what's your name". Keep it short.
-  initial_prompt: "A natural spoken conversation with a voice assistant named Zero."
-
+  threads: 4
+  audio_ctx: 768
+  initial_prompt: 'A conversation with Zero, an assistive humanoid robot built by
+    Zerobionic in Nairobi Kenya. Commands include finger gestures and sign language:
+    point, thumbs up, peace sign, fist, open hand, wiggle fingers, move thumb, move
+    index finger, spell Peter, spell Cow, spell Robot, AF1, KSL.'
+  google:
+    language: en-US
+    timeout: 10.0
 llm:
-  engine:
-    openai # openai = vLLM on zerolabs0 (Gemma 4 12B QAT w4a16) <- CUT OVER.
-    # Measured 39.6ms to first token on a warm prefix, 80 tok/s.
-    # ROLLBACK: set `engine: ollama` and restore the host/model lines
-    # commented below — the old Ollama stack is still running untouched.
-  # Speculative prefill: while the endpointer is still waiting out the silence,
-  # the speculative transcript is sent ahead with num_predict=1 so the model
-  # reads (and KV-caches) the whole prompt early. By the time the real request
-  # lands, prefill is already done — first token starts almost immediately.
-  # A wrong speculation costs one throwaway token on the GPU, nothing else.
-  speculative_prefill: true
-  # Speculative REPLY: when the turn model is confident you've finished and the
-  # live transcript already reads like a complete request, start generating the
-  # answer before you actually stop. On commit the bet is kept ONLY if what you
-  # said matches it word for word — otherwise it is thrown away and the reply is
-  # generated normally. Strict on purpose: answering a question that changed
-  # mid-sentence is worse than waiting.
-  speculative_reply: true
-  speculative_reply_threshold: 0.8 # P(turn complete) needed to place a bet
-  # vLLM on zerolabs0 over the tailnet (binds 0.0.0.0 — no tunnel needed).
+  engine: openai
+  speculative_prefill: false
+  speculative_reply: false
+  speculative_reply_threshold: 0.8
   host: http://100.95.210.94:8001
-  model: gemma4-12b # the id vLLM serves (NOT the HF path — /v1/models shows it)
-  # Previous Ollama stack, kept for rollback:
-  #   host: http://127.0.0.1:11435
-  #   model: gemma4:latest
-  temperature:
-    0.6 # a playful persona at 0.3 reads flat; the prompt's honesty
-    # clauses do the factual guarding, not the temperature
-  max_tokens:
-    220 # was 500. Spoken replies were running 3-5 sentences, which is a long
-    # time to listen to and a long time to wait through before you can speak
-    # again. This caps the answer nearer 2-3 sentences. It does NOT change
-    # time-to-first-word — that is network + prefill — but it makes each turn
-    # end sooner, which is most of what "feels quick" actually is.
-  num_ctx:
-    4096 # explicit context size. Big enough for persona + memory +
-    # 6 turns, but HALF the KV-cache VRAM of 8192 — the GPU is
-    # shared (Gemma + Whisper + Orpheus + YOLO11x + CLIP + faces)
-    # and 8192 was tipping it into OOM. Raise only with headroom.
-  # Cache-friendly history: append-only most turns (fast ~2s), and only trim back
-  # to `history_turns` once it grows past `history_trim_at`.
-  history_turns: 6 # size we keep after a trim (3 felt like a goldfish)
-  history_trim_at: 12 # let it grow to this many turns before trimming
-
+  model: gemma4-12b
+  temperature: 0.5
+  max_tokens: 300
+  num_ctx: 4096
+  history_turns: 6
+  history_trim_at: 12
 tts:
-  engine:
-    kyutai # <- CUT OVER. Measured on the Pi: Kyutai 215ms to first audio vs
-    # Orpheus 1699ms, and 2.9x realtime vs 0.8x. Orpheus was THE latency
-    # bottleneck — 1.7s of every reply. Tradeoff: Kyutai does not perform
-    # the [laughs]/[sighs] cue tags (they are stripped, never spoken).
-    # ROLLBACK: set `engine: orpheus`.
-    # orpheus (GPU, natural, performs cue tags) | kyutai (streaming
-    # WebSocket, ~213ms to first audio, but does NOT perform [laughs]/[sighs]
-    # cues — they are stripped) | piper (local fallback) | fish
+  engine: kyutai
   kyutai:
-    url: ws://100.100.95.12:8091 # zerolabs2 over the tailnet
-    # Voice from the kyutai/tts-voices repo, relative to its root.
+    url: ws://100.100.95.12:8091
     voice: expresso/ex03-ex01_happy_001_channel1_334s.wav
     api_key: public_token
-    timeout: 30
-    prebuffer_ms:
-      100 # jitter buffer for the KYUTAI voice. The Orpheus 300ms was being
-      # applied to every engine; Kyutai generates at 2.9x realtime and never
-      # underruns, so most of that was pure added first-audio latency. Raise
-      # toward 300 only if the voice ever stutters mid-word.
-  # If the remote Orpheus fails (tunnel down), speak through local Piper instead of
-  # going silently mute — the different voice IS the "degraded mode" signal. Built
-  # lazily on first failure; the remote is retried every sentence. Needs the piper
-  # binary + voice below. Blank = no fallback.
-  fallback:
-    orpheus # Kyutai primary, Orpheus as failover — it is already running and
-    # performs cue tags. NOT piper: the piper binary is missing on the Pi,
-    # so a piper fallback would leave ZERO mute if the primary died.
+    timeout: 15.0
+  fallback: orpheus
   orpheus:
-    # Orpheus TTS server on the GPU node, over an SSH tunnel. Male voices:
-    # leo dan zac; female: tara leah jess mia zoe. leo = the most natural,
-    # steady male voice. For BEST quality run the fp16 vLLM server
-    # (server/orpheus_server.py) instead of the quantized cpp one — same
-    # endpoints, higher fidelity, faster streaming (compute permitting).
-    url: http://127.0.0.1:9100/tts # Orpheus server on zerolabs1 via SSH tunnel (was S2 shim 100.95.210.94:9100 on zerolabs0)
-    voice: leo
-    timeout: 30
-    # Jitter buffer: pre-accumulate this much audio before playback starts, so
-    # a brief generation hiccup never underruns the speaker mid-word (the
-    # stutter). Costs this much added latency to first sound — cheap insurance.
-    prebuffer_ms: 300
+    url: http://127.0.0.1:9100/tts
+    voice: tara
+    timeout: 10.0
   piper:
-    binary: piper/piper # extracted arm64 release (relative to repo root)
+    binary: piper/piper
     voice: models/piper/en_US-amy-medium.onnx
-    length_scale: 1.0 # base speaking rate (orchestrator nudges per-segment)
+    length_scale: 1.0
   fish:
-    # OpenAudio S1-mini — expressive mode. PyTorch/CPU build, NOT the MLX build.
     model_dir: models/fish/openaudio-s1-mini
-    precision: int8 # int8 | int4 | fp16  (transformer quantization)
-    # codec stays fp16 regardless (GAN — quantizing degrades audio)
-    # Inference command, finalized in the Phase-6 spike. Placeholders:
-    # {model_dir} {text} {out}. Must write a WAV to {out}. Leave null until set.
+    precision: int8
     infer_cmd: null
-
 vision:
-  # ZERO's eyes. The camera + YOLO11n + color loop runs continuously in the
-  # background (perception is never on the critical path); the wake word that
-  # starts a conversation makes ZERO *attend* to what it's already seeing.
-  enabled:
-    true # needs a camera + requirements-vision.txt installed.
-    # Off = voice-only (unchanged pipeline).
-    # The camera is found by NAME (vision.camera.prefer), not port or index, so
-    # moving USB sockets needs no config change.
-    # needs a camera + requirements-vision.txt installed.
-    # Off = voice-only (unchanged pipeline).
-    # The camera is found by NAME (vision.camera.prefer), not by port or index,
-    # so moving it to a different USB socket needs no config change: the
-    # /dev/v4l/by-id symlink is built from vendor/product/SERIAL. Verified
-    # across a port swap on 2026-08-17.
-
-  # Set true ONLY if llm.model is a vision-capable build (e.g. a multimodal Gemma
-  # 3 / Qwen2-VL). Then the keyframe itself is handed to the LLM on visual turns.
-  # If false, ZERO still "sees" via detection + GPU depth facts as text — just no
-  # raw-image understanding. Verify with: ollama show <model> (look for "vision").
+  enabled: true
   multimodal: true
-
-  max_items: 6 # most objects named in the detector HINT (counts only)
-
-  # Spontaneous visual remarks: stable scene changes (an object appearing /
-  # disappearing for 2s+) surface as a note the LLM MAY mention mid-conversation
-  # ("oh, is that new?"). Rate-limited so it never gets chatty.
+  max_items: 6
   change_note_cooldown_s: 120
-
-  # Digital gaze: a moveable attention window that recenters on the tracked
-  # face — software pan/tilt, no motors, the room stays in view. Drawn on the
-  # preview (orange box + top-right inset). Needs the YuNet face model
-  # (identity.face.detector_path); silently off without it.
   attention:
     enabled: true
-    window_frac: 0.45 # window size as a fraction of each frame dimension
-    confirm_s: 0.4 # face must persist this long before the gaze locks on
-    lost_s: 2.0 # gaze holds a briefly-lost face this long (head turns, blinks)
-    # HOW FAST THE HEAD LEARNS WHERE YOUR FACE IS — the real limit on tracking
-    # responsiveness. Measured 2026-08-17: face tracking inside the detection
-    # loop updated at only 4.8 Hz (median gap 185 ms, worst 748 ms) because it
-    # inherited that loop's sleep and its GPU round trip, and YuNet was
-    # detecting at full 640x480 (~97 ms/frame).
-    track_hz: 20 # digital gaze on its own thread at up to this rate (0 = old
-      # in-loop behaviour). The neck cannot react faster than this.
-    detect_scale: 0.5 # run face detection on a half-size copy and scale the
-      # boxes back — ~4x cheaper for the same faces at conversational range.
-      # 1.0 = full resolution (slower). Identity/enrolment are unaffected.
-
-  # Live preview: SEE what ZERO sees (camera feed + detection boxes) while it runs.
+    window_frac: 0.45
+    confirm_s: 0.4
+    lost_s: 2.0
+    track_hz: 20
+    detect_scale: 0.5
   preview: true
-  preview_mode:
-    auto # auto | window | web
-    #  window = an OpenCV desktop window (needs a monitor)
-    #  web    = an MJPEG stream in a browser — works on a
-    #           HEADLESS Pi: open http://<pi-ip>:8008/
-    #  auto   = window if a display is detected, else web
-    #           (so it just works on a laptop AND a Pi).
-  preview_host:
-    127.0.0.1 # web mode bind address. 127.0.0.1 = private (view via
-    #   ssh -L 8008:localhost:8008 pi@<host>, then browse
-    #   http://localhost:8008/). Set 0.0.0.0 to expose the
-    #   feed directly on the LAN (unauthenticated — only on
-    #   a trusted home network).
-  preview_port: 8008 # web mode: browse to http://<host>:<port>/
-  preview_scale: 1.0 # enlarge the 640x480 view (e.g. 1.5 = 960x720)
-  detect_interval_s:
-    0.1 # min seconds between detections (~10/s) for near
-    # real-time presence. Each is an HTTP round trip +
-    # GPU YOLO11x — fine on LAN/Tailscale when compute
-    # isn't the limit. Raise toward 0.4 if the tunnel
-    # or GPU gets saturated; 0 = as fast as possible.
-
-  # On a visual turn ZERO hands the multimodal LLM a few RECENT frames (not one
-  # frozen pose) so it can see motion/action — a raised hand, someone mid-turn.
-  frames_per_look:
-    2 # keyframes sent per visual turn (2-3 shows motion; 1 =
-    # single frame). Each is a small JPEG over the tunnel.
-  look_window_s: 1.0 # sample those frames from roughly the last N seconds.
-
-    # BRIO exposes /dev/video0-3; only video0 (index 0) is the capture node,
-    # the others are metadata and fail to open. If 0 ever gives no frames on a
-    # re-enumeration, try 2 (the BRIO's second capture node).
+  preview_mode: auto
+  preview_host: 127.0.0.1
+  preview_port: 8008
+  preview_scale: 1.0
+  detect_interval_s: 0.1
+  frames_per_look: 2
+  look_window_s: 1.0
   camera:
-    # The BRIO browned out mid-session on 2026-08-17 and came back as
-    # /dev/video1, which killed the run because index 0 was pinned. `prefer`
-    # hunts the camera by NAME under /dev/v4l/by-id (survives re-enumeration);
-    # `device` pins an exact path; index is the last resort. The capture loop
-    # also re-opens (and re-resolves) when frames stop, not only when they
-    # never started.
     prefer: Logitech_BRIO
-    device: ""
+    device: ''
     index: 0
-    width: 640 # stream geometry — small so YOLO11n keeps up on the Pi
+    width: 640
     height: 480
     request_fps: 30
-    mjpg:
-      true # request MJPG from the camera. USB webcams (BRIO) can't
-      # sustain raw YUYV at this res/fps and return no frames;
-      # MJPG fixes it. Set false only if your camera lacks MJPG.
-
+    mjpg: true
   detect:
-    # OPEN-VOCABULARY reflex eye (Phase 1): a YOLO-World export whose 187
-    # classes come from scripts/vocab_indoor.txt — edit the vocab + re-export to
-    # change them. Exported at imgsz=480: on-CPU it runs ~2x faster than the 640
-    # export and detects MORE in normal scenes; it only loses very small objects,
-    # which the GPU eye covers. Fall back to yolo11s.onnx (COCO-80, imgsz 640)
-    # if the world model misbehaves on the Pi.
-    model_path: yolov8s-worldv2-480.onnx # ONNX (NMS baked in) — onnxruntime, NO torch
-    confidence: 0.30 # YOLO-World scores run lower than closed-set YOLO11 —
-      # 0.35 dropped real objects (measured); 0.30 recovers them
-    iou: 0.45 # informational: NMS is already inside the ONNX graph
-    device: cpu # 'cpu' (Pi) | 'cuda' (onnxruntime CUDA EP, if present)
-    imgsz: 480 # must match what export_yolo_onnx.py used
-    classes: [] # class names to keep. [] = keep ALL (recommended:
-      # "identify many objects"). List specific names to
-      # filter, e.g. [person, cup, laptop].
-
-    # ── Open vocabulary (YOLO-World) ─────────────────────────────────────────
-    # To go BEYOND the 80 COCO classes, export a YOLO-World model with a custom
-    # prompt vocabulary (scripts/export_yolo_onnx.py --vocab scripts/vocab_indoor.txt)
-    # and point model_path at it. The exporter writes a sibling "<model>.names.json"
-    # holding the prompt words; the detector auto-loads it (no config needed), but
-    # you can force a specific list here:
-    names_path: # e.g. yolo_world.names.json — blank = auto-detect / COCO-80
-
+    model_path: yolov8s-worldv2-480.onnx
+    confidence: 0.3
+    iou: 0.45
+    device: cpu
+    imgsz: 480
+    classes: []
+    names_path: null
   color:
-    top_n:
-      0 # 0 = skip pixel color-naming entirely. The multimodal
-      # LLM reads real colors off the frame, and pixel-sampled
-      # names ("blue person") were the clinical-sounding source.
-      # Raise only if you run text-only (no keyframes to the LLM).
+    top_n: 0
     center_crop: 0.6
     min_saturation: 50
     min_value: 40
     white_value: 200
-    min_colorful_ratio: 0.10
+    min_colorful_ratio: 0.1
     min_pixels: 50
-
   gpu:
-    # Grounded distance + bearing from the GPU vision server (Depth Anything V2).
-    # OFF by default now: distances/bearings read as clinical and are no longer on
-    # the speech path — the multimodal LLM sees position straight from the frames.
-    # The server code stays in server/vision/ for optional/experimental use; flip
-    # this back on only if you deliberately want depth facts again.
     enabled: false
     url: http://127.0.0.1:8000
     health_path: /health
     facts_path: /facts
-    analyze_path:
-      /analyze # long-tail naming: the Qwen2-VL VLM (server/vision/vlm)
-      # describes objects the COCO/YOLO-World detector can't.
-    health_timeout_s: 5.0 # snappy so fallback to local-only is quick
+    analyze_path: /analyze
+    health_timeout_s: 5.0
     facts_timeout_s: 15.0
-    analyze_timeout_s: 30.0 # the VLM is heavier than depth-only /facts
-    jpeg_quality: 80 # keyframe JPEG quality sent up the tunnel
-
-    # When multimodal:false (the main LLM can't see), route VISUAL turns to the GPU
-    # VLM so ZERO can still name arbitrary objects from the frame. Ignored when the
-    # main LLM is multimodal (it already sees the keyframes directly).
+    analyze_timeout_s: 30.0
+    jpeg_quality: 80
     vlm_fallback: false
-
-# ── World state (Phase 2): three perception tiers, one live scene graph ─────
-# Tier 0 (motion, every frame) and Tier 1 (open-vocab detection + tracking,
-# motion-gated) feed a versioned WorldState; the LLM context, memory and the
-# proactive engine READ from it instead of triggering their own analyses.
 world:
   enabled: true
-  motion: # Tier 0 — frame differencing, runs on every frame (~ms)
-    downscale_w: 160 # analysis width; smaller = cheaper + less sensitive
-    pixel_delta: 25 # gray-level change for a pixel to count as "moved"
-    threshold: 0.02 # fraction of moved pixels => motion is active
-    quiet_frames: 15 # consecutive still frames before motion switches off
-  gate: # Tier 1 cadence, driven by Tier 0 (sparse firing)
-    active_interval_s: 0.0 # detection interval while scene is moving (0 = every frame)
-    idle_interval_s: 2.0 # keepalive detection interval while still
-    linger_s: 3.0 # keep full cadence this long after motion stops
-  surprise: # Phase 3 — prediction error routes attention & memory
-    enabled: true
-    stats_path: data/world_surprise.json # ZERO's accumulated sense of "normal"
-    remember_bits: 4.0 # events at least this surprising become episodes
-    narrate_bits: 6.0 # ...and this surprising wake the Tier 2 narrator
-  vocab_export:
-    checkpoint: yolov8s-worldv2.pt # used by nightly vocab re-export (consolidate.py)
-  budgets: # hard per-tier compute ceilings (sparse firing, enforced)
-    tier1_max_duty: 0.6 # detector may use at most this fraction of loop time
-    tier2_max_per_min: 20 # narrator inferences per minute, pokes included
-  narrator: # Tier 2 — streaming scene understanding into the world state
-    # OFF by default: every tick costs a VLM inference on the shared GPU.
-    # backend "analyze" reuses the vision server's /analyze (Qwen2-VL) — needs
-    # vision.gpu.enabled: true. backend "openai" points at any OpenAI-compatible
-    # vision server: the Cosmos 3 Nano Reasoner slot (server/cosmos/) — moving
-    # Tier 2 to a second GPU/edge box is just this url, no code change.
+  motion:
+    downscale_w: 160
+    pixel_delta: 25
+    threshold: 0.02
+    quiet_frames: 15
+  gate:
+    active_interval_s: 0.0
+    idle_interval_s: 2.0
+    linger_s: 3.0
+  surprise:
     enabled: false
-    backend: analyze # 'analyze' | 'openai'
-    interval_s: 3.0 # narration cadence; it self-skips while nothing changes
-    narration_max_age_s: 20.0 # older narration is stale — dropped from context
-    url: http://127.0.0.1:9200 # openai backend only
-    model: nvidia/Cosmos3-Nano # openai backend only
+    stats_path: data/world_surprise.json
+    remember_bits: 4.0
+    narrate_bits: 6.0
+  vocab_export:
+    checkpoint: yolov8s-worldv2.pt
+  budgets:
+    tier1_max_duty: 0.6
+    tier2_max_per_min: 20
+  narrator:
+    enabled: false
+    backend: analyze
+    interval_s: 3.0
+    narration_max_age_s: 20.0
+    url: http://127.0.0.1:9200
+    model: nvidia/Cosmos3-Nano
     timeout_s: 20.0
-
-# Persona: the system prompt lives in zero/llm/persona.py (SYSTEM_TEMPLATE) —
-# edit it there. (It used to be templated from here, but the values were no
-# longer substituted, so the dead keys were removed.)
-
-# ───────────────────────────────────────────────────────────────────────────
-# Head / attention subsystem (phase 1). Gaze as an OUTPUT of attention, driven
-# by the same controller as tracking and by ZERO's conversation state.
-#
-# SHIPS DARK: enabled:false means a normal run is completely unaffected. Turning
-# it on with the default driver (null) moves NOTHING — it runs the full stack
-# (social gaze, face tracking, efference-copy suppression) against a no-op sink
-# so the feel and the emitted command stream can be judged with zero risk. A
-# physical driver (http/udp) is a separate, explicit opt-in and WILL move metal.
-# ───────────────────────────────────────────────────────────────────────────
 head:
-  enabled: true             # head subsystem LIVE — tracks faces + social gaze in convo
-  driver: http              # http = drive the gateway directly (no reflex layer)
-  trace: false              # (null-driver only) log the ~1 Hz commanded pose
-
-  # Motion envelope + smoothing (HeadController). Values are the 28ce9ee tuning
-  # war's endpoint: low slew + wide deadband = smooth, no ±40° revolving.
-  rate_hz: 40               # control tick
-  max_speed_dps: 220        # slew ceiling °/s — keep up with the hand (was 70)
-  # Trapezoidal profiling: velocity ramps at this accel and brakes into the
-  # target instead of stepping straight to the ceiling. Measured (simulate):
-  # legacy 0 -> jerk 88-168k°/s³, spectral 0.56-0.80; 1200 -> jerk ~42-45k,
-  # spectral 0.78-0.93, settle +0.1s; 800 is smoother still but laggier on a
-  # fast hand sweep. 0 restores the old pure-slew behavior exactly.
+  enabled: true
+  driver: http
+  trace: false
+  rate_hz: 40
+  max_speed_dps: 220
   max_accel_dps2: 1200
-  input: face               # ATTENTION MODE: track faces + social gaze rhythm
-                            # ("hand"/"head" = teleop modes, kept for testing)
-  limit_deg: 80             # ± pan envelope: 'completely left/right' = ±80°
-  command_dwell_s: 4.0      # a voice turn holds this long, then resumes following ('stop' locks)
-  express: true             # gesture beats in replies + sentence-end look-back
-                            # (nod live; small dips/turns while speaking)
+  input: face
+  limit_deg: 80
+  command_dwell_s: 4.0
+  express: false
   home_x: 0.0
   home_y: 0.0
-
-  # Eyes-lead-head: the neck holds while the face is within this fraction of the
-  # half-frame (the digital crop is the fast 'eye'); beyond it the neck engages.
-  engage_frac: 0.1          # neck engages past ~5-7° off-centre (this cam's scale)
-  # MIRROR — ZERO's pan follows YOUR head yaw, layered over face tracking:
-  # face it and it attends to you; turn your head and it turns with you, across
-  # the full pan envelope, proportional to how far you turned. Small movements
-  # are ignored so conversational head-bobbing doesn't twitch the neck.
-  # The yaw signal is nose-vs-ear-line geometry, so it doesn't change as ZERO
-  # rotates — the loop is open-loop and stable — but a big turn does carry you
-  # out of frame, which is what hold_s covers.
+  engage_frac: 0.1
   mirror:
-    # Back ON: the reboot it was suspended for turned out not to be CPU —
-    # vitals caught load 1.12 of 4 cores and 54 C five seconds before death.
-    enabled: true
-    deadzone: 0.2         # |signal| below this = facing forward, no override.
-                          # Raise if it reacts to small talking movements.
-    range_deg: 80         # a full head turn maps to this many degrees of pan
-    gain: 2.0             # sensitivity of the nose-vs-ears yaw signal
-    hold_s: 2.5           # hold the turn this long after you leave the frame,
-                          # then release to face tracking (which re-acquires).
-                          # Without it the neck snaps back the moment it obeys.
-  face_stale_s: 0.7         # the attention window FREEZES where a face was last
-                            # seen; past this long with no actual detection the
-                            # head stops treating it as a target and eases home
-                            # instead of chasing a ghost to its limit.
-  track_tilt: true          # tilt follows the face too (nod verified 2026-08-16)
-  # Controller-side tilt envelope (belief space), matching the 2026-08-17
-  # recalibration: rest (tilt 0) = servo 133.4 and the only travel is downward
-  # to servo 161.4, i.e. tilt -28..0. Belief is clamped to the same window as
-  # the driver so the head never believes it is somewhere the servo can't go.
+    enabled: false
+    deadzone: 0.2
+    range_deg: 80
+    gain: 2.0
+    hold_s: 2.5
+  face_stale_s: 0.7
+  track_tilt: true
   tilt_min_deg: -28
   tilt_max_deg: 0
-  source_hz: 15             # rate the neck target is pulled from Eyes' gaze
-  suppress_lead_s: 0.5      # efference copy: silence novelty while moving
-  resettle_dwell_s: 0.4     # re-baseline this long after the neck stops
-
-  # Direct teleoperation by hand/head pose (YOLO-pose, local ONNX). Move your
-  # hand left/right → head follows in real time (open-loop map + 1€ filter).
+  source_hz: 15
+  suppress_lead_s: 0.5
+  resettle_dwell_s: 0.4
   hand:
     model_path: models/yolo11n-pose.onnx
-    min_cutoff: 0.8         # 1€ filter: lower = smoother but laggier
-    beta: 0.25              # 1€ filter: higher = snappier on fast moves
-    deadzone: 0.12          # hand within 0.12 shoulder-widths of centre -> head holds (anti-jitter)
-    conf: 0.35              # min person confidence (width guard is the real junk filter)
-    kp_conf: 0.25           # min keypoint confidence
-    min_shoulder_frac: 0.10 # reject detections whose shoulders span < 10% of frame (junk)
-    # (no keypoint key: the tracked keypoint is derived from head.input —
-    #  input "hand" tracks the wrist, input "head" tracks the nose)
-    lost_s: 1.5             # hand gone this long -> ease the neck back to centre
-    mirror: false           # MIRROR control: hand left -> head right, hand right -> head left
-    gain: 0.6               # HAND sensitivity: full ~1.6-width hand sweep maps across +/-80
-    gain_head: 2.0          # HEAD-yaw sensitivity (nose-vs-ears signal is smaller-range than a hand sweep)
-    # Vertical (tilt) teleop channel — DARK until the nod is calibrated. The
-    # y-signal is neutral-relative (auto-baselined from the first ~10 samples).
-    tilt: false             # kill switch: true = hand/head vertical also drives the nod
-    tilt_range_deg: 15      # full vertical deflection maps across +/- this many degrees
-    gain_y: 1.0             # vertical sensitivity
-    deadzone_y: 0.15        # vertical deadzone (neutral-relative units)
-
-  tracker:                  # closed-loop visual servo (FaceTracker)
-    kp_pan: 0.55            # snappier horizontal follow
-    kp_tilt: 0.16           # only used when head.track_tilt is true
-    deadband: 0.04          # face within ~4% of centre = "centred" (was 0.22)
-    pan_sign: 1.0           # +1: face right -> turn right (matches +deg=right hw)
-    tilt_sign: 1.0          # the one-look sign test: flip if error GROWS on turn
+    min_cutoff: 0.8
+    beta: 0.25
+    deadzone: 0.12
+    conf: 0.35
+    kp_conf: 0.25
+    min_shoulder_frac: 0.1
+    lost_s: 1.5
+    mirror: false
+    gain: 0.6
+    gain_head: 2.0
+    tilt: false
+    tilt_range_deg: 15
+    gain_y: 1.0
+    deadzone_y: 0.15
+  tracker:
+    kp_pan: 0.55
+    kp_tilt: 0.16
+    deadband: 0.04
+    pan_sign: 1.0
+    tilt_sign: 1.0
     half_fov_pan_deg: 35
     half_fov_tilt_deg: 25
-    settle_delay_s: 0.08    # beat between corrections. This is a deliberate
-                            # wait for the neck+camera to catch up before
-                            # correcting again; it only needs to cover one
-                            # face-position update, now ~50 ms (was ~200 ms).
-    lead_s: 0.12            # predictive lead (was 0.30 — big leads jumped on noise)
-
-  social:                   # GazeScheduler — the turn-taking layer
-    listen_face_frac: 0.71  # Argyle & Cook: gaze ~71% while listening
-    speak_face_frac: 0.41   #                gaze ~41% while speaking
-    listen_avert_s: 1.14    # Andrist et al. 2014 aversion durations
+    settle_delay_s: 0.08
+    lead_s: 0.12
+  social:
+    listen_face_frac: 0.71
+    speak_face_frac: 0.41
+    listen_avert_s: 1.14
     speak_avert_s: 1.96
-    max_mutual_s: 5.0       # never hold unbroken mutual gaze past ~5 s (Binetti)
-    think_hold_s: 3.5       # THINKING: look up-and-away this long
-    sideways_deg: 12        # aversion offset magnitude (head-only)
+    max_mutual_s: 5.0
+    think_hold_s: 3.5
+    sideways_deg: 12
     up_deg: 10
-
-  # Physical driver settings (only used when driver is http/udp — MOVES METAL).
-  gateway:                  # driver: http — gateway on the Arm Pi (:5000)
-    # Tailscale address: the Arm Pi's LAN IP drifts with DHCP (.183 -> .184,
-    # 2026-08-13) and the LAN path is blocked between the Pis anyway (AP
-    # isolation). Tailscale is stable and ~24 ms RTT — fine at 15 Hz.
+  gateway:
     base_url: http://100.67.233.65:5000
-    pan_joint: head_tilt_joint    # firmware joint names (resolve on calibration)
+    pan_joint: head_tilt_joint
     tilt_joint: head_nod_joint
-    max_hz: 28              # posts/sec to the gateway. At 15 the driver was
-                            # itself the speed limit: the controller advances
-                            # up to 14.7 deg between posts at 220 deg/s, above
-                            # the 12 deg max_jump, so every fast move got
-                            # walked and capped near 180 deg/s. 28 keeps each
-                            # post's delta under the cap.
-    deadband_deg: 0.3       # smaller = finer corrections still get posted
+    max_hz: 28
+    deadband_deg: 0.3
     timeout_s: 0.5
-    max_jump_deg: 16        # max hardware move per post from last-ACKED pose —
-                            # after an outage the driver WALKS to the target
-                            # instead of whipping (slew only exists in belief)
-    # Nod mapping: gateway servo = 90 + angle_deg, and the driver posts
-    # angle = clamp(nod_sign*tilt + nod_offset_deg, nod_min_deg, nod_max_deg).
-    # RECALIBRATED 2026-08-17 (supervised; log calibration_nod_log.txt):
-    # min 133.4 = home 133.4, max 161.4 servo. Rest sits AT the min end, so
-    # all 28° of travel runs one way — toward servo 161.4. With the standing
-    # direction (larger servo = GAZE DOWN) that means: rest is the highest
-    # gaze, "look down" works through 28°, "look up" from rest is a no-op.
-    # Angle space = servo - 90, so the clamp is 43.4..71.4.
-    drive_nod: true         # nod LIVE within the calibrated envelope
-    nod_sign: -1.0          # larger servo angle = gaze DOWN (operator-verified
-                            # 2026-08-16; +tilt stays = up)
-    nod_offset_deg: 43.4    # rest: tilt 0 -> angle 43.4 -> servo 133.4
-    nod_min_deg: 43.4       # servo 133.4 (rest / up stop)
-    nod_max_deg: 71.4       # servo 161.4 (down stop)
-  setpoint:                 # driver: udp — Arm-side reflex/smoothing service
+    max_jump_deg: 16
+    drive_nod: true
+    nod_sign: -1.0
+    nod_offset_deg: 43.4
+    nod_min_deg: 43.4
+    nod_max_deg: 71.4
+  setpoint:
     host: 192.168.150.183
     port: 8099
-
-# Arm/hand gestures (voice-commanded: 'wave', 'raise your arm', 'open your
-# hand'). SHIPS DARK, twice over: arms.enabled gates the whole subsystem, and
-# even enabled, a joint is INERT until it has a calibrated envelope entry in
-# arms.joints (min/max/home in gateway angle_deg command space — find them
-# with the supervised scripts/arm_calibrate.py, small steps, robot watched).
-# Steppers (elbows/biceps/shoulders) have NO encoders and zero at whatever
-# pose the Nano booted in — they stay inert even when calibrated unless
-# allow_steppers is also true. Servo hands first; steppers later, carefully.
 arms:
-  enabled: true             # subsystem + voice commands + gesture cues LIVE
-  driver: http              # null = record only | http = MOVES THE ROBOT.
-                            # LIVE from 2026-08-17. Envelopes are URDF limits
-                            # at limit_frac, NOT per-joint supervised
-                            # calibration, so treat every direction as
-                            # unverified until you have watched it move.
-  rate_hz: 20               # gesture playback tick
-  max_speed_dps: 120        # per-joint speed cap during playback. 60 was slow
-                            # enough that a gesture frame ended before the
-                            # joint arrived, leaving the move half-made.
-  allow_steppers: true      # the gesture joints (shoulder-lift/bicep/elbow)
-                            # are all steppers, so this must be on for any of
-                            # them to load. driver:null is what holds motion.
-  # Gesture pacing + grounding for the conversational layer. The model cues a
-  # gesture inline in its reply ([beat], [wave], ...) and the cue fires as that
-  # word reaches the speaker. NOTE: the shoulder in/out joints and the wrists
-  # are excluded from gestures in code and cannot be re-enabled from here.
-  # Hands move a little while people talk. speech_beat fires a small beat on
-  # a spoken sentence even when the model cued nothing, so the arms are
-  # visibly alive during a reply instead of waiting on a cue the model rarely
-  # writes. Short sentences ("Yeah.") never trigger one.
-  speech_beat: true
-  beat_gap_s: 8             # seconds between automatic speech beats
-  # Gesture-speech coordination, from the gesture-studies literature:
-  #  * the STROKE lands on the word the cue sits against, never after it
-  #    (McNeill's phonological synchrony rule), so the gesture is scheduled
-  #    from the cue's word position rather than fired at sentence onset;
-  #  * preparation has to be under way before that word arrives, hence a lead;
-  #  * consecutive gestures do NOT retract between strokes (Kendon's gesture
-  #    units) — the hand stays up for unit_hold_s and a following gesture
-  #    cancels the retraction entirely.
-  words_per_sec: 2.8        # speaking rate used to place the stroke
-  prep_lead_s: 0.25         # start the arm moving this early
-  unit_hold_s: 1.2          # hold a stroke this long before retracting
-  min_gesture_gap_s: 12     # floor between gestures. Most turns should carry
-                            # NO gesture — hands moving every sentence read as
-                            # nervous, not alive. Lower for a livelier robot.
-  # Per-joint direction: +1 means "raise" moves that joint positively. Flip a
-  # joint to -1 if it turns out to move the opposite way — config, not code.
+  enabled: true
+  driver: http
+  rate_hz: 20
+  max_speed_dps: 120
+  allow_steppers: false
+  speech_beat: false
+  beat_gap_s: 8
+  words_per_sec: 2.8
+  prep_lead_s: 0.25
+  unit_hold_s: 9999.0
+  min_gesture_gap_s: 12
   joint_sign:
-    # Verified on the robot 2026-08-17: raising the LEFT arm drove it the wrong
-    # way, so its shoulder motor is mirrored relative to the right. The sign
-    # flips both the commanded direction AND the joint's window, so "raise"
-    # still gets the full lift rather than the small half of an asymmetric
-    # range. Add left_elbow_joint / left_bicep_joint here if they read
-    # backwards too.
     left_up_down_joint: -1
-  allow_pointing: false     # honour [point_left]/[point_right] only when
-                            # perception can actually ground a target. Off
-                            # until pointing is aimed against real bearings —
-                            # a point at nothing is worse than no point.
+  allow_pointing: false
   gateway:
-    base_url: http://100.67.233.65:5000   # same gateway as the head
+    base_url: http://100.67.233.65:5000
     max_hz: 10
     deadband_deg: 0.5
     timeout_s: 1.0
-  # CALIBRATION FILL-IN SHEET. Run scripts/arm_calibrate.py per joint (order
-  # below), then UNCOMMENT the joint's line and replace min/max/home with the
-  # exact numbers the script prints (it prints them in this raw command space
-  # — paste verbatim). A commented/absent joint is INERT. Steppers also need
-  # allow_steppers: true above once their lines are real.
-  # Envelopes from the robot's own URDF on the Arm Pi
-  # (~/AF1_Workspace/robot_description/humanoid.urdf), converted rad -> deg.
-  # These are MECHANICAL travel limits; they do not say where the arm is
-  # sitting, because the steppers have no encoders and zero is wherever they
-  # were at the last reset — hence limit_frac below. The shoulder in/out pair
-  # and the wrists are absent deliberately: excluded in code, not just here.
-  step_deg: 30              # how far a plain "raise your elbow" moves. 15 was
-                            # measured as too small to read as movement; say an
-                            # explicit "40 degrees" to override per command.
-  limit_frac: 1.0           # fraction of each URDF range actually usable, in
-                            # effect until supervised motion confirms the arm
-                            # rests near the modelled zero. Raise toward 1.0
-                            # once verified, one step at a time.
+  step_deg: 30
+  limit_frac: 1.0
   joints:
-    right_up_down_joint: {min: -68.8, max: 106.0, home: 0.0}   # shoulder lift
-    left_up_down_joint:  {min: -68.8, max: 106.0, home: 0.0}
-    right_bicep_joint:   {min: -74.9, max:  47.7, home: 0.0}   # upper-arm roll
-    left_bicep_joint:    {min: -120.3, max: 120.3, home: 0.0}
-    right_elbow_joint:   {min: -90.5, max:  19.5, home: 0.0}
-    left_elbow_joint:    {min: -90.5, max:  19.5, home: 0.0}
+    left_up_down_joint:
+      min: -68.8
+      max: 106.0
+      home: 0.0
+    right_up_down_joint:
+      min: -68.8
+      max: 106.0
+      home: 0.0
+    left_in_out_joint:
+      min: -137.5
+      max: -1.0
+      home: -40.0
+    right_in_out_joint:
+      min: 1.0
+      max: 137.5
+      home: 40.0
+    left_bicep_joint:
+      min: -120.3
+      max: 120.3
+      home: 0.0
+    right_bicep_joint:
+      min: -74.9
+      max: 47.7
+      home: 0.0
+    left_elbow_joint:
+      min: -90.5
+      max: 19.5
+      home: 0.0
+    right_elbow_joint:
+      min: -90.5
+      max: 19.5
+      home: 0.0
+    left_wrist_joint:
+      min: 0.0
+      max: 180.0
+      home: 180.0
+    right_wrist_joint:
+      min: 0.0
+      max: 180.0
+      home: 0.0
+    left_thumbp1_joint:
+      min: 0.0
+      max: 180.0
+      home: 0.0
+    left_indexp1_joint:
+      min: 0.0
+      max: 180.0
+      home: 0.0
+    left_middlep1_joint:
+      min: 0.0
+      max: 180.0
+      home: 0.0
+    left_ringp1_joint:
+      min: 0.0
+      max: 180.0
+      home: 0.0
+    left_pinkyp1_joint:
+      min: 0.0
+      max: 180.0
+      home: 0.0
+    right_thumbp1_joint:
+      min: 0.0
+      max: 180.0
+      home: 0.0
+    right_indexp1_joint:
+      min: 0.0
+      max: 180.0
+      home: 0.0
+    right_middlep1_joint:
+      min: 0.0
+      max: 180.0
+      home: 0.0
+    right_ringp1_joint:
+      min: 0.0
+      max: 180.0
+      home: 0.0
+    right_pinkyp1_joint:
+      min: 0.0
+      max: 180.0
+      home: 0.0
   gestures: {}
-    # Templates to uncomment AFTER the joints above are calibrated. Replace
-    # the TODO joint names/angles once you know which joint physically lifts
-    # the arm and which direction is "up" (positive or negative).
-    # raise_right:
-    #   - {joints: {right_up_down_joint: 30}, s: 1.2}   # TODO joint + angle
-    #   - {joints: {right_up_down_joint: 30}, s: 1.5}   # hold raised
-    #   - {joints: {right_up_down_joint: "home"}, s: 1.2}
-    # raise_left:
-    #   - {joints: {left_up_down_joint: 30}, s: 1.2}    # TODO joint + angle
-    #   - {joints: {left_up_down_joint: 30}, s: 1.5}
-    #   - {joints: {left_up_down_joint: "home"}, s: 1.2}
-    # handshake:
-    #   - {joints: {right_up_down_joint: 25, right_elbow_joint: 20}, s: 1.2}
-    #   - {joints: {right_up_down_joint: 25, right_elbow_joint: 20}, s: 2.0}
-    #   - {joints: {right_up_down_joint: "home", right_elbow_joint: "home"}, s: 1.2}
-    # open_right_hand:      # needs finger servos (PCA rail) working
-    #   - {joints: {right_indexp1_joint: 0, right_middlep1_joint: 0}, s: 0.6}
-    # close_right_hand:
-    #   - {joints: {right_indexp1_joint: 55, right_middlep1_joint: 55}, s: 0.6}

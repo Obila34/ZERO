@@ -52,6 +52,11 @@ class RemoteSTT(STT):
             )
             resp.raise_for_status()
             text = (resp.json().get("text") or "").strip()
+            # Suppress common Whisper silence / low-noise hallucinations
+            low = text.lower().strip(" .!?,")
+            if low in ("thank you", "thanks", "thank you very much", "subtitles by", "you", "thanks for watching", "bye"):
+                log.info("suppressed Whisper silence hallucination: %r", text)
+                text = ""
         except (requests.RequestException, ValueError) as e:
             # Raise instead of returning "" — the caller must be able to tell a
             # dead tunnel from silence, so it can fail over to a local engine.

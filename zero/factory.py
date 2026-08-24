@@ -99,6 +99,20 @@ def _build_remote_whisper(cfg: Config) -> STT:
 
 
 def build_stt(cfg: Config) -> STT:
+    engine = cfg.get("stt.engine", "google")
+    if engine == "google":
+        from zero.stt.google_engine import GoogleSTT
+        fb = cfg.get("stt.fallback", "remote")
+        fallback_engine = None
+        if fb == "remote":
+            fallback_engine = _build_remote_whisper(cfg)
+        elif fb == "whispercpp":
+            fallback_engine = _build_whispercpp(cfg)
+        return GoogleSTT(
+            language=cfg.get("stt.google.language", "en-US"),
+            timeout=cfg.get("stt.google.timeout", 10.0),
+            fallback=fallback_engine,
+        )
     engine = cfg.get("stt.engine", "whispercpp")
     if engine == "kyutai":
         # Streaming WebSocket STT. The deployed model is en/fr ONLY — no

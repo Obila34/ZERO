@@ -1,95 +1,94 @@
-# ZERO
+# ZERO (AF-1) Conversational Humanoid Brain
 
-An **offline** conversational voice robot for the **Raspberry Pi 5** — talk to it
-in English, it replies in a natural human-sounding voice (with chuckles, sighs and
-emphasis). First step toward a conversational humanoid.
+ZERO is the embodied AI conversational brain for the **AF-1 Humanoid Robot**, developed by **Zerobionic Africa** in Nairobi, Kenya. It integrates continuous voice perception, Google Speech Recognition (free STT), Gemma 4 (12B) conversational intelligence via vLLM, Kyutai streaming TTS, and real-time bilateral Kenyan Sign Language (KSL) fingerspelling and 10-finger hand dexterity.
 
-Everything runs **on the Pi, no internet**: wake word → speech-to-text → a local
-LLM → text-to-speech. Every stage sits behind a small interface, so any engine
-(and later, a cloud engine) can be swapped in `config.yaml` without code changes.
+---
 
-## Pipeline
+## 🚀 How to Fire Up the LLM & Services
 
-```
-IDLE ──(wake word)──> LISTENING ──(end of speech)──> THINKING ──> SPEAKING ──> IDLE
-```
-
-| Stage      | Engine (default)            | Module                              |
-|------------|-----------------------------|-------------------------------------|
-| Wake word  | openWakeWord                | `zero/wake/openwakeword_engine.py`  |
-| Endpointing| silero-vad (webrtc fallback)| `zero/vad/endpointer.py`            |
-| STT        | whisper.cpp (`base.en`)     | `zero/stt/whispercpp_engine.py`     |
-| LLM        | Ollama + Llama 3.2 3B       | `zero/llm/ollama_engine.py`         |
-| TTS (fast) | Piper + orchestrator        | `zero/tts/piper_engine.py`          |
-| TTS (expr.)| Fish OpenAudio S1-mini      | `zero/tts/fish_engine.py`           |
-| Vision     | YOLO11n (ONNX) + Depth Anything V2 | `zero/vision/` · `server/vision/` |
-
-### Eyes (vision)
-
-ZERO can also **see**. A camera + YOLO11n + color loop (`zero/vision/eyes.py`)
-runs continuously from startup — perception is never on the critical path, so the
-moment you ask "what's this?" the scene is already perceived. The wake word that
-opens a conversation makes ZERO *attend* to what it's been seeing all along.
-
-- Every turn gets a quick, GPU-free ambient line ("in view: a person, a red cup").
-- **Visual** questions also fetch grounded distance + bearing from the GPU vision
-  server (Depth Anything V2 over the same SSH tunnel) and, if `vision.multimodal`
-  is on, hand the keyframe straight to a vision-capable LLM.
-- One brain, one memory, one voice: the scene is folded into the **same** Gemma
-  prompt and SQLite memory the conversation already uses.
-
-Off by default. Turn on with `vision.enabled: true` in `config.yaml` after
-`pip install -r requirements-vision.txt` (light: OpenCV + onnxruntime, **no
-torch** — YOLO11n runs as the bundled `yolo11n.onnx`). Falls back to local
-detections (no distances) if the GPU is unreachable. See
-[`docs/VISION.md`](docs/VISION.md).
-
-### Two-tier voice
-
-- **Piper** (default): fast and reliable. Expressiveness comes from the
-  orchestrator — the LLM emits cue tags (`[laughs]`, `[sighs]`, …) and short
-  pre-recorded clips are spliced in (`zero/tts/nonverbals/`).
-- **Fish S1-mini** (expressive mode): performs `(laughing)`, `(chuckling)`,
-  `(whispering)` etc. natively. Heavier — benchmark on the Pi before making it
-  default. Use the **PyTorch/CPU** build, **never** the MLX build (Mac-only).
-
-Switch with `tts.engine: piper | fish` in `config.yaml`. The LLM prompt never
-changes — the orchestrator translates the shared cue vocabulary per engine.
-
-> **Running the real two-machine setup (Pi + GPU node)?** Read
-> [`docs/OPERATIONS.md`](docs/OPERATIONS.md) — the full architecture, the SSH
-> tunnel, exact start/restart commands for both boxes, and a troubleshooting
-> table mapping every known log error to its fix.
->
-> **Where ZERO is headed:** [`docs/PLAN.md`](docs/PLAN.md) — the roadmap to a
-> present, learning, proactive companion (identity, agentic tool use, human-like
-> memory, self-directed learning, proactivity), each module designed against
-> this codebase with prior-art research.
-
-## Setup (on the Pi 5)
-
+### 1. Launch the GPU vLLM Model Server
+On your GPU server (e.g. `100.95.210.94:8001`):
 ```bash
-bash scripts/setup_pi.sh                       # deps, models, Ollama, Piper
-source .venv/bin/activate
-python scripts/list_audio_devices.py --loopback # verify mic + speaker
-python -m zero.main                             # start talking
+vllm serve google/gemma-2-12b-it \
+  --host 0.0.0.0 \
+  --port 8001 \
+  --gpu-memory-utilization 0.90 \
+  --max-model-len 4096 \
+  --tensor-parallel-size 1
 ```
 
-Set the mic/speaker indices it prints into `audio.input_device` /
-`audio.output_device` in `config.yaml` (or a `config.local.yaml` override).
+### 2. Start the ZERO Brain Service on Head Pi
+```bash
+# Start the background conversational service
+systemctl --user start zero
 
-## Configuration
+# Check real-time service status
+systemctl --user status zero
 
-All knobs live in [`config.yaml`](config.yaml): audio devices, wake word +
-threshold, VAD timings, STT/LLM models, and TTS engine + voice. A
-`config.local.yaml` (gitignored) deep-merges on top for per-device overrides.
+# Follow live logs
+tail -f /home/head/zero.service.log
 
-## Notes / roadmap
+# Restart service after config changes
+systemctl --user restart zero
 
-- **Latency** is the cost of fully-local: replies are streamed sentence-by-sentence
-  so speech starts before the whole reply is generated. Drop the LLM to
-  `llama3.2:1b` and STT to `tiny.en` if it's slow.
-- **RAM (8 GB Pi):** the LLM + whisper + Fish don't all fit resident at once —
-  quantize Fish's transformer (int8/int4) and/or lazy-load. See the plan.
-- **Phase 7 polish:** barge-in (interrupt playback on a new wake word) and a
-  spoken "thinking" filler are stubbed (`should_stop` hook in playback).
+# Stop service
+systemctl --user stop zero
+```
+
+### 3. Direct HTTP API Text / Voice Turns
+```bash
+# Fingerspell a word in Sign Language
+curl -X POST http://127.0.0.1:8090/zero/turn_text \
+  -H "Content-Type: application/json" \
+  -d '{"text": "spell PETER in sign language", "speak": true}'
+
+# Execute a hand gesture
+curl -X POST http://127.0.0.1:8090/zero/turn_text \
+  -H "Content-Type: application/json" \
+  -d '{"text": "sign I love you in sign language", "speak": true}'
+```
+
+---
+
+## 🧠 Architecture & How the LLM Works
+
+```
+IDLE ──(wake word: "hey jarvis")──> LISTENING ──(VAD / silence 750ms)──> THINKING / TOOLS ──> SPEAKING / SIGNING ──> IDLE
+```
+
+| Pipeline Stage | Active Engine | Fallback / Alternative | Module |
+| :--- | :--- | :--- | :--- |
+| **Wake Word** | `openWakeWord` (`hey_jarvis`, thr=0.15) | Alexa, Mycroft | `zero/wake/openwakeword_engine.py` |
+| **VAD Endpointer** | `TEN VAD` (wasm, thr=0.35) + `Smart Turn v3` | Silero ONNX | `zero/vad/endpointer.py` |
+| **Speech-to-Text (STT)** | **Google Free Speech Recognition** | GPU Whisper (`large-v3-turbo`) | `zero/stt/google_engine.py` |
+| **LLM Intelligence** | **Gemma 4 (12B)** via vLLM OpenAI API | Ollama / Llama 3.2 | `zero/llm/openai_engine.py` |
+| **TTS Voice** | **Kyutai Streaming TTS** | Piper / Fish Audio | `zero/tts/kyutai_engine.py` |
+| **Bilateral KSL & Fingers** | **ArmTool (12 Calibrated Servos)** | Fast Direct Yield | `zero/tools/arms.py` |
+| **Web Search** | **SearXNG + LLM Direct Synthesizer** | — | `zero/tools/websearch.py` |
+
+---
+
+## ✨ Features & Capabilities
+
+### 1. Bilateral Kenyan Sign Language (KSL) Fingerspelling
+* **Synchronized Dual-Hand Signing**: Automatically mirrors all 26 manual alphabet letters ($A-Z$) across both left and right hands simultaneously.
+* **Calibrated Timing**: Exact speed of **1 letter / second** (`1.0s` hold per letter).
+* **Spoken Letter Readout**: Synthesizes clear spoken letters (*"Spelling COW: C - O - W."*) while physical hands actuate.
+* **Arm Stance Retention**: Steppers remain locked (`allow_steppers: false`) so only fingers and wrists move without drooping the arm.
+
+### 2. Full 10-Finger Hand Dexterity & Gestures
+Independent multi-joint control across Thumb, Index, Middle, Ring, and Pinky on both hands:
+* ✌️ **Peace / Victory Sign**: Index & Middle extended ($90^\circ$), others curled ($0^\circ$).
+* 🤟 **I Love You Sign (ILY)**: Thumb ($5^\circ$), Index ($90^\circ$), and Pinky ($99^\circ$) extended; Middle & Ring curled ($0^\circ$).
+* 👉 **Point**: Index extended forward, others curled.
+* 👍 **Thumbs Up**: Thumb extended upward ($5^\circ$), fingers in a fist.
+* ✊ **Fist / 🖐️ Open Hands**: Full closure or extension.
+* 〰️ **Wiggle Fingers**: Dynamic sequential wave ripple across all fingers.
+* 🎯 **Individual Finger Control**: *"move your thumb"*, *"bend right index finger"*, *"open left pinky"*.
+
+### 3. Voice & Conversation Intelligence
+* **Zerobionic Africa Identity**: Grounded in its assistive STEM & deaf education mission.
+* **English-Only Fluent Mode**: Crisp, concise 1-2 sentence replies without fluff.
+* **Multi-Layer Thought Guard**: Automatically strips reasoning markers (`<thought>...</thought>`) to avoid speech loops.
+* **Vision On-Demand**: Ambient vision remarks are suppressed unless you explicitly ask visual questions (*"What do you see?"*).
+* **SearXNG Live Web Search**: Synthesizes live factual information cleanly without reading URLs or metadata headers.

@@ -348,44 +348,42 @@ class ToolAwareLLM:
         return None
 
     def _run_and_rephrase(self, messages, raw_reply: str, call: dict):
-        name = call["tool"]
+        name = call.get('tool', '')
         tool = self._registry.get(name)
         if tool is None:
-            result = f"I don't have a tool called {name}."
+            yield f"I do not have a tool called {name}."
+            return
+
+        raw_args = call.get('args')
+        if isinstance(raw_args, dict):
+            args = raw_args
+        elif isinstance(raw_args, str):
+            args = {'query': raw_args}
         else:
-            # The model sometimes emits "args" as a bare string (the query)
-            # instead of an object — coerce it so args.get() never explodes.
-            raw_args = call.get("args")
-            if isinstance(raw_args, dict):
-                args = raw_args
-            elif isinstance(raw_args, str):
-                args = {"query": raw_args}
-            else:
-                args = {}
-            result = tool.safe_run(args, self._ctx())
-            log.info("tool %s -> %r", name, result[:100])
-        # Second pass: let the model phrase the outcome in its own voice.
-        # The assistant turn is included ONLY when it has content: most tool
-        # routes pass raw_reply="" (forced/auto web search never asked the
-        # model first), and an EMPTY assistant turn renders as a degenerate
-        # `<start_of_turn>model<end_of_turn>` in Gemma's chat template — which
-        # is exactly the shape that provoked leaked "thought ..." reasoning
-        # prefixes on tool-router turns, despite enable_thinking=false.
+            args = {}
+
+        result = tool.safe_run(args, self._ctx())
+        log.info('tool %s -> %r', name, result[:100])
+
+        # Arms, signing, and direct tools return the final spoken sentence directly
+        if name in ('arms', 'time', 'timer', 'reminder'):
+            yield result
+            return
+
+        # For web search: summarize cleanly into a direct, natural 1-2 sentence spoken answer
+        followup_content = (
+            "Web Search Results:\n" + str(result) + "\n\n" +
+            "Answer the user's question directly in 1 or 2 natural spoken sentences based on the search results. " +
+            "Never say 'Web results for...', do not cite search queries or URLs, and do not quote raw metadata."
+        )
         followup = [
             *messages,
-            *([{"role": "assistant", "content": raw_reply}]
-              if raw_reply.strip() else []),
-            {"role": "user", "content":
-                f"(Tool result: {result}) State the answer to the user "
-                "directly, in one or two spoken sentences. Never narrate the "
-                "process — no 'querying', 'searching', 'I looked it up', "
-                "'results say', 'it looks like' — and never mention tools, "
-                "sources or JSON. If the result doesn't actually answer the "
-                "question, say plainly that you couldn't find it."},
+            *([{'role': 'assistant', 'content': raw_reply}] if raw_reply.strip() else []),
+            {'role': 'user', 'content': followup_content}
         ]
         spoke = False
         for chunk in self._llm.stream(followup):
             spoke = True
             yield chunk
-        if not spoke:  # LLM died mid-turn — the raw result still gets spoken
-            yield result
+        if not spoke:
+            yield "I found some results online, but couldn't get a clear answer."

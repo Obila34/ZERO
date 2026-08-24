@@ -321,7 +321,20 @@ class Zero:
             arms_block = _arm_prompt(available_gestures(self.cfg))
         except Exception as e:
             log.debug("arm prompt block unavailable: %s", e)
-        system_prompt = build_system_prompt(tool_block, body_block, arms_block,
+        
+        robot_hardware_block = (
+            "Zerobionic Africa (Nairobi, Kenya) — AF-1 Robot Hardware & KSL Reference:\n"
+            "You are AF-1, built by Zerobionic Africa in Nairobi for Kenyan Sign Language (KSL) and STEM education.\n"
+            "You have direct control over your 20 physical robot actuators:\n"
+            "- Left Arm: left_up_down_joint (-68.8 to 106 deg), left_in_out_joint (-137.5 to -1 deg), left_bicep_joint (-120.3 to 120.3 deg), left_elbow_joint (-90.5 to 19.5 deg)\n"
+            "- Right Arm: right_up_down_joint (-68.8 to 106 deg), right_in_out_joint (1 to 137.5 deg), right_bicep_joint (-74.9 to 47.7 deg), right_elbow_joint (-90.5 to 19.5 deg)\n"
+            "- Wrists: left_wrist_joint & right_wrist_joint (0 to 180 deg, 180=palm forward, 90=diagonal/inward, 0=cup/upward)\n"
+            "- Fingers: left/right thumb, index, middle, ring, pinky (0 open to 90-140 deg closed fist)\n"
+            "- Kenyan Sign Language (KSL) Capabilities: All 26 letters (A-Z) and word fingerspelling supported via the arms tool.\n"
+            "Whenever asked about Zerobionic Africa, your origins, your joints, limits, or asked to sign/gesture in KSL, answer accurately and trigger the motion."
+        )
+
+        system_prompt = build_system_prompt(tool_block, robot_hardware_block, body_block, arms_block,
                                             lang_block, web_block)
         self.convo = Conversation(
             system_prompt=system_prompt,
@@ -1464,27 +1477,17 @@ class Zero:
 
     def _look(self, text: str) -> tuple[str, list[str]]:
         """Ephemeral (note, keyframes) for this turn — never persisted, never raises.
-
-        Ambient turns get only the cheap text hint; visual turns also pull a few
-        recent keyframes so the multimodal LLM can actually see.
+        Only pulls vision context if the user explicitly asks a visual question.
         """
         if self.eyes is None:
             return "", []
         try:
-            t0 = time.monotonic()
             visual = self._is_visual(text)
-            t1 = time.monotonic()
             if visual:
                 ctx = self.eyes.visual_context(question=text)
-                out = (ctx.text, ctx.images)
-            else:
-                out = (self.eyes.local_context(), [])
-            t2 = time.monotonic()
-            if t2 - t0 > 0.3:
-                log.info("look breakdown: is_visual=%.2fs context=%.2fs "
-                         "(visual=%s)", t1 - t0, t2 - t1, visual)
-            return out
-        except Exception as e:  # vision must never break a conversation turn
+                return (ctx.text, ctx.images)
+            return ("", [])
+        except Exception as e:
             log.debug("vision look failed: %s", e)
             return "", []
 

@@ -1,3 +1,37 @@
+from __future__ import annotations
+
+# Calibrated ASL A-Z Letter Definitions (Degrees)
+ASL_LETTER_ANGLES = {
+    'A': {'left_wrist_joint': 180.0, 'left_thumbp1_joint': 5.0, 'left_indexp1_joint': 0.0, 'left_middlep1_joint': 0.0, 'left_ringp1_joint': 0.0, 'left_pinkyp1_joint': 0.0},
+    'B': {'left_wrist_joint': 180.0, 'left_thumbp1_joint': 140.0, 'left_indexp1_joint': 90.0, 'left_middlep1_joint': 90.0, 'left_ringp1_joint': 99.0, 'left_pinkyp1_joint': 99.0},
+    'C': {'left_wrist_joint': 180.0, 'left_thumbp1_joint': 65.8, 'left_indexp1_joint': 49.5, 'left_middlep1_joint': 49.5, 'left_ringp1_joint': 54.4, 'left_pinkyp1_joint': 54.4},
+    'D': {'left_wrist_joint': 180.0, 'left_thumbp1_joint': 92.8, 'left_indexp1_joint': 90.0, 'left_middlep1_joint': 9.0, 'left_ringp1_joint': 9.9, 'left_pinkyp1_joint': 9.9},
+    'E': {'left_wrist_joint': 180.0, 'left_thumbp1_joint': 140.0, 'left_indexp1_joint': 13.5, 'left_middlep1_joint': 13.5, 'left_ringp1_joint': 14.8, 'left_pinkyp1_joint': 14.8},
+    'F': {'left_wrist_joint': 180.0, 'left_thumbp1_joint': 80.0, 'left_indexp1_joint': 13.5, 'left_middlep1_joint': 90.0, 'left_ringp1_joint': 99.0, 'left_pinkyp1_joint': 99.0},
+    'G': {'left_wrist_joint': 90.0, 'left_thumbp1_joint': 5.0, 'left_indexp1_joint': 90.0, 'left_middlep1_joint': 0.0, 'left_ringp1_joint': 0.0, 'left_pinkyp1_joint': 0.0},
+    'H': {'left_wrist_joint': 90.0, 'left_thumbp1_joint': 5.0, 'left_indexp1_joint': 90.0, 'left_middlep1_joint': 90.0, 'left_ringp1_joint': 0.0, 'left_pinkyp1_joint': 0.0},
+    'I': {'left_wrist_joint': 180.0, 'left_thumbp1_joint': 119.8, 'left_indexp1_joint': 0.0, 'left_middlep1_joint': 0.0, 'left_ringp1_joint': 0.0, 'left_pinkyp1_joint': 99.0},
+    'J': {'left_wrist_joint': 90.0, 'left_thumbp1_joint': 119.8, 'left_indexp1_joint': 0.0, 'left_middlep1_joint': 0.0, 'left_ringp1_joint': 0.0, 'left_pinkyp1_joint': 99.0},
+    'K': {'left_wrist_joint': 180.0, 'left_thumbp1_joint': 52.2, 'left_indexp1_joint': 90.0, 'left_middlep1_joint': 54.0, 'left_ringp1_joint': 0.0, 'left_pinkyp1_joint': 0.0},
+    'L': {'left_wrist_joint': 180.0, 'left_thumbp1_joint': 5.0, 'left_indexp1_joint': 90.0, 'left_middlep1_joint': 0.0, 'left_ringp1_joint': 0.0, 'left_pinkyp1_joint': 0.0},
+    'M': {'left_wrist_joint': 180.0, 'left_thumbp1_joint': 140.0, 'left_indexp1_joint': 9.0, 'left_middlep1_joint': 9.0, 'left_ringp1_joint': 9.9, 'left_pinkyp1_joint': 0.0},
+    'N': {'left_wrist_joint': 180.0, 'left_thumbp1_joint': 119.8, 'left_indexp1_joint': 13.5, 'left_middlep1_joint': 13.5, 'left_ringp1_joint': 0.0, 'left_pinkyp1_joint': 0.0},
+    'O': {'left_wrist_joint': 180.0, 'left_thumbp1_joint': 90.0, 'left_indexp1_joint': 45.0, 'left_middlep1_joint': 45.0, 'left_ringp1_joint': 45.0, 'left_pinkyp1_joint': 45.0},
+    'P': {'left_wrist_joint': 180.0, 'left_thumbp1_joint': 52.2, 'left_indexp1_joint': 90.0, 'left_middlep1_joint': 54.0, 'left_ringp1_joint': 0.0, 'left_pinkyp1_joint': 0.0},
+    'Q': {'left_wrist_joint': 180.0, 'left_thumbp1_joint': 5.0, 'left_indexp1_joint': 90.0, 'left_middlep1_joint': 0.0, 'left_ringp1_joint': 0.0, 'left_pinkyp1_joint': 0.0},
+    'R': {'left_wrist_joint': 180.0, 'left_thumbp1_joint': 119.8, 'left_indexp1_joint': 90.0, 'left_middlep1_joint': 90.0, 'left_ringp1_joint': 0.0, 'left_pinkyp1_joint': 0.0},
+    'S': {'left_wrist_joint': 180.0, 'left_thumbp1_joint': 140.0, 'left_indexp1_joint': 0.0, 'left_middlep1_joint': 0.0, 'left_ringp1_joint': 0.0, 'left_pinkyp1_joint': 0.0},
+    'T': {'left_wrist_joint': 180.0, 'left_thumbp1_joint': 119.8, 'left_indexp1_joint': 13.5, 'left_middlep1_joint': 0.0, 'left_ringp1_joint': 0.0, 'left_pinkyp1_joint': 0.0},
+    'U': {'left_wrist_joint': 180.0, 'left_thumbp1_joint': 119.8, 'left_indexp1_joint': 90.0, 'left_middlep1_joint': 90.0, 'left_ringp1_joint': 0.0, 'left_pinkyp1_joint': 0.0},
+    'V': {'left_wrist_joint': 180.0, 'left_thumbp1_joint': 119.8, 'left_indexp1_joint': 90.0, 'left_middlep1_joint': 90.0, 'left_ringp1_joint': 0.0, 'left_pinkyp1_joint': 0.0},
+    'W': {'left_wrist_joint': 180.0, 'left_thumbp1_joint': 119.8, 'left_indexp1_joint': 90.0, 'left_middlep1_joint': 90.0, 'left_ringp1_joint': 99.0, 'left_pinkyp1_joint': 0.0},
+    'X': {'left_wrist_joint': 180.0, 'left_thumbp1_joint': 119.8, 'left_indexp1_joint': 45.0, 'left_middlep1_joint': 0.0, 'left_ringp1_joint': 0.0, 'left_pinkyp1_joint': 0.0},
+    'Y': {'left_wrist_joint': 180.0, 'left_thumbp1_joint': 5.0, 'left_indexp1_joint': 0.0, 'left_middlep1_joint': 0.0, 'left_ringp1_joint': 0.0, 'left_pinkyp1_joint': 99.0},
+    'Z': {'left_wrist_joint': 90.0, 'left_thumbp1_joint': 119.8, 'left_indexp1_joint': 90.0, 'left_middlep1_joint': 0.0, 'left_ringp1_joint': 0.0, 'left_pinkyp1_joint': 0.0},
+}
+
+
+
 """ArmSystem — keyframed gesture playback over calibrated joints.
 
 A gesture is a list of frames; each frame is ({joint: target}, seconds).
@@ -12,7 +46,6 @@ The system NEVER moves on its own: no idle animation, no tracking. It moves
 only when a gesture is requested (voice/LLM/API) and eases every calibrated
 joint back to home on `rest()` and on shutdown.
 """
-from __future__ import annotations
 
 import threading
 import time
@@ -199,15 +232,9 @@ class ArmSystem:
         self._suppress_until = time.monotonic() + max(0.0, float(seconds))
 
     def express(self, text: str, *, now: float | None = None) -> str | None:
-        """Fire the gesture cued in a spoken sentence, if any, and return the
-        gesture played. The whole safety stack lives here, so it applies
-        wherever expression comes from.
-
-        Returns None (and plays nothing) when: nothing is cued, gestures are
-        suppressed or e-stopped, the gesture's hand is occupied, a deictic
-        cannot be grounded, or the pacing floor hasn't elapsed — a hand that
-        moves on every sentence reads as nervous rather than alive.
-        """
+        """Fire the gesture cued in a spoken sentence, if any."""
+        if not self._cfg.get("arms.express", False):
+            return None
         from zero.arms.cues import (CUE_FUNCTION, CUE_TO_GESTURE, cue_positions,
                                     find_cues)
 

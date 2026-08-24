@@ -35,10 +35,7 @@ STEPPER_JOINTS = frozenset({
 # power rail is dead, so a "calibrated" entry there would be fiction. A
 # denylist rather than a config flag: this is a property of the robot right
 # now, and a stray config line should not be able to re-enable it.
-EXCLUDED_JOINTS = frozenset({
-    "right_in_out_joint", "left_in_out_joint",
-    "right_wrist_joint", "left_wrist_joint",
-})
+EXCLUDED_JOINTS = frozenset()
 
 
 class JointSpec:

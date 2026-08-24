@@ -237,13 +237,22 @@ class OpenAICompatLLM(LLM):
                 # must never reach the speaker.
                 chunk = (choices[0].get("delta") or {}).get("content", "")
                 if chunk:
+                    # Strip any XML or raw thinking tags
+                    chunk = re.sub(r"<thought>.*?</thought>", "", chunk, flags=re.DOTALL)
+                    chunk = re.sub(r"</?thought>", "", chunk, flags=re.IGNORECASE)
                     if first:
+                        # Drop leading thought markers until real text begins
+                        low = chunk.strip().lower()
+                        if low in ("thought", "thinking", "reasoning", "thought:", "thinking:", "thought.", "*thought*"):
+                            log.warning("dropped leaked reasoning token (%r)", chunk)
+                            continue
                         chunk = _strip_reasoning_prefix(chunk)
-                        if not chunk:
-                            continue  # still first: a bare marker was dropped
+                        if not chunk.strip():
+                            continue
                         first = False
                     if guard.feed(chunk):
-                        return   # degenerate: stop before it reaches the voice
+                        log.warning("degenerate loop suppressed")
+                        return
                     yield chunk
         except requests.RequestException as e:
             # Network died mid-reply. Yield nothing further; the caller speaks
