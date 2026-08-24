@@ -50,3 +50,7 @@ server/vision/.cache/
 
 # YOLO source weights (build artifacts; we ship the exported .onnx only)
 *.pt
+
+# joint-angle black box — runtime DB, never tracked
+zero_joints.sqlite
+zero_joints.sqlite-*
