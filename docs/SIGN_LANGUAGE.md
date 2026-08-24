@@ -95,12 +95,17 @@ hardcoded) tells the model to be honest about these.
       left_bicep_joint --effective 10` answers it in one supervised minute:
       parks via joint_cmd, fires the identical raw value via pose_cmd — no
       motion = offsets applied, a ~16 deg step = offset-blind.
-- [ ] **in/out shoulder pair — inert until a sign check.** The operator
-      lifted the code exclusion (the KSL signing stance needs the pair),
-      but it has never moved under ZERO and its direction is unknown; a
-      wrong guess drives the arm into the torso. Two minutes of
-      `arm_calibrate.py right_in_out_joint --stepper` with eyes on the
-      robot, then uncomment its envelope in config.yaml.
+- [x] **in/out shoulder pair LIVE + signing stance** (operator decision,
+      2026-08-24): home = the rest pose it sat on (untouched since boot =
+      effective 0 by construction); envelopes one-sided from rest (right
+      0..+136.5, left −136.5..0) so the torso side is unreachable by
+      clamp. SignEngine now rises into the KSL stance before the first
+      letter and lowers after the last, at a stepper-safe 90 dps cap
+      (`sign.stance` config; degrades silently to hands-only when the
+      steppers aren't registered). Direction follows the URDF/firmware
+      convention and is NOT yet motion-verified under ZERO — watch the
+      FIRST stance: if an arm presses inward, e-stop and flip the
+      envelope + stance signs in config.yaml.
 - [ ] Z-trace and P/Q downward orientation need the bicep/forearm rotation
       path authored (lexicon `arm:` segments) — possible now that the
       biceps are live.

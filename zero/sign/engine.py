@@ -28,7 +28,8 @@ import threading
 import time
 
 from zero.arms import hands
-from zero.motion.profile import min_jerk, stretch_for_speed
+from zero.arms.driver import STEPPER_JOINTS
+from zero.motion.profile import PEAK, min_jerk
 from zero.sign.handshapes import HANDSHAPES, capabilities, describe
 from zero.sign.lexicon import load_lexicon
 from zero.utils.logging import get_logger
@@ -74,6 +75,15 @@ class SignEngine:
         self._rate = float(cfg.get("sign.rate_hz", 30.0))
         self._lexicon = load_lexicon(cfg.get("sign.lexicon_path",
                                              "data/sign_lexicon.yaml"))
+        # Signing stance (Phase 5, in/out live): arms rise into a forward
+        # KSL stance around the letters, at a STEPPER-safe speed. Targets
+        # are effective degrees with motor direction baked in (config).
+        self._stance_on = bool(cfg.get("sign.stance.enabled", True))
+        self._stance_move_s = float(cfg.get("sign.stance.move_s", 1.2))
+        self._stance_dps = float(cfg.get("sign.stance_speed_dps", 90.0))
+        self._stance_joints = {
+            side: {str(j): float(v) for j, v in (targets or {}).items()}
+            for side, targets in (cfg.get("sign.stance.joints") or {}).items()}
         # Belief: last commanded angle per hand joint, seeded from the bus so
         # the first ease starts from wherever the hands actually are.
         self._pose: dict[str, float] = {}
@@ -171,10 +181,29 @@ class SignEngine:
                 self._pose[j] = last.get(
                     j, spec.home_deg if spec is not None else 0.0)
 
+    def _stance_pose(self, sides) -> dict[str, float]:
+        """Stance targets for the signing side(s), FILTERED to joints the
+        bus actually has — signing degrades to hands-only when the arm
+        steppers aren't registered (arms.driver: null), silently and
+        safely."""
+        if not self._stance_on:
+            return {}
+        pose: dict[str, float] = {}
+        for s in sides:
+            for j, v in self._stance_joints.get(s, {}).items():
+                if self._bus.spec(j) is not None:
+                    pose[j] = v
+        return pose
+
     def _start(self, letters: list[str], side: str,
                hold_last_s: float | None = None) -> None:
         sides = self._sides(side)
         frames: list[tuple[dict[str, float], float, float]] = []
+        stance = self._stance_pose(sides)
+        if stance:
+            # Arms rise BEFORE the first handshape — preparation precedes
+            # the stroke, same rule the gesture layer follows.
+            frames.append((dict(stance), self._stance_move_s, 0.15))
         for ch in letters:
             pose = self._letter_pose(ch, sides)
             dwell = max(0.0, self._letter_s - self._move_s)
@@ -187,7 +216,8 @@ class SignEngine:
         if hold_last_s is not None and frames:
             pose, mv, _dw = frames[-1]
             frames[-1] = (pose, mv, hold_last_s)
-        self._launch(frames, finish_open=True, sides=sides)
+        self._launch(frames, finish_open=True, sides=sides,
+                     lower=sorted(stance))
 
     def _start_segments(self, segments: list[dict]) -> None:
         frames: list[tuple[dict[str, float], float, float]] = []
@@ -212,16 +242,19 @@ class SignEngine:
         self._launch(frames, finish_open=True,
                      sides=tuple(touched_sides) or ("left", "right"))
 
-    def _launch(self, frames, *, finish_open: bool, sides) -> None:
+    def _launch(self, frames, *, finish_open: bool, sides,
+                lower: list | None = None) -> None:
         with self._lock:
             self._gen += 1
             gen = self._gen
         self._player = threading.Thread(
-            target=self._play, args=(frames, gen, finish_open, sides),
+            target=self._play, args=(frames, gen, finish_open, sides,
+                                     lower or []),
             name="sign-play", daemon=True)
         self._player.start()
 
-    def _play(self, frames, gen: int, finish_open: bool, sides) -> None:
+    def _play(self, frames, gen: int, finish_open: bool, sides,
+              lower: list) -> None:
         dt = 1.0 / max(1.0, self._rate)
         for pose, move_s, hold_s in frames:
             if not self._ease_to(pose, move_s, gen, dt):
@@ -238,7 +271,15 @@ class SignEngine:
             open_pose: dict[str, float] = {}
             for s in sides:
                 open_pose.update(hands.open_hand_pose(s))
-            if not self._ease_to(open_pose, 0.4, gen, dt):
+            # ...and the stance comes DOWN with the hands: every raised
+            # joint eases back to its bus home (rest) in the same frame.
+            for j in lower:
+                spec = self._bus.spec(j)
+                if spec is not None:
+                    open_pose[j] = spec.home_deg
+            if not self._ease_to(
+                    open_pose, self._stance_move_s if lower else 0.4,
+                    gen, dt):
                 return
         with self._lock:
             if gen == self._gen:          # only the newest playback releases
@@ -265,8 +306,15 @@ class SignEngine:
             # Nothing registered (e.g. an arm-only segment before Phase 5) —
             # skip the segment rather than stall the whole sign.
             return True
-        far = max(abs(goal[j] - start[j]) for j in goal)
-        dur = stretch_for_speed(max(0.05, dur), far, self._max_dps)
+        # Per-joint speed caps: hand servos are quick, but a stance move
+        # rides 160:1 geared steppers — those stretch the segment to their
+        # own (much slower) ceiling. The frame finishes late rather than
+        # whipping an arm.
+        dur = max(0.05, float(dur))
+        for j in goal:
+            cap = (self._stance_dps if j in STEPPER_JOINTS
+                   else self._max_dps)
+            dur = max(dur, PEAK * abs(goal[j] - start[j]) / max(1e-6, cap))
         t0 = time.monotonic()
         while True:
             with self._lock:

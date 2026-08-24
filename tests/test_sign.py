@@ -41,14 +41,19 @@ def _engine(over=None):
 
 
 def _wait_released(bus, timeout=5.0):
-    # released = the SIGN track no longer claims the hands (a lower-priority
-    # track may still hold its own stale claim — that's the bus's hold rule).
+    # Wait for the sign playback to CLAIM the hands and then RELEASE them.
+    # (Just checking for release races the thread startup: right after
+    # spell() the claim may not exist yet and release looks instant.)
     end = time.monotonic() + timeout
+    seen = False
     while time.monotonic() < end:
-        if bus.owner("left_indexp1_joint") != "sign" and \
-                bus.owner("right_indexp1_joint") != "sign":
+        owning = (bus.owner("left_indexp1_joint") == "sign" or
+                  bus.owner("right_indexp1_joint") == "sign")
+        if owning:
+            seen = True
+        elif seen:
             return True
-        time.sleep(0.01)
+        time.sleep(0.005)
     return False
 
 
@@ -237,3 +242,102 @@ def test_arm_tool_sign_paths_and_no_fake_success():
     ctx3 = ToolContext(extras={"arms": arms})
     assert "sign system isn't running" in tool.run(
         {"text": "spell cow"}, ctx3)
+
+
+# ── the signing stance (Phase 5: in/out + shoulders live) ───────────────────
+
+STANCE_CFG = {
+    "sign.stance.enabled": True,
+    "sign.stance.move_s": 0.05,
+    "sign.stance_speed_dps": 100000.0,
+    "sign.stance.joints": {
+        "left": {"left_in_out_joint": -40.0, "left_up_down_joint": -45.0},
+        "right": {"right_in_out_joint": 40.0, "right_up_down_joint": 45.0},
+    },
+}
+
+
+def _stance_engine():
+    t = NullTransport()
+    bus = MotionBus(t, rate_hz=500.0)
+    _BUSES.append(bus)
+    for name, s in hands.hand_joint_specs().items():
+        bus.register(BusJoint(name, min_deg=s["min"], max_deg=s["max"],
+                              home_deg=s["home"], batch=True))
+    for name, lo, hi in (("left_in_out_joint", -136.5, 0.0),
+                         ("right_in_out_joint", 0.0, 136.5),
+                         ("left_up_down_joint", -106.0, 68.8),
+                         ("right_up_down_joint", -68.8, 106.0)):
+        bus.register(BusJoint(name, min_deg=lo, max_deg=hi, home_deg=0.0))
+    cfg = FakeCfg({"sign.letter_s": 0.06, "sign.transition_s": 0.03,
+                   "sign.rate_hz": 500, "sign.max_speed_dps": 100000.0,
+                   "sign.lexicon_path": "/nonexistent.yaml", **STANCE_CFG})
+    return SignEngine(cfg, bus), bus, t
+
+
+def test_stance_rises_before_letters_and_lowers_to_rest_after():
+    eng, bus, t = _stance_engine()
+    eng.spell("HI")
+    assert _wait_released(bus)
+    io = [p["right_in_out_joint"] for p in t.posts
+          if "right_in_out_joint" in p]
+    assert io, "stance joints must move during a spell"
+    assert max(io) > 39.0                        # rose to the stance
+    assert abs(io[-1]) < 1.0                     # ...and came back to rest
+    # the first HANDSHAPE write comes only after the stance target appears
+    first_hand = next(i for i, p in enumerate(t.posts)
+                      if "left_indexp1_joint" in p)
+    first_stance = next(i for i, p in enumerate(t.posts)
+                        if "right_in_out_joint" in p)
+    assert first_stance < first_hand
+    # left side is mirrored: it abducted NEGATIVE
+    lio = [p["left_in_out_joint"] for p in t.posts
+           if "left_in_out_joint" in p]
+    assert min(lio) < -39.0 and abs(lio[-1]) < 1.0
+
+
+def test_stance_degrades_to_hands_only_when_steppers_unregistered():
+    # Same config, but a hands-only bus (arms.driver: null world): the
+    # stance is filtered out and spelling works exactly as before.
+    t = NullTransport()
+    bus = MotionBus(t, rate_hz=500.0)
+    _BUSES.append(bus)
+    for name, s in hands.hand_joint_specs().items():
+        bus.register(BusJoint(name, min_deg=s["min"], max_deg=s["max"],
+                              home_deg=s["home"], batch=True))
+    cfg = FakeCfg({"sign.letter_s": 0.06, "sign.transition_s": 0.03,
+                   "sign.rate_hz": 500, "sign.max_speed_dps": 100000.0,
+                   "sign.lexicon_path": "/nonexistent.yaml", **STANCE_CFG})
+    eng = SignEngine(cfg, bus)
+    assert eng.spell("HI") is not None
+    assert _wait_released(bus)
+    assert not any("right_in_out_joint" in p for p in t.posts)
+    assert any("left_indexp1_joint" in p for p in t.posts)
+
+
+def test_stance_steppers_move_at_their_own_slower_cap():
+    import time as _t
+
+    t = NullTransport()
+    bus = MotionBus(t, rate_hz=500.0)
+    _BUSES.append(bus)
+    for name, s in hands.hand_joint_specs().items():
+        bus.register(BusJoint(name, min_deg=s["min"], max_deg=s["max"],
+                              home_deg=s["home"], batch=True))
+    bus.register(BusJoint("right_in_out_joint", min_deg=0.0, max_deg=136.5))
+    cfg = FakeCfg({"sign.letter_s": 0.02, "sign.transition_s": 0.02,
+                   "sign.rate_hz": 500, "sign.max_speed_dps": 100000.0,
+                   "sign.lexicon_path": "/nonexistent.yaml",
+                   "sign.stance.enabled": True,
+                   "sign.stance.move_s": 0.02,        # asks for instant...
+                   "sign.stance_speed_dps": 90.0,      # ...but the cap rules
+                   "sign.stance.joints": {
+                       "right": {"right_in_out_joint": 40.0}}})
+    eng = SignEngine(cfg, bus)
+    t0 = _t.monotonic()
+    eng.spell("A", side="right")
+    assert _wait_released(bus)
+    took = _t.monotonic() - t0
+    # 40 deg at min-jerk under a 90 dps cap needs >= 1.875*40/90 = 0.83 s
+    # each way; well over the ~0.1 s the letters themselves need.
+    assert took >= 1.5, f"stance moved too fast: {took:.2f}s"

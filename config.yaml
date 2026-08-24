@@ -1088,6 +1088,27 @@ sign:
   max_speed_dps: 360        # hand-servo speed cap during signing
   rate_hz: 30               # sign playback tick (writes to the bus)
   lexicon_path: data/sign_lexicon.yaml
+  # Signing stance — the arm(s) rise into a forward KSL stance before the
+  # first letter and ease back to rest after the last (the firmware's own
+  # fingerspell does the same). Targets are EFFECTIVE degrees with each
+  # motor's real direction baked in: left_up_down is a mirrored motor
+  # (verified 2026-08-17), hence the sign difference between the sides.
+  # Joints not registered on the bus (e.g. steppers with arms.driver: null)
+  # are skipped silently, so signing still works hands-only.
+  stance:
+    enabled: true
+    move_s: 1.2             # ease into / out of the stance
+    joints:
+      left:
+        left_in_out_joint: -40    # abduct outward (left = negative)
+        left_up_down_joint: -45   # raise (mirrored motor: raise = negative)
+        left_elbow_joint: -30     # bend forearm forward
+      right:
+        right_in_out_joint: 40
+        right_up_down_joint: 45
+        right_elbow_joint: -30
+  stance_speed_dps: 90      # stepper cap for stance moves — arms are geared
+                            # 160:1, never hand-servo speeds
 
 arms:
   enabled: true             # subsystem + voice commands + gesture cues LIVE
@@ -1182,15 +1203,17 @@ arms:
                             # rests near the modelled zero. Raise toward 1.0
                             # once verified, one step at a time.
   joints:
-    # The in/out pair re-entered scope at the operator's Phase-5 decision
-    # (2026-08-24) — EXCLUDED_JOINTS no longer blocks it — but it has NEVER
-    # moved under ZERO and even its direction is unknown, so it stays inert
-    # (no envelope) until a two-minute supervised sign check:
-    #   .venv/bin/python scripts/arm_calibrate.py right_in_out_joint --stepper
-    # then uncomment with the printed numbers. A guessed sign here drives
-    # the arm INTO the torso; nothing is worth that.
-    # right_in_out_joint: {min: ..., max: ..., home: 0.0}
-    # left_in_out_joint:  {min: ..., max: ..., home: 0.0}
+    # In/out (shoulder abduction) — LIVE at the operator's decision
+    # (2026-08-24): home = the rest pose the arm was sitting on (untouched
+    # since the gateway boot, so effective 0 by construction). Travel is
+    # ONE-SIDED from rest — the torso is right there on the "in" side — so
+    # the envelope only opens outward: URDF range 136.5 deg, direction from
+    # the URDF/firmware convention (right abduction +, left −; the firmware's
+    # own signing stance drives left_in_out negative). Direction is NOT yet
+    # motion-verified under ZERO: first command, watch it — if an "out"
+    # command presses inward, e-stop and flip these envelopes' signs.
+    right_in_out_joint: {min: 0.0, max: 136.5, home: 0.0}
+    left_in_out_joint:  {min: -136.5, max: 0.0, home: 0.0}
     right_up_down_joint: {min: -68.8, max: 106.0, home: 0.0}   # shoulder lift
     left_up_down_joint:  {min: -68.8, max: 106.0, home: 0.0}
     right_bicep_joint:   {min: -74.9, max:  47.7, home: 0.0}   # upper-arm roll
