@@ -8,6 +8,18 @@ the LLM, which can still call the arm tool.
 Shapes returned:
     {"kind": "gesture", "name": "<gesture>"}
     {"kind": "joint", "joints": [...], "degrees": +/-N, "part": ..., "side": ...}
+    {"kind": "hand_gesture", "name": "<pose>", "side": ...}     peace, fist, ...
+    {"kind": "hand", "state": "open"|"close", "side": ...}
+    {"kind": "finger", "finger": ..., "side": ..., "closure": 0..1|None,
+     "degrees": N|None}
+    {"kind": "spell", "word": "<WORD>"}          fingerspell a word in KSL
+    {"kind": "spell_name"}                       "spell my name" — the tool
+                                                 resolves it from who's talking
+    {"kind": "letter", "letter": "<A-Z>"}        sign one letter
+    {"kind": "sign", "gloss": "<word>"}          a lexicon sign ("sign hello");
+                                                 the tool falls back to
+                                                 spelling, out loud, when the
+                                                 lexicon doesn't have it
     None
 """
 from __future__ import annotations
@@ -103,6 +115,77 @@ _FULL = re.compile(r"\b(?:all\s+the\s+way|fully|completely|max(?:imum)?|"
                    r"right\s+up|as\s+high\s+as\s+possible)\b", re.IGNORECASE)
 
 
+# ── hand poses + sign language (KSL) ────────────────────────────────────────
+# From the Pi's sign build (2026-08-24 merge), tightened: each pattern names
+# the pose explicitly, so ordinary speech ("that's a fair point") never moves
+# a hand. Side defaults to BOTH for hand poses — the robot signs bilaterally.
+_ILY = re.compile(
+    r"\b(?:i\s+love\s+you\s+sign|sign\s+i\s+love\s+you|ily\s+sign|"
+    r"show\s+(?:me\s+|us\s+)?i\s+love\s+you)\b", re.IGNORECASE)
+_PEACE = re.compile(
+    r"\b(?:peace|victory)\s+sign\b|\bsign\s+peace\b|"
+    r"\bshow\s+(?:me\s+|us\s+)?(?:the\s+)?peace\s+sign\b", re.IGNORECASE)
+_THUMBS_UP = re.compile(
+    r"\bthumbs?\s+up\b", re.IGNORECASE)
+_FIST_G = re.compile(
+    r"\b(?:make|show)\s+(?:me\s+|us\s+)?a\s+fist\b|\bfist\s+bump\b",
+    re.IGNORECASE)
+_OK_SIGN = re.compile(
+    r"\b(?:ok(?:ay)?\s+sign|give\s+(?:me\s+|us\s+)?(?:an?\s+)?ok(?:ay)?\b)",
+    re.IGNORECASE)
+_ROCK_ON = re.compile(r"\b(?:rock\s+on|rock\s+sign|the\s+horns)\b",
+                      re.IGNORECASE)
+_PINCH = re.compile(r"\bpinch(?:ing)?\b", re.IGNORECASE)
+_WIGGLE = re.compile(
+    rf"\b(?:wiggle|wave)\s+(?:your\s+|the\s+)?(?:{_SIDE}\s+)?fingers?\b",
+    re.IGNORECASE)
+_POINT_FINGER = re.compile(
+    rf"\bpoint\s+(?:your\s+|the\s+)?(?:{_SIDE}\s+)?(?:finger|index)\b",
+    re.IGNORECASE)
+# "curl your index", "bend your left thumb 45 degrees", "straighten your pinky"
+_FINGER_RE = re.compile(
+    rf"\b(?P<verb>curl|bend|close|flex|extend|straighten|open|raise|lift|"
+    rf"move)\s+(?:your\s+|the\s+)?(?:{_SIDE}\s+)?"
+    r"(?P<finger>thumb|index|middle|ring|pinky|pinkie)(?:\s+finger)?\b",
+    re.IGNORECASE)
+_FINGER_CLOSE_VERB = re.compile(r"\b(?:curl|bend|close|flex)\b", re.IGNORECASE)
+# Fingerspelling. "spell"/"fingerspell"/"sign the word/name X"; the stoplist
+# keeps "can you spell that" style fragments from spelling the word "that".
+_SPELL_NAME = re.compile(
+    r"\b(?:spell|fingerspell|sign)\s+(?:out\s+)?my\s+name\b", re.IGNORECASE)
+_ASL_SPELL = re.compile(
+    r"\b(?:finger\s*spell|fingerspell|spell(?:\s+out)?|"
+    r"how\s+do\s+you\s+spell|can\s+you\s+spell|sign\s+the\s+(?:word|name))\s+"
+    r"(?:the\s+(?:word|name)\s+)?(?P<word>[A-Za-z]+)\b", re.IGNORECASE)
+_SPELL_STOP = frozenset({
+    "THE", "THAT", "THIS", "IT", "ME", "MY", "YOUR", "OUT", "WORD", "NAME",
+    "SOMETHING", "ANYTHING", "A", "AN"})
+# Known STT mishears of words people actually ask for — extend as they crop up.
+_SPELL_CORRECTIONS = {"PIT": "PETER", "PITA": "PETER"}
+_ASL_LETTER = re.compile(
+    r"\b(?:show\s+(?:me\s+|us\s+)?|sign|do|make)\s+(?:the\s+)?letter\s+"
+    r"(?P<letter>[A-Za-z])\b"
+    r"|\bwhat(?:'s|\s+is)\s+(?:the\s+letter\s+)?(?P<l2>[A-Za-z])\s+in\s+"
+    r"(?:sign(?:\s+language)?|ksl|asl)\b", re.IGNORECASE)
+# "sign hello" — a lexicon gloss. Checked AFTER the specific sign phrases
+# above so "sign peace"/"sign the word cow" resolve to their own kinds.
+_SIGN_WORD = re.compile(
+    r"\b(?:sign|show\s+(?:me\s+|us\s+)?the\s+sign\s+for)\s+"
+    r"(?P<gloss>[A-Za-z]+)\b", re.IGNORECASE)
+_SIGN_STOP = frozenset({
+    "the", "a", "an", "language", "letter", "word", "name", "here", "it",
+    "that", "this", "something", "me", "please"})
+
+
+def _both_side(t: str) -> str:
+    low = t.lower()
+    if "left" in low and "right" not in low:
+        return "left"
+    if "right" in low and "left" not in low:
+        return "right"
+    return "both"
+
+
 def _side(m, default="right") -> str:
     s = (m.groupdict().get("side") or default)
     return s.lower()
@@ -113,6 +196,55 @@ def parse_arm_command(text: str) -> dict | None:
     if not text:
         return None
     t = text.strip()
+
+    # ── sign language first: these phrasings are the most specific ─────────
+    if _SPELL_NAME.search(t):
+        return {"kind": "spell_name"}
+    m = _ASL_SPELL.search(t)
+    if m:
+        w = _SPELL_CORRECTIONS.get(m.group("word").upper(),
+                                   m.group("word").upper())
+        if w not in _SPELL_STOP:
+            return {"kind": "spell", "word": w}
+    m = _ASL_LETTER.search(t)
+    if m:
+        let = m.group("letter") or m.group("l2")
+        if let:
+            return {"kind": "letter", "letter": let.upper()}
+
+    # ── named hand poses (before the generic sign-gloss catch-all) ──────────
+    if _ILY.search(t):
+        return {"kind": "hand_gesture", "name": "i_love_you",
+                "side": _both_side(t)}
+    if _PEACE.search(t):
+        return {"kind": "hand_gesture", "name": "peace", "side": _both_side(t)}
+    if _THUMBS_UP.search(t):
+        return {"kind": "hand_gesture", "name": "thumbs_up",
+                "side": _both_side(t)}
+    if _FIST_G.search(t):
+        return {"kind": "hand_gesture", "name": "fist", "side": _both_side(t)}
+    if _OK_SIGN.search(t):
+        return {"kind": "hand_gesture", "name": "ok_sign",
+                "side": _both_side(t)}
+    if _ROCK_ON.search(t):
+        return {"kind": "hand_gesture", "name": "rock_on",
+                "side": _both_side(t)}
+    if _PINCH.search(t):
+        return {"kind": "hand_gesture", "name": "pinch", "side": _both_side(t)}
+    if _WIGGLE.search(t):
+        return {"kind": "hand_gesture", "name": "wiggle",
+                "side": _both_side(t)}
+    if _POINT_FINGER.search(t):
+        return {"kind": "hand_gesture", "name": "point_hand",
+                "side": _both_side(t)}
+
+    # "sign hello" — a lexicon gloss for the sign engine. Last of the sign
+    # family so the specific phrasings above win.
+    m = _SIGN_WORD.search(t)
+    if m:
+        gloss = m.group("gloss").lower()
+        if gloss not in _SIGN_STOP:
+            return {"kind": "sign", "gloss": gloss}
 
     # Bare "<part> up/down" — no verb, the way people actually talk ("arms up",
     # "left elbow down"). Checked first: it is unambiguous.
@@ -168,10 +300,29 @@ def parse_arm_command(text: str) -> dict | None:
                     "degrees": sign * amount,
                     "part": part, "side": side}
 
+    # Individual finger control ("curl your index", "bend the left thumb 40
+    # degrees"). After the joint block: elbow/shoulder verbs must win there.
+    m = _FINGER_RE.search(t)
+    if m:
+        finger = m.group("finger").lower().replace("pinkie", "pinky")
+        dm = _DEG_RE.search(t)
+        out = {"kind": "finger", "finger": finger,
+               "side": (m.group("side") or "both").lower(),
+               "closure": None, "degrees": None}
+        if dm:
+            out["degrees"] = float(dm.group("deg"))
+        else:
+            out["closure"] = (1.0 if _FINGER_CLOSE_VERB.search(
+                m.group("verb")) else 0.0)
+        return out
+
     m = _HAND.search(t)
     if m:
+        # Real finger actuation now — the hands are live (2026-08-24). Open =
+        # spread palm; close = fist. Side defaults to both, like the poses.
         verb = "open" if m.group("verb").lower().startswith("open") else "close"
-        return {"kind": "gesture", "name": f"{verb}_{_side(m)}_hand"}
+        return {"kind": "hand", "state": verb,
+                "side": (m.groupdict().get("side") or "both").lower()}
 
     m = _DOWN.search(t)
     if m:

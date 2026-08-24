@@ -894,7 +894,11 @@ world:
 # ───────────────────────────────────────────────────────────────────────────
 head:
   enabled: true             # head subsystem LIVE — tracks faces + social gaze in convo
-  driver: http              # http = drive the gateway directly (no reflex layer)
+  driver: bus               # bus = gaze rides the MotionBus (one clock/arbiter/
+                            # e-stop shared with gestures + sign; the nod
+                            # mapping below is applied identically). Set back
+                            # to http to bypass the bus and drive the gateway
+                            # directly, exactly as before 2026-08-24.
   trace: false              # (null-driver only) log the ~1 Hz commanded pose
 
   # Motion envelope + smoothing (HeadController). Values are the 28ce9ee tuning
@@ -1044,20 +1048,70 @@ head:
 # Steppers (elbows/biceps/shoulders) have NO encoders and zero at whatever
 # pose the Nano booted in — they stay inert even when calibrated unless
 # allow_steppers is also true. Servo hands first; steppers later, carefully.
+# ── Motion bus — ONE writer for every joint on the robot ────────────────────
+# Gaze (head), gestures (arms/hands) and sign language all write setpoints
+# onto prioritised tracks (sign > command > gesture > gaze > idle); one clock
+# samples them together each tick and posts the result, batching the 12 hand
+# joints into a single pose_cmd. One shared e-stop freezes everything.
+# See zero/motion/bus.py.
+motion:
+  driver: http              # http = MOVES THE ROBOT via the AF-1 gateway |
+                            # null = record only (default). This is THE metal
+                            # switch for everything routed driver:bus above.
+  rate_hz: 30               # bus tick — resolve + post cadence
+  gateway:
+    base_url: http://100.67.233.65:5000   # same gateway as head/arms
+    timeout_s: 0.7
+
+# ── Sign language (KSL) ─────────────────────────────────────────────────────
+# Fingerspelling on both hands via the manual alphabet (zero/sign/handshapes
+# .py — handshape + wrist orientation, expanded per side against each hand's
+# own calibration), plus lexicon signs from data/sign_lexicon.yaml. The
+# LEXICON SHIPS EMPTY on purpose: entries come from a KSL signer (see
+# zero/sign/lexicon.py for the YAML shape); an unknown sign is refused out
+# loud and offered as fingerspelling, never invented. P, Q, R, V and Z are
+# mechanically approximate — the engine speaks each letter as it signs, so a
+# spelled word stays unambiguous, and the model is told to be honest about it.
+sign:
+  enabled: true             # rides on arms.enabled; false = no sign engine
+  side: both                # sign bilaterally (left | right | both)
+  letter_s: 0.85            # seconds per letter — matches the spoken
+                            # "P - E - T - E - R" readout cadence
+  transition_s: 0.25        # min-jerk ease between letters
+  single_hold_s: 3.0        # how long "sign the letter K" holds the shape
+  max_speed_dps: 360        # hand-servo speed cap during signing
+  rate_hz: 30               # sign playback tick (writes to the bus)
+  lexicon_path: data/sign_lexicon.yaml
+
 arms:
   enabled: true             # subsystem + voice commands + gesture cues LIVE
-  driver: http              # null = record only | http = MOVES THE ROBOT.
-                            # LIVE from 2026-08-17. Envelopes are URDF limits
-                            # at limit_frac, NOT per-joint supervised
+  driver: bus               # null = record only | bus = via the MotionBus
+                            # (recommended; whether the bus moves metal is
+                            # motion.driver below) | http = legacy direct
+                            # gateway path. Envelopes are URDF limits at
+                            # limit_frac, NOT per-joint supervised
                             # calibration, so treat every direction as
                             # unverified until you have watched it move.
+                            # The 12 hand joints (wrists + fingers) are NOT
+                            # listed under joints: their envelopes come from
+                            # zero/arms/hands.py — firmware ground truth,
+                            # 2026-08-24 — and config only overrides one by
+                            # naming it explicitly.
   rate_hz: 20               # gesture playback tick
+  hand_speed_dps: 300       # speed cap for the hand servos (wrists/fingers) —
+                            # quick little motors; at the arm cap a simple
+                            # fist took over a second. Still eased, never
+                            # step-commanded.
   max_speed_dps: 120        # per-joint speed cap during playback. 60 was slow
                             # enough that a gesture frame ended before the
                             # joint arrived, leaving the move half-made.
-  allow_steppers: true      # the gesture joints (shoulder-lift/bicep/elbow)
-                            # are all steppers, so this must be on for any of
-                            # them to load. driver:null is what holds motion.
+  allow_steppers: false     # STEPPERS GATED DARK (2026-08-24 sign build):
+                            # the shoulder/bicep/elbow steppers stay inert
+                            # until the supervised Phase-5 bring-up — no
+                            # encoders, no homing, and pose_cmd's offset
+                            # behaviour is unverified. The hands (PCA servos)
+                            # are NOT steppers and stay live. Flip back on
+                            # only at the robot, watching it.
   # Gesture pacing + grounding for the conversational layer. The model cues a
   # gesture inline in its reply ([beat], [wave], ...) and the cue fires as that
   # word reaches the speaker. NOTE: the shoulder in/out joints and the wrists

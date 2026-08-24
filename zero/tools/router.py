@@ -364,6 +364,11 @@ class ToolAwareLLM:
                 args = {}
             result = tool.safe_run(args, self._ctx())
             log.info("tool %s -> %r", name, result[:100])
+            if tool.speaks_directly:
+                # The tool's sentence IS the reply (e.g. a fingerspell
+                # readout paced to the hands) — rephrasing would break it.
+                yield result
+                return
         # Second pass: let the model phrase the outcome in its own voice.
         # The assistant turn is included ONLY when it has content: most tool
         # routes pass raw_reply="" (forced/auto web search never asked the

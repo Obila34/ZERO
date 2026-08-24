@@ -44,6 +44,7 @@ from zero.conversation import Conversation
 from zero.events import EventBus
 from zero.factory import (
     build_arms,
+    build_sign,
     build_corpus, build_endpointer, build_guests, build_head, build_identity,
     build_learning_loop, build_llm, build_memory, build_perception,
     build_privacy, build_proactive, build_stt, build_tools,
@@ -263,10 +264,21 @@ class Zero:
         # normal run; when on, the default NullDriver still moves nothing.
         self.head = None
         self.arms = None
+        self.sign = None
         # Conversational expression (gesture cues in replies + the sentence-end
         # look-back). The hooks existed but were never called (audit H3); wired
         # into the playback loop now, still dark until head.express is on.
         self._head_express_on = bool(self.cfg.get("head.express", False))
+
+        # The sign engine is built HERE (not in run()) because the system
+        # prompt below is generated from its real capabilities — an engine
+        # built later would leave the model untaught. Cheap: config + static
+        # tables + a (usually empty) lexicon file; moves nothing.
+        try:
+            self.sign = build_sign(self.cfg)
+        except Exception as e:
+            log.warning("sign subsystem unavailable: %s", e)
+            self.sign = None
 
         tool_block = (self.tool_registry.spec_block()
                       if self.tool_registry is not None else "")
@@ -321,8 +333,18 @@ class Zero:
             arms_block = _arm_prompt(available_gestures(self.cfg))
         except Exception as e:
             log.debug("arm prompt block unavailable: %s", e)
+        # Sign language — generated from the engine's real capabilities, so
+        # the model is never taught a sign the hands can't make (a hardcoded
+        # block here is how the first build drifted from the hardware).
+        sign_block = ""
+        try:
+            from zero.sign.engine import sign_prompt_block
+
+            sign_block = sign_prompt_block(getattr(self, "sign", None))
+        except Exception as e:
+            log.debug("sign prompt block unavailable: %s", e)
         system_prompt = build_system_prompt(tool_block, body_block, arms_block,
-                                            lang_block, web_block)
+                                            sign_block, lang_block, web_block)
         self.convo = Conversation(
             system_prompt=system_prompt,
             history_turns=self.cfg.get("llm.history_turns", 3),
@@ -443,7 +465,8 @@ class Zero:
             person_id=person.person_id if person is not None else None,
             person_name=person.name if person is not None else None,
             extras={"head": getattr(self, "head", None),    # gaze tool, late-bound
-                    "arms": getattr(self, "arms", None)},   # arm tool, late-bound
+                    "arms": getattr(self, "arms", None),    # arm tool, late-bound
+                    "sign": getattr(self, "sign", None)},   # sign engine, late-bound
         )
 
     def _drain_events(self) -> bool:
@@ -579,9 +602,10 @@ class Zero:
         try:
             if self.arms is None:
                 self.arms = build_arms(self.cfg)
+            if self.sign is None:
+                self.sign = build_sign(self.cfg)
         except Exception as e:
             log.warning("arms unavailable in text mode: %s", e)
-            self.arms = None
         try:
             while True:
                 try:
@@ -641,6 +665,11 @@ class Zero:
                 self.arms.stop()
             except Exception:
                 pass
+        if self.sign is not None:
+            try:
+                self.sign.stop()
+            except Exception:
+                pass
         self._end_conversation()
         self._join_memory_thread()
 
@@ -682,6 +711,12 @@ class Zero:
         except Exception as e:
             log.warning("arm subsystem unavailable: %s", e)
             self.arms = None
+        try:
+            if self.sign is None:
+                self.sign = build_sign(self.cfg)
+        except Exception as e:
+            log.warning("sign subsystem unavailable: %s", e)
+            self.sign = None
         # Surprise gate (Phase 3): scores world events by prediction error —
         # the unexpected becomes episodes and wakes the narrator. Built here
         # (not __init__) because it needs the eyes to have survived startup.
@@ -720,6 +755,11 @@ class Zero:
             if self.arms is not None:
                 try:
                     self.arms.stop()
+                except Exception:
+                    pass
+            if self.sign is not None:
+                try:
+                    self.sign.stop()
                 except Exception:
                     pass
             if self.eyes is not None:

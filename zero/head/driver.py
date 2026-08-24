@@ -304,6 +304,31 @@ def make_driver(cfg) -> HeadDriver:
     kind = str(cfg.get("head.driver", "null")).lower()
     if kind in ("", "null", "none", "off", "mock"):
         return NullDriver(trace=bool(cfg.get("head.trace", False)))
+    if kind == "bus":
+        # Gaze joins the MotionBus: same nod mapping and walking behaviour as
+        # the http driver, but arbitrated with gestures and sign on one clock
+        # and one shared e-stop. Whether the bus moves metal is motion.driver's
+        # call (motion.driver: http), not this one.
+        from zero.motion.drivers import BusHeadDriver, get_bus
+
+        bus = get_bus(cfg)
+        drv = BusHeadDriver(
+            bus,
+            pan_joint=cfg.get("head.gateway.pan_joint", "head_tilt_joint"),
+            tilt_joint=cfg.get("head.gateway.tilt_joint", "head_nod_joint"),
+            limit_deg=float(cfg.get("head.limit_deg", 80.0)),
+            deadband_deg=float(cfg.get("head.gateway.deadband_deg", 0.4)),
+            max_jump_deg=float(cfg.get("head.gateway.max_jump_deg", 12.0)),
+            nod_offset_deg=float(cfg.get("head.gateway.nod_offset_deg", 0.0)),
+            nod_min_deg=float(cfg.get("head.gateway.nod_min_deg", -90.0)),
+            nod_max_deg=float(cfg.get("head.gateway.nod_max_deg", 90.0)),
+            drive_nod=bool(cfg.get("head.gateway.drive_nod", True)),
+            nod_sign=float(cfg.get("head.gateway.nod_sign", 1.0)),
+        )
+        if bus.moves_hardware:
+            log.warning("head.driver=bus + motion.driver=http — HEAD WILL "
+                        "MOVE via the MotionBus")
+        return drv
     if kind == "http":
         drv = HttpGatewayDriver(
             base_url=cfg.get("head.gateway.base_url", "http://192.168.150.183:5000"),

@@ -1,0 +1,35 @@
+# ZERO's KSL motion-sign lexicon.
+#
+# DELIBERATELY EMPTY. Signs teach people; an invented or misremembered sign
+# teaches them wrong, so every entry here must come from (or be reviewed by)
+# a KSL signer. Until a word has an entry, ZERO says it doesn't know the
+# sign and offers to fingerspell it — that is the intended behaviour, not a
+# gap.
+#
+# Check entries before deploying:   .venv/bin/python scripts/sign_lexicon_check.py
+#
+# Format (see zero/sign/lexicon.py for the full rules): a sign is an ordered
+# list of hold-move-hold SEGMENTS. Per segment:
+#   hands:  left/right -> {shape: <A-Z handshape>  OR  closure: {finger: 0..1},
+#                          orient: forward|in|up}   (0.0 = finger extended)
+#   arm:    joint -> degrees (optional; stepper joints stay inert until the
+#           supervised Phase-5 bring-up, and are dropped with a log until then)
+#   head:   nod | shake | tilt | neutral (optional non-manual marker;
+#           reserved — head playback lands with the motion-sign phase)
+#   move_s: seconds easing INTO this segment (min-jerk)
+#   hold_s: seconds holding it
+#   review: pending | signer-approved     (bookkeeping for the vetting pass)
+#
+# Worked example (structure only — NOT asserted to be the real KSL sign;
+# leave commented until a signer supplies and approves the real movement):
+#
+# hello:
+#   review: pending
+#   segments:
+#     - hands: {right: {shape: B, orient: forward}}
+#       arm: {right_up_down_joint: 40, right_elbow_joint: -20}
+#       move_s: 0.5
+#       hold_s: 0.3
+#     - hands: {right: {shape: B, orient: in}}
+#       move_s: 0.4
+#       hold_s: 0.2

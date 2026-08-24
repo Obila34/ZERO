@@ -86,12 +86,42 @@ BUILTIN_GESTURES: dict[str, list] = {
 }
 
 
+def available_gestures(cfg) -> list[str]:
+    """Gesture names that could actually play under this config — every
+    joint they touch has a calibrated envelope. main.py builds the prompt's
+    gesture block from this, so the model is never taught a gesture the
+    robot cannot perform. (This existed only as an import in main.py until
+    2026-08-24 — the block had been silently empty.)"""
+    from zero.arms.driver import load_joints
+
+    joints = set(load_joints(cfg))
+    merged = dict(BUILTIN_GESTURES)
+    for name, frames in (cfg.get("arms.gestures") or {}).items():
+        try:
+            merged[str(name)] = [(dict(f["joints"]), float(f["s"]))
+                                 for f in frames]
+        except (KeyError, TypeError, ValueError):
+            continue
+    out = []
+    for name, frames in merged.items():
+        if name == "rest":
+            continue
+        need = {j for tg, _s in frames for j in tg}
+        if need and need <= joints:
+            out.append(name)
+    return sorted(out)
+
+
 class ArmSystem:
     def __init__(self, cfg):
         self._joints = load_joints(cfg)
         self._driver = make_arm_driver(cfg, self._joints)
         self._rate = float(cfg.get("arms.rate_hz", 20.0))
         self._max_dps = float(cfg.get("arms.max_speed_dps", 60.0))
+        # Hand servos are small and quick; capping them at the arm's stepper
+        # speed made a simple fist take over a second. Separate cap, still a
+        # cap — a hand pose is eased, never step-commanded.
+        self._max_dps_hand = float(cfg.get("arms.hand_speed_dps", 300.0))
         self._gestures = dict(BUILTIN_GESTURES)
         for name, frames in (cfg.get("arms.gestures") or {}).items():
             try:
@@ -346,6 +376,74 @@ class ArmSystem:
         self._player.start()
         return True
 
+    def play_frames(self, label: str, frames: list) -> bool:
+        """Play ad-hoc keyframes (hand poses, wiggles) through the SAME
+        pipeline as named gestures — min-jerk easing, speed caps, clamping,
+        e-stop, preemption. This is the only sanctioned way to move joints
+        that aren't a named gesture; nothing may call the driver directly.
+
+        Frames whose joints are all uncalibrated are refused (False), same
+        honesty rule as play()."""
+        if self._estop or not frames:
+            return False
+        if not any(j in self._joints for tg, _ in frames for j in tg):
+            return False
+        with self._lock:
+            self._gen += 1
+            gen = self._gen
+        self._player = threading.Thread(
+            target=self._play, args=(label, list(frames), gen),
+            name="arm-frames", daemon=True)
+        self._player.start()
+        return True
+
+    def hand_gesture(self, name: str, side: str = "both") -> str | None:
+        """A named finger pose (peace, fist, thumbs up, ...) on one or both
+        hands. Returns the spoken confirmation, or None when refused —
+        unknown name, uncalibrated hand, or e-stop."""
+        from zero.arms.handposes import (hand_gesture_frames, spoken,
+                                         wiggle_frames)
+
+        if name.lower().strip() in ("wiggle", "wiggle_fingers"):
+            return ("Wiggling my fingers!"
+                    if self.play_frames("wiggle", wiggle_frames(side))
+                    else None)
+        frames = hand_gesture_frames(name, side)
+        if frames is None:
+            return None
+        if not self.play_frames(name, frames):
+            return None
+        return spoken(name)
+
+    def move_finger(self, finger: str, side: str = "both",
+                    closure: float | None = None,
+                    degrees: float | None = None) -> str | None:
+        """Curl one finger — by closure fraction (0 open .. 1 closed) or by
+        raw servo degrees. Returns a spoken confirmation or None when
+        refused. Degrees are clamped by the joint envelope like everything
+        else; closure is the portable form and preferred."""
+        from zero.arms import hands
+
+        f = finger.lower().replace(" finger", "").strip()
+        if f not in hands.FINGERS:
+            return None
+        sides = ("left", "right") if side in ("both", "all") else (side,)
+        pose = {}
+        for s in sides:
+            if closure is not None:
+                pose[hands.joint_name(s, f)] = hands.finger_deg(s, f, closure)
+            elif degrees is not None:
+                pose[hands.joint_name(s, f)] = float(degrees)
+            else:
+                return None
+        if not self.play_frames(f"finger-{f}", [(pose, 0.3)]):
+            return None
+        what = ("Curling" if (closure or 0) >= 0.5 else "Extending")
+        whose = "both" if len(sides) == 2 else f"my {sides[0]}"
+        if degrees is not None:
+            return f"Moving {whose} {f} to {degrees:.0f} degrees."
+        return f"{what} {whose} {f}."
+
     def rest(self) -> bool:
         return self.play("rest")
 
@@ -449,11 +547,16 @@ class ArmSystem:
             if not goal:
                 continue
             start = {j: self._pose.get(j, 0.0) for j in goal}
-            far = max(abs(goal[j] - start[j]) for j in goal)
             # Minimum jerk peaks at 1.875 * distance / duration. Stretch the
-            # frame if that would exceed the joint speed cap, so the gesture
-            # completes instead of being cut off mid-move.
-            dur = max(float(dur), 1.875 * far / max(1e-6, self._max_dps))
+            # frame if that would exceed the joint's speed cap, so the gesture
+            # completes instead of being cut off mid-move. Hand servos carry
+            # their own (faster) cap — see __init__.
+            from zero.arms.hands import HAND_JOINTS
+            for j, g in goal.items():
+                cap = (self._max_dps_hand if j in HAND_JOINTS
+                       else self._max_dps)
+                dur = max(float(dur),
+                          1.875 * abs(g - start[j]) / max(1e-6, cap))
             t0 = time.monotonic()
             while True:
                 with self._lock:

@@ -41,8 +41,13 @@ def test_raise_and_lower():
 
 
 def test_open_close_hand():
-    assert P("open your hand")["name"] == "open_right_hand"
-    assert P("close your left hand")["name"] == "close_left_hand"
+    # Real finger actuation since 2026-08-24 (the PCA rail is alive): open =
+    # spread palm, close = fist, bilateral unless a side is named.
+    assert P("open your hand") == {"kind": "hand", "state": "open",
+                                   "side": "both"}
+    got = P("close your left hand")
+    assert got["kind"] == "hand" and got["state"] == "close"
+    assert got["side"] == "left"
 
 
 def test_ordinary_speech_does_not_move_arms():
@@ -56,8 +61,13 @@ def test_ordinary_speech_does_not_move_arms():
 # ── envelope safety ─────────────────────────────────────────────────────────
 
 def test_uncalibrated_joints_are_inert():
+    # With no config the ONLY joints that load are the 12 hand joints, whose
+    # calibration is firmware ground truth in code (zero/arms/hands.py) —
+    # every arm joint still needs an explicit config envelope.
+    from zero.arms.hands import HAND_JOINTS
+
     joints = load_joints(FakeCfg({"arms.joints": {}}))
-    assert joints == {}
+    assert set(joints) == set(HAND_JOINTS)
 
 
 def test_stepper_gated_behind_allow_steppers():
@@ -210,7 +220,10 @@ def test_excluded_joints_never_load():
         **ARMS}}
     joints = load_joints(FakeCfg(cfg))
     assert "right_in_out_joint" not in joints    # operator-excluded
-    assert "right_wrist_joint" not in joints     # and the dead PCA wrists
+    # The wrists were excluded while the PCA rail was dead; it is alive again
+    # (2026-08-24) and the sign engine needs them — they load now, with the
+    # config override winning over the firmware default.
+    assert "right_wrist_joint" in joints
     assert "right_elbow_joint" in joints         # gesture joints still load
 
 
@@ -504,7 +517,7 @@ def test_llm_invented_gesture_names_are_recovered():
     ctx = ToolContext(extras={"arms": s})
     tool = ArmTool()
     out = tool.run({"gesture": "arms_up"}, ctx)
-    assert "moving my" in out, out
+    assert ("moving my" in out or "moving both" in out), out
     s._player.join(timeout=2.0)
     # a genuinely unknown name is refused honestly, not blamed on calibration
     bad = tool.run({"gesture": "backflip"}, ctx)

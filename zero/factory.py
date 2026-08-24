@@ -315,6 +315,40 @@ def build_arms(cfg: Config):
         return None
 
 
+def build_sign(cfg: Config):
+    """Build the sign-language engine, or None when unavailable.
+
+    Rides on the arms subsystem being enabled (the hands ARE arm joints) and
+    on the shared MotionBus — sign playback is a bus track, which is what
+    lets it outrank gestures and gaze instead of fighting them. The engine
+    registers the 12 hand joints itself, so signing works even while
+    arms.driver is null (the bus just records)."""
+    from zero.utils.logging import get_logger
+
+    log = get_logger("sign")
+    if not cfg.get("arms.enabled", False) or not cfg.get("sign.enabled", True):
+        return None
+    try:
+        from zero.arms.hands import hand_joint_specs
+        from zero.motion.bus import BusJoint
+        from zero.motion.drivers import get_bus
+        from zero.sign.engine import SignEngine
+
+        bus = get_bus(cfg)
+        for name, s in hand_joint_specs().items():
+            bus.register(BusJoint(name, min_deg=s["min"], max_deg=s["max"],
+                                  home_deg=s["home"], batch=True))
+        eng = SignEngine(cfg, bus)
+        st = eng.status()
+        log.info("sign engine up: %d exact letters, %d approximate, "
+                 "%d lexicon sign(s)", st["letters_exact"],
+                 len(st["letters_approx"]), len(st["lexicon"]))
+        return eng
+    except Exception as e:   # never let an optional subsystem break startup
+        log.warning("sign enabled but build failed — running without: %s", e)
+        return None
+
+
 def build_memory(cfg: Config):
     """Long-term memory store, or None if disabled in config."""
     if not cfg.get("memory.enabled", True):

@@ -30,14 +30,14 @@ STEPPER_JOINTS = frozenset({
 })
 
 # Joints the gesture layer must never drive, whatever config says. The
-# shoulder in/out pair and the wrists are excluded by operator decision
-# (2026-08-17); the wrists in particular sit on the PCA servo board whose
-# power rail is dead, so a "calibrated" entry there would be fiction. A
-# denylist rather than a config flag: this is a property of the robot right
-# now, and a stray config line should not be able to re-enable it.
+# shoulder in/out pair is excluded by operator decision (2026-08-17). The
+# wrists were here too while the PCA servo rail was dead; the rail is alive
+# again (verified against live gateway telemetry, 2026-08-24 — the sign work
+# depends on it), so the wrists and fingers are back in play. A denylist
+# rather than a config flag: this is a property of the robot right now, and
+# a stray config line should not be able to re-enable an excluded joint.
 EXCLUDED_JOINTS = frozenset({
     "right_in_out_joint", "left_in_out_joint",
-    "right_wrist_joint", "left_wrist_joint",
 })
 
 
@@ -218,10 +218,20 @@ class HttpArmDriver:
 
 
 def load_joints(cfg) -> dict[str, JointSpec]:
-    """Calibrated joints from `arms.joints` config. Entries without min/max
-    are refused (an envelope is not optional). Steppers are dropped unless
-    `arms.allow_steppers` — their zero is wherever the Nano booted."""
-    raw = cfg.get("arms.joints") or {}
+    """Calibrated joints from `arms.joints` config, merged over the hand
+    joints' firmware-truth envelopes. Entries without min/max are refused (an
+    envelope is not optional). Steppers are dropped unless
+    `arms.allow_steppers` — their zero is wherever the Nano booted.
+
+    The 12 PCA hand joints (wrists + fingers) default to the calibration in
+    zero/arms/hands.py, which is read off the gateway firmware itself — the
+    first sign build hand-wrote 0-180 envelopes into config and drove the
+    right thumb 70 degrees past its stop. Config may still override a hand
+    joint, but only by naming it explicitly."""
+    from zero.arms.hands import hand_joint_specs
+
+    raw = dict(hand_joint_specs())
+    raw.update(cfg.get("arms.joints") or {})
     allow_steppers = bool(cfg.get("arms.allow_steppers", False))
     # Envelopes come from the robot's URDF, which describes each joint's
     # mechanical travel. What it CANNOT tell us is where inside that travel the
@@ -243,8 +253,13 @@ def load_joints(cfg) -> dict[str, JointSpec]:
             continue
         try:
             home = float(ent.get("home", 0.0))
-            lo = home + (float(ent["min"]) - home) * frac
-            hi = home + (float(ent["max"]) - home) * frac
+            # frac exists for the encoderless steppers, whose true resting
+            # pose is unverified; PCA servos are absolute, so their firmware
+            # envelopes are used whole — shrinking a finger's travel would
+            # just deform every handshape.
+            f = frac if name in STEPPER_JOINTS else 1.0
+            lo = home + (float(ent["min"]) - home) * f
+            hi = home + (float(ent["max"]) - home) * f
             if float(signs.get(name, 1.0)) < 0:      # motor mirrored
                 lo, hi = 2 * home - hi, 2 * home - lo
             spec = JointSpec(str(name), lo, hi, home)
@@ -261,6 +276,23 @@ def load_joints(cfg) -> dict[str, JointSpec]:
 
 def make_arm_driver(cfg, joints: dict[str, JointSpec]):
     kind = str(cfg.get("arms.driver", "null")).lower()
+    if kind == "bus" and joints:
+        # The recommended transport: gestures share the MotionBus with gaze
+        # and sign — one clock, one arbiter, one e-stop. Whether the bus
+        # moves metal is motion.driver's call, not this one.
+        from zero.motion.drivers import BusArmDriver, get_bus
+
+        bus = get_bus(cfg)
+        drv = BusArmDriver(bus, joints,
+                           deadband_deg=float(
+                               cfg.get("arms.gateway.deadband_deg", 0.3)))
+        if bus.moves_hardware:
+            log.warning("arms.driver=bus + motion.driver=http — ARMS WILL "
+                        "MOVE (%d calibrated joint(s))", len(joints))
+        return drv
+    if kind == "bus":
+        log.warning("arms.driver=bus but no calibrated joints — NullArmDriver")
+        return NullArmDriver()
     if kind == "http" and joints:
         drv = HttpArmDriver(
             base_url=cfg.get("arms.gateway.base_url",

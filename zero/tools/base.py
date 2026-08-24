@@ -26,6 +26,11 @@ class Tool(ABC):
     description: str = ""              # one line, shown to the LLM
     parameters: dict = {}              # {"arg": "what it is"} — shown to the LLM
     confirm_required: bool = False     # future: outward-facing actions
+    # True = run() already returns the exact sentence to speak; the router
+    # yields it verbatim instead of asking the LLM to rephrase. Set it on
+    # tools whose wording is load-bearing — the arm tool's spelled-letter
+    # readout is paced to the hands, and a paraphrase would break the sync.
+    speaks_directly: bool = False
 
     @abstractmethod
     def run(self, args: dict, ctx: ToolContext) -> str:
