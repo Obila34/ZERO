@@ -128,8 +128,17 @@ _PEACE = re.compile(
 _THUMBS_UP = re.compile(
     r"\bthumbs?\s+up\b", re.IGNORECASE)
 _FIST_G = re.compile(
-    r"\b(?:make|show)\s+(?:me\s+|us\s+)?a\s+fist\b|\bfist\s+bump\b",
+    r"\b(?:make|show)\s+(?:me\s+|us\s+)?a\s+fist\b|\bfist\s+bump\b"
+    # "clench/squeeze/ball up (your/a/my) fist(s)/hand(s)" — second-person
+    # possessives only, so narrated speech ("he clenched his fists") never
+    # moves the robot.
+    r"|\b(?:clench(?:ing)?|squeez(?:e|ing)|ball(?:ing)?(?:\s+up)?)\s+"
+    r"(?:(?:your|the|a|my)\s+)?(?:fists?|hands?)\b",
     re.IGNORECASE)
+# "unclench/release your fist" -> open hand
+_UNCLENCH = re.compile(
+    r"\b(?:unclench(?:ing)?|release|relax)\s+(?:(?:your|the|my)\s+)?"
+    r"(?:fists?|hands?|fingers)\b", re.IGNORECASE)
 _OK_SIGN = re.compile(
     r"\b(?:ok(?:ay)?\s+sign|give\s+(?:me\s+|us\s+)?(?:an?\s+)?ok(?:ay)?\b)",
     re.IGNORECASE)
@@ -221,6 +230,8 @@ def parse_arm_command(text: str) -> dict | None:
     if _THUMBS_UP.search(t):
         return {"kind": "hand_gesture", "name": "thumbs_up",
                 "side": _both_side(t)}
+    if _UNCLENCH.search(t):
+        return {"kind": "hand", "state": "open", "side": _both_side(t)}
     if _FIST_G.search(t):
         return {"kind": "hand_gesture", "name": "fist", "side": _both_side(t)}
     if _OK_SIGN.search(t):

@@ -674,3 +674,20 @@ def test_an_explicit_cue_still_wins_over_inference():
     # the sentence would infer a wave; the cue asks for a shrug
     assert s.express("Hey there [shrug] good to see you", now=1000.0) == "shrug"
     s._player.join(timeout=4.0)
+
+
+def test_clench_family_parses_and_narrative_never_moves():
+    # "clench a fist" must hit the FAST path (2026-08-25 request) — plus
+    # squeeze/ball-up synonyms and the unclench/relax reversal.
+    for phrase in ("clench your fist", "clench a fist", "squeeze your hand",
+                   "ball up your fists"):
+        got = P(phrase)
+        assert got == {"kind": "hand_gesture", "name": "fist",
+                       "side": "both"}, (phrase, got)
+    for phrase in ("unclench your fist", "relax your fingers"):
+        got = P(phrase)
+        assert got["kind"] == "hand" and got["state"] == "open", (phrase, got)
+    # third-person narration is speech, not a command
+    for phrase in ("he clenched his fists in anger",
+                   "she was squeezing her stress ball"):
+        assert P(phrase) is None, phrase
