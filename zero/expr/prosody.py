@@ -51,7 +51,7 @@ def _f0_autocorr(frames: np.ndarray, sr: int) -> np.ndarray:
     denom = (fr * fr).sum(axis=1) + 1e-9
     best_lag = np.zeros(len(fr), dtype=np.int64)
     best_val = np.zeros(len(fr), dtype=np.float32)
-    for lag in range(lo, hi):
+    for lag in range(lo, hi, 2):
         v = (fr[:, :-lag] * fr[:, lag:]).sum(axis=1) / denom
         better = v > best_val
         best_val[better] = v[better]
@@ -121,30 +121,84 @@ def find_accents(audio: np.ndarray, sr: int) -> list[float]:
     return accents
 
 
+# Streaming analysis budget — sized for the Pi 4, where the first deploy
+# of this module took the robot down: polling find_accents over a GROWING
+# 24 kHz buffer at the 25 Hz render tick pegged three cores and broke the
+# voice (2026-08-25). Every constant below exists because of that incident.
+ANALYSIS_SR = 8000          # prosody needs f0<400 Hz — 24 kHz is 9x wasted
+WINDOW_S = 6.0              # analyze at most the trailing window
+MIN_GROWTH_S = 0.30         # re-analyze only after this much NEW audio...
+TAIL_FLUSH_S = 0.5          # ...or when the stream has clearly gone quiet
+SLOW_BACKOFF = 4.0          # analysis taking t seconds earns a 4t cooldown
+
+
 class RollingProsody:
-    """Streaming wrapper for one sentence's audio arriving in pieces."""
+    """Streaming wrapper for one sentence's audio arriving in pieces.
+
+    Analysis is DRIVEN BY NEW AUDIO, never by the caller's tick rate: a
+    poll with nothing new is a length compare and returns immediately, so
+    once a sentence is fully synthesized its cost drops to zero no matter
+    how often the scheduler asks. Incoming audio is decimated to
+    ANALYSIS_SR on the way in (box-mean anti-alias — crude, and entirely
+    sufficient for energy/f0), and only the trailing WINDOW_S is analyzed,
+    with reported times offset back to sentence-start coordinates."""
 
     def __init__(self, sr: int, max_s: float = 30.0):
-        self._sr = int(sr)
+        self._in_sr = int(sr)
+        self._decim = max(1, round(self._in_sr / ANALYSIS_SR))
+        self._sr = self._in_sr // self._decim
         self._buf = np.empty(0, dtype=np.float32)
-        self._max = int(max_s * sr)
+        self._offset_s = 0.0          # seconds trimmed off the buffer front
+        self._fed_s = 0.0             # total audio received (sentence time)
+        self._analyzed_s = 0.0        # sentence time at last analysis
+        self._cooldown_until = 0.0
+        self._last_feed_t = 0.0
         self._reported: list[float] = []
 
     @property
     def duration_s(self) -> float:
-        return len(self._buf) / self._sr
+        return self._fed_s
 
     def feed(self, piece) -> None:
+        import time as _time
+
         p = np.asarray(piece, dtype=np.float32).reshape(-1)
-        if len(self._buf) < self._max:
-            self._buf = np.concatenate([self._buf, p])[: self._max]
+        self._fed_s += len(p) / self._in_sr
+        self._last_feed_t = _time.monotonic()
+        if self._decim > 1:
+            n = (len(p) // self._decim) * self._decim
+            if n == 0:
+                return
+            p = p[:n].reshape(-1, self._decim).mean(axis=1).astype(np.float32)
+        self._buf = np.concatenate([self._buf, p])
+        cap = int(WINDOW_S * self._sr)
+        if len(self._buf) > cap:
+            trim = len(self._buf) - cap
+            self._offset_s += trim / self._sr
+            self._buf = self._buf[trim:]
 
     def poll(self) -> list[float]:
         """New accent times since the last poll (seconds from sentence
-        start), holding back anything within the edge guard."""
-        horizon = self.duration_s - EDGE_GUARD_S
+        start). Cheap unless enough new audio arrived; self-throttling on
+        slow hardware."""
+        import time as _time
+
+        now = _time.monotonic()
+        growth = self._fed_s - self._analyzed_s
+        if growth <= 0.0 or now < self._cooldown_until:
+            return []
+        if growth < MIN_GROWTH_S and (
+                now - self._last_feed_t) < TAIL_FLUSH_S:
+            return []                  # wait for more audio (or the tail)
+        self._analyzed_s = self._fed_s
+        t0 = _time.perf_counter()
+        raw = find_accents(self._buf, self._sr)
+        took = _time.perf_counter() - t0
+        self._cooldown_until = now + SLOW_BACKOFF * took
+        horizon = self._fed_s - EDGE_GUARD_S
         fresh = []
-        for t in find_accents(self._buf, self._sr):
+        for t in raw:
+            t += self._offset_s
             if t >= horizon:
                 continue
             if any(abs(t - r) < MIN_GAP_S / 2 for r in self._reported):

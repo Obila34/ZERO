@@ -231,3 +231,46 @@ def test_build_gates_and_bit_identical_off_state():
     assert build_expr(FakeCfg({})) is None                       # default off
     assert build_expr(FakeCfg({"expression.hands.enabled": True})) is None
     assert not TAP.attached      # nothing attached: speech-path taps no-op
+
+
+# ── the Pi incident of 2026-08-25: analysis cost must stay collapsed ────────
+
+def test_idle_polling_is_free_and_long_sentences_stay_correct():
+    """The first deploy pegged three Pi cores: find_accents ran over each
+    sentence's whole growing 24 kHz buffer at the 25 Hz render tick. Polls
+    with no new audio must now be length-compares, and a sentence longer
+    than the analysis window must still report late accents in sentence
+    coordinates (window-trim offset)."""
+    from zero.expr.prosody import RollingProsody
+
+    # long "sentence": 9 s with a clear stress at 8.0 s (past the 6 s window)
+    x = np.zeros(int(9.0 * SR), dtype=np.float32)
+
+    def place(t, f0, amp, blen):
+        n = int(blen * SR)
+        tt = np.arange(n) / SR
+        f = f0 * (1 + 0.3 * np.sin(np.pi * tt / blen))
+        sig = np.hanning(n) * amp * np.sin(2 * np.pi * np.cumsum(f) / SR)
+        i = int(t * SR)
+        x[i:i + n] += sig[:len(x) - i]
+
+    for t0 in (3.6, 4.4, 5.2, 6.0, 6.8, 7.4):
+        place(t0, 140, 0.15, 0.15)
+    place(7.91, 180, 0.5, 0.18)                     # accent center 8.0
+    x += 0.003 * np.random.randn(len(x)).astype(np.float32)
+
+    rp = RollingProsody(SR)
+    seen = []
+    for i in range(0, len(x), int(0.3 * SR)):
+        rp.feed(x[i:i + int(0.3 * SR)])
+        seen += rp.poll()
+    time.sleep(0.6)
+    seen += rp.poll()
+    assert any(abs(t - 8.0) < 0.15 for t in seen), \
+        f"late accent lost to window trim: {seen}"
+
+    # completed sentence: further polling is a no-op, and FAST
+    t0 = time.perf_counter()
+    for _ in range(500):
+        rp.poll()
+    assert (time.perf_counter() - t0) < 0.01, "idle polls must be free"
