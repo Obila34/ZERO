@@ -727,7 +727,10 @@ vision:
       # 1.0 = full resolution (slower). Identity/enrolment are unaffected.
 
   # Live preview: SEE what ZERO sees (camera feed + detection boxes) while it runs.
-  preview: true
+  # OFF (2026-08-25): annotating + JPEG-encoding every frame for a stream
+  # nobody watches was part of the ~390% CPU that broke audio playback.
+  # Flip back to true when you actually need to look through its eyes.
+  preview: false
   preview_mode:
     auto # auto | window | web
     #  window = an OpenCV desktop window (needs a monitor)
@@ -931,9 +934,11 @@ head:
   # rotates — the loop is open-loop and stable — but a big turn does carry you
   # out of frame, which is what hold_s covers.
   mirror:
-    # Back ON: the reboot it was suspended for turned out not to be CPU —
-    # vitals caught load 1.12 of 4 cores and 54 C five seconds before death.
-    enabled: true
+    # OFF (2026-08-25): the mirror runs a full YOLO-pose network on the Pi
+    # CPU continuously — py-spy showed it as one of four always-on model
+    # loops summing to ~390% CPU and breaking audio playback. Head tracking
+    # (face) is unaffected; re-enable only after the CPU budget has headroom.
+    enabled: false
     deadzone: 0.2         # |signal| below this = facing forward, no override.
                           # Raise if it reacts to small talking movements.
     range_deg: 80         # a full head turn maps to this many degrees of pan
