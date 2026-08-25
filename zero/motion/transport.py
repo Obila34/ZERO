@@ -29,6 +29,12 @@ from zero.utils.logging import get_logger
 
 log = get_logger("motion.transport")
 
+# urllib honours http_proxy/HTTP_PROXY from the environment by default; a
+# proxy configured for the service would silently route JOINT COMMANDS
+# through it (audit 2026-08-25 #9). The gateway is a LAN/tailscale peer —
+# always direct.
+_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
 
 class NullTransport:
     """Moves nothing; remembers what would have been posted."""
@@ -75,7 +81,7 @@ class HttpTransport:
             f"{self._base}{path}", data=body,
             headers={"Content-Type": "application/json"}, method="POST")
         try:
-            urllib.request.urlopen(req, timeout=self._timeout).close()
+            _OPENER.open(req, timeout=self._timeout).close()
             return True
         except Exception as e:      # never raise into the bus tick
             log.debug("gateway post %s failed: %s", path, e)
@@ -97,8 +103,8 @@ class HttpTransport:
         """The gateway's stored zero offsets (stepper calibration). None on
         failure — the caller must treat the offsets as unknown, not zero."""
         try:
-            with urllib.request.urlopen(f"{self._base}/api/calibration",
-                                        timeout=self._timeout) as r:
+            with _OPENER.open(f"{self._base}/api/calibration",
+                              timeout=self._timeout) as r:
                 return {k: float(v)
                         for k, v in json.loads(r.read().decode()).items()}
         except Exception as e:

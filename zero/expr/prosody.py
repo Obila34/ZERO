@@ -148,6 +148,7 @@ class RollingProsody:
         self._decim = max(1, round(self._in_sr / ANALYSIS_SR))
         self._sr = self._in_sr // self._decim
         self._buf = np.empty(0, dtype=np.float32)
+        self._carry = np.empty(0, dtype=np.float32)   # sub-decim remainder
         self._offset_s = 0.0          # seconds trimmed off the buffer front
         self._fed_s = 0.0             # total audio received (sentence time)
         self._analyzed_s = 0.0        # sentence time at last analysis
@@ -166,7 +167,12 @@ class RollingProsody:
         self._fed_s += len(p) / self._in_sr
         self._last_feed_t = _time.monotonic()
         if self._decim > 1:
+            # Carry the sub-decimation remainder into the next piece —
+            # dropping it drifted accent coordinates early by ~15 ms per
+            # 30 s of small-piece streaming (audit expr #8).
+            p = np.concatenate([self._carry, p])
             n = (len(p) // self._decim) * self._decim
+            self._carry = p[n:]
             if n == 0:
                 return
             p = p[:n].reshape(-1, self._decim).mean(axis=1).astype(np.float32)

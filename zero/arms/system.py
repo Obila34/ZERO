@@ -191,7 +191,7 @@ class ArmSystem:
         """
         if isinstance(joints, str):
             joints = [joints]
-        if self._estop:
+        if self._halted():
             return []
         targets, moved = {}, []
         for name in joints:
@@ -355,11 +355,16 @@ class ArmSystem:
         point is only ever made toward something actually seen."""
         self._can_point = bool(allowed)
 
+    def _halted(self) -> bool:
+        """Local e-stop OR the shared bus's — either way nothing reaches
+        metal, and claiming success would be a lie (audit sign #2)."""
+        return self._estop or bool(getattr(self._driver, "estopped", False))
+
     def play(self, name: str) -> bool:
         """Start a gesture (preempting any running one). False if unknown or
         e-stopped. Returns immediately; playback is threaded."""
         frames = self._gestures.get(name)
-        if frames is None or self._estop:
+        if frames is None or self._halted():
             return False
         if name == "rest":
             frames = [({j: "home" for j in self._joints}, 0.8)]
@@ -384,7 +389,7 @@ class ArmSystem:
 
         Frames whose joints are all uncalibrated are refused (False), same
         honesty rule as play()."""
-        if self._estop or not frames:
+        if self._halted() or not frames:
             return False
         if not any(j in self._joints for tg, _ in frames for j in tg):
             return False
@@ -458,6 +463,13 @@ class ArmSystem:
 
     def resume(self) -> None:
         self._estop = False
+        # the shared bus froze with us — un-freeze it too (audit sign #2)
+        r = getattr(self._driver, "resume", None)
+        if callable(r):
+            try:
+                r()
+            except Exception:
+                pass
 
     def status(self) -> dict:
         return {"joints": sorted(self._joints),
@@ -546,7 +558,16 @@ class ArmSystem:
                     goal[jname] = spec.clamp(v)
             if not goal:
                 continue
-            start = {j: self._pose.get(j, 0.0) for j in goal}
+            # Start from what the WIRE last saw when the driver knows it —
+            # sign or the expression layer may have moved these joints since
+            # our own belief was current, and easing from a stale belief
+            # writes a first-frame snap (audit sign #4).
+            actual = {}
+            try:
+                actual = dict(getattr(self._driver, "last", {}) or {})
+            except Exception:
+                pass
+            start = {j: actual.get(j, self._pose.get(j, 0.0)) for j in goal}
             # Minimum jerk peaks at 1.875 * distance / duration. Stretch the
             # frame if that would exceed the joint's speed cap, so the gesture
             # completes instead of being cut off mid-move. Hand servos carry

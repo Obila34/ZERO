@@ -87,6 +87,14 @@ def validate_sign(name: str, entry: dict) -> str | None:
         arm = seg.get("arm") or {}
         if not isinstance(arm, dict):
             return f"segment {i}: arm must map joint -> degrees"
+        for j, v in arm.items():
+            try:
+                float(v)
+            except (TypeError, ValueError):
+                # refuse at LOAD time — the engine float()s these at show
+                # time, and a failure there is a swallowed generic apology
+                # (audit sign #6)
+                return f"segment {i}: arm {j} value {v!r} is not a number"
         head = seg.get("head")
         if head is not None and head not in _VALID_HEAD:
             return f"segment {i}: unknown head marker {head!r}"

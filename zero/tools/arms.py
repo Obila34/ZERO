@@ -47,8 +47,8 @@ class ArmTool(Tool):
         "gesture": "for hand_gesture: peace | i_love_you | thumbs_up | fist "
                    "| open_hand | ok_sign | rock_on | pinch | wiggle | "
                    "point_hand. For arm gestures: wave_right | wave_left.",
-        "state": "for hand: open | close.",
         "finger": "for finger: thumb | index | middle | ring | pinky.",
+        "state": "for hand: open | close. For finger: extend | close.",
         "part": "for joint: arm | shoulder | elbow | bicep.",
         "side": "right | left | both. Use 'both' when no side is named.",
         "degrees": "for joint: how far, POSITIVE raises/straightens, "
@@ -80,9 +80,22 @@ class ArmTool(Tool):
             return spoken or ("I can't do that one right now — my hands "
                               "aren't ready.")
         if kind == "hand":
-            pose = "open_hand" if cmd["state"] == "open" else "fist"
-            spoken = arms.hand_gesture(pose, cmd.get("side", "both"))
-            if spoken is None:
+            # A STATE request, not a gesture: the fist gesture self-reverses
+            # after its unit hold ("close your hand" reopened 1.8 s later —
+            # audit sign #9). Hold the pose; the bus keeps it standing.
+            from zero.arms import hands as _hands
+            from zero.arms.handposes import HAND_POSES
+
+            closure = (HAND_POSES["fist"][0] if cmd["state"] == "close"
+                       else {})
+            sides = (("left", "right")
+                     if cmd.get("side", "both") in ("both", "all")
+                     else (cmd["side"],))
+            pose = {}
+            for sd in sides:
+                pose.update(_hands.hand_pose(sd, closure))
+            if not arms.play_frames(f"hand-{cmd['state']}",
+                                    [(pose, 0.4), (pose, 0.3)]):
                 return "I can't move my hands right now."
             verb = "Opening" if cmd["state"] == "open" else "Closing"
             what = ("both hands" if cmd.get("side", "both") == "both"
@@ -129,6 +142,11 @@ class ArmTool(Tool):
         if sign is None:
             return ("I can't sign right now — my sign system isn't "
                     "running.")
+        if getattr(sign, "estopped", False):
+            # "I don't have that sign" during an e-stop teaches the
+            # user the vocabulary is missing (audit sign #11)
+            return ("I'm emergency-stopped right now — I can't move "
+                    "at all.")
         kind = cmd["kind"]
         if kind == "spell_name":
             name = (ctx.person_name or "").strip()
@@ -180,13 +198,17 @@ class ArmTool(Tool):
                 return None
             out = {"kind": "finger", "finger": f, "side": side,
                    "closure": None, "degrees": None}
+            state = str(args.get("state", "")).strip().lower()
             if args.get("degrees") is not None:
                 try:
                     out["degrees"] = float(args["degrees"])
                 except (TypeError, ValueError):
                     out["closure"] = 1.0
             else:
-                out["closure"] = 1.0
+                # closure hard-coded to 1.0 meant an LLM asking to EXTEND a
+                # finger curled it while saying "Curling..." (audit #10)
+                out["closure"] = 0.0 if state in (
+                    "open", "extend", "extended", "straight") else 1.0
             return out
         if action == "rest":
             return {"kind": "gesture", "name": "rest"}
@@ -200,9 +222,11 @@ class ArmTool(Tool):
             side = str(args.get("side", "right")).strip().lower() or "right"
             sides = ("right", "left") if side == "both" else (side,)
             try:
-                deg = float(args.get("degrees", 15.0))
+                # 30, not 15: 15 deg was MEASURED as invisible across a room
+                # (2026-08-17); the LLM path had kept the invisible default
+                deg = float(args.get("degrees", 30.0))
             except (TypeError, ValueError):
-                deg = 15.0
+                deg = 30.0
             return {"kind": "joint", "part": part, "side": side,
                     "degrees": deg,
                     "joints": [f"{s}_{suffix}" for s in sides]}

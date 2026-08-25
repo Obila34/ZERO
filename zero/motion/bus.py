@@ -103,8 +103,11 @@ class MotionBus:
         self._targets: dict[str, dict[str, float]] = {}
         self._posted: dict[str, float] = {}     # last ACKNOWLEDGED, effective
         self._offsets: dict[str, float] | None = None
+        self._offsets_fails = 0
+        self._offsets_retry_after = 0.0
         self._estop = False
         self._fails = 0
+        self._muted = False
         self._lock = threading.Lock()
         self._stop_evt = threading.Event()
         self._wake = threading.Event()
@@ -165,15 +168,23 @@ class MotionBus:
         """Free joints claimed by a track (all of them when joints is None).
         The bus holds each joint's last posted value until some track writes
         it again."""
+        prio = TRACK_PRIORITY.get(track, 0)
         with self._lock:
             tr = self._targets.get(track)
             if not tr:
                 return
-            if joints is None:
-                tr.clear()
-            else:
-                for name in joints:
-                    tr.pop(name, None)
+            names = list(tr) if joints is None else list(joints)
+            for name in names:
+                tr.pop(name, None)
+                # Write-time preemption misses one window: a lower-priority
+                # write that lands AFTER this track's last write sits masked
+                # and would resurface the instant we release (audit #8 — a
+                # gesture's final frame firing during a sign's last second).
+                # Clear those too; a producer that is still alive re-claims
+                # with its next write inside one tick.
+                for other, otr in self._targets.items():
+                    if TRACK_PRIORITY.get(other, 0) < prio:
+                        otr.pop(name, None)
 
     def owner(self, joint: str) -> str | None:
         """Which track currently wins this joint (None = unclaimed)."""
@@ -190,15 +201,37 @@ class MotionBus:
     # ── safety ───────────────────────────────────────────────────────────────
     def estop(self) -> None:
         """Freeze everything and tell the gateway to stop. Affects every
-        track — this is the shared hard-stop."""
+        track — this is the shared hard-stop. The stop post is the ONE
+        message that must not be lost to a dropped packet, so it retries;
+        if it still fails, that is shouted, not swallowed — the operator's
+        next resort is cutting motor power, and they need to know now."""
         self._estop = True
-        try:
-            self._transport.stop()
-        except Exception:
-            pass
-        log.warning("MOTION E-STOP — all tracks frozen until resume()")
+        delivered = False
+        for _ in range(3):
+            try:
+                if self._transport.stop():
+                    delivered = True
+                    break
+            except Exception:
+                pass
+        if delivered:
+            log.warning("MOTION E-STOP — all tracks frozen until resume()")
+        else:
+            log.error("MOTION E-STOP — bus frozen, but /api/stop DID NOT "
+                      "REACH THE GATEWAY after 3 attempts: hardware may "
+                      "still be executing its last commands. Cut motor "
+                      "power if anything is moving.")
 
     def resume(self) -> None:
+        # The world may have changed while we were stopped: the hardware
+        # halted somewhere short of the last acked targets, and an operator
+        # may have re-zeroed offsets from the cockpit. Forgetting _posted
+        # forces a clean re-post of every live target (deadband would
+        # otherwise suppress it and the robot would sit displaced while
+        # `last` claims otherwise — audit #3); forgetting offsets forces a
+        # refetch (audit #5).
+        self._posted.clear()
+        self._offsets = None
         self._estop = False
         self._wake.set()
 
@@ -208,7 +241,10 @@ class MotionBus:
 
     @property
     def healthy(self) -> bool:
-        return self._fails < 3
+        # Unhealthy when the link is down OR steppers are being silently
+        # held for missing offsets — both mean "commands are not reaching
+        # metal" and status() must say so (audit #4).
+        return self._fails < 3 and not self._muted
 
     @property
     def moves_hardware(self) -> bool:
@@ -255,6 +291,7 @@ class MotionBus:
         singles: dict[str, tuple[BusJoint, float]] = {}
         owners: dict[str, str] = {}
         pending = False
+        muted = False
         for name, (spec, target, track) in resolved.items():
             owners[name] = track
             acked = self._posted.get(name)
@@ -273,6 +310,7 @@ class MotionBus:
             if spec.use_offset:
                 if not self._ensure_offsets():
                     pending = True          # mute until offsets are known
+                    muted = True
                     continue
                 singles[name] = (spec, step)
             elif spec.batch:
@@ -280,7 +318,11 @@ class MotionBus:
             else:
                 singles[name] = (spec, step)
         ok_all = True
-        if batch:
+        # E-stop is re-checked before EVERY post: a tick with a dozen singles
+        # against a slow gateway can span seconds, and posting joint commands
+        # AFTER /api/stop went out would restart the very motion the operator
+        # just killed (audit 2026-08-25 #1).
+        if batch and not self._estop:
             if self._transport.post_pose(
                     {n: round(v, 2) for n, v in batch.items()}):
                 self._posted.update(batch)
@@ -291,6 +333,16 @@ class MotionBus:
                 ok_all = False
                 pending = True
         for name, (spec, step) in singles.items():
+            if self._estop:
+                pending = False
+                break
+            if not ok_all:
+                # First failure means the link is down — attempting every
+                # remaining joint just serialises timeouts into a multi-
+                # second tick (during which nothing can preempt). They all
+                # retry next tick anyway (audit #9).
+                pending = True
+                break
             wire = step - (self._offsets or {}).get(name, 0.0) \
                 if spec.use_offset else step
             if self._transport.post_joint(name, round(wire, 2)):
@@ -300,10 +352,20 @@ class MotionBus:
             else:
                 ok_all = False
                 pending = True
+        # Muted steppers surface in `healthy` but must NOT feed the link-
+        # down backoff: that would slow the tick for every HEALTHY joint
+        # (the head) because one stepper is waiting on offsets.
+        self._muted = muted
         if ok_all:
             if self._fails >= 3:
                 log.warning("gateway recovered after %d failed cycles",
                             self._fails)
+                # An outage long enough to notice may have been a gateway
+                # restart: its setpoints are gone and its stored offsets may
+                # differ. Re-learn both rather than trusting stale belief.
+                self._posted.clear()
+                self._offsets = None
+                pending = True
             self._fails = 0
         else:
             self._fails += 1
@@ -315,10 +377,27 @@ class MotionBus:
     def _ensure_offsets(self) -> bool:
         if self._offsets is not None:
             return True
+        # ONE attempt per backoff window, however many stepper joints ask in
+        # a tick — the failure mode this replaces refetched per joint per
+        # tick: ~30 HTTP timeouts/second against a broken /api/calibration,
+        # with health reading fine throughout (audit #4). Muted steppers now
+        # also count as a failing cycle so `healthy` tells the truth.
+        now = time.monotonic()
+        if now < self._offsets_retry_after:
+            return False
         got = self._transport.fetch_offsets()
         if got is None:
+            self._offsets_retry_after = now + min(
+                30.0, 1.0 * 2 ** min(self._offsets_fails, 5))
+            self._offsets_fails += 1
+            if self._offsets_fails in (1, 3) or self._offsets_fails % 20 == 0:
+                log.warning("gateway offsets unavailable (attempt %d) — "
+                            "stepper joints stay MUTE until they load",
+                            self._offsets_fails)
             return False
         self._offsets = got
+        self._offsets_fails = 0
+        self._offsets_retry_after = 0.0
         log.info("gateway offsets loaded (%d joints)", len(got))
         return True
 

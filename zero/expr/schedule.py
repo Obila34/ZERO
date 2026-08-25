@@ -51,10 +51,10 @@ def _bump(x: float) -> float:
 
 
 class _Envelope:
-    """One gesture event: weight rises to 1 at apex, falls to 0 after."""
+    """One gesture event: weight rises to peak at apex, falls to 0 after."""
 
     __slots__ = ("t_apex", "attack", "decay", "closure", "wrist", "sides",
-                 "wrist_swing")
+                 "wrist_swing", "peak")
 
     def __init__(self, t_apex: float, attack: float, decay: float,
                  closure: dict, wrist: str | None, sides,
@@ -66,17 +66,27 @@ class _Envelope:
         self.wrist = wrist              # symbolic orientation or None
         self.sides = tuple(sides)
         self.wrist_swing = wrist_swing  # deg, for dynamic kinds (negation)
+        self.peak = 1.0                 # scaled down by turnaround()
 
     def weight(self, now: float) -> float:
         dt = now - self.t_apex
         if dt < -self.attack or dt > self.decay:
             return 0.0
         if dt <= 0.0:
-            return _bump(0.5 * (1.0 + dt / self.attack))   # 0 -> 1 at apex
-        return _bump(0.5 * (1.0 + dt / self.decay))        # 1 -> 0 after
+            return self.peak * _bump(0.5 * (1.0 + dt / self.attack))
+        return self.peak * _bump(0.5 * (1.0 + dt / self.decay))
+
+    def turnaround(self, now: float) -> None:
+        """Speech died under this gesture: decay out from the CURRENT
+        weight. Re-timing the apex alone made a barely-started prep SNAP
+        to the full shape (weight jumped to peak at dt=0)."""
+        if self.t_apex <= now:
+            return                       # already decaying
+        self.peak = self.weight(now)
+        self.t_apex = now
 
     def done(self, now: float) -> bool:
-        return now - self.t_apex > self.decay
+        return now - self.t_apex > self.decay or self.peak <= 0.001
 
 
 class _Sentence:
@@ -101,6 +111,14 @@ class HandScheduler:
         g = lambda k, d: cfg.get(k, d)   # noqa: E731
         self._rate = float(g("expression.hands.rate_hz", 25.0))
         self._latency = float(g("expression.hands.latency_ms", 60.0)) / 1000.0
+        # The playout tap fires when a piece is PULLED into the output
+        # pipeline, not when it becomes audible: the player prebuffers
+        # (~300 ms, audio.prebuffer_ms) and the sink adds its own latency.
+        # Without this term every apex led the audible syllable by a third
+        # of a second (audit expr #3). Tune from black-box-vs-ear on the
+        # robot; BT sinks need more.
+        self._playout_delay = float(
+            g("expression.hands.playout_delay_ms", 320.0)) / 1000.0
         self._prep = float(g("expression.hands.prep_lead_ms", 250.0)) / 1000.0
         self._beat_amp = float(g("expression.hands.beat.amp", 0.09))
         self._beat_wrist = float(g("expression.hands.beat.wrist_deg", 2.0))
@@ -135,9 +153,14 @@ class HandScheduler:
             st = self._sentences.get(idx)
             if st is None:
                 st = self._sentences[idx] = _Sentence(sentence, self._sr)
-                # keep the store bounded — a monologue must not accumulate
-                for old in [k for k in self._sentences if k < idx - 4]:
-                    self._sentences.pop(old, None)
+                # Bounded store, pruned relative to the sentence AT THE
+                # SPEAKER — pruning on the synthesis index deleted the
+                # currently-playing sentence whenever short sentences let
+                # TTS run more than 4 ahead (audit expr #5).
+                floor_idx = (self._cur_idx if self._cur_idx is not None
+                             else idx) - 1
+                for k in [k for k in self._sentences if k < floor_idx]:
+                    self._sentences.pop(k, None)
             st.prosody.feed(piece)
 
     def on_playout(self, idx: int, n_samples: int) -> None:
@@ -150,22 +173,25 @@ class HandScheduler:
             if st.anchor is None:
                 st.anchor = now
                 self._cur_idx = idx
-                # a NEW sentence at the speaker: pending events of any prior
-                # sentence that never played are dead — drop them
+                # a NEW sentence at the speaker: pending events of any PRIOR
+                # sentence that never played are dead. Future sentences
+                # (synthesized ahead, queued to play next) keep theirs —
+                # clearing k != idx killed the beats of every sentence after
+                # the first whenever TTS outran playback (audit expr #2).
                 for k, other in self._sentences.items():
-                    if k != idx and other.anchor is None:
+                    if k < idx and other.anchor is None:
                         other.accents_pending.clear()
             st.cursor += int(n_samples)
 
     # ── event scheduling (runs inside the tick) ──────────────────────────────
     def _schedule_from(self, st: _Sentence, now: float) -> None:
-        for t_rel in st.prosody.poll():
-            st.accents_pending.append(t_rel)
+        # (prosody polling happens lock-free in the tick before this call)
         if st.anchor is None:
             return
         remaining = []
         for t_rel in st.accents_pending:
-            t_apex = st.anchor + t_rel - self._latency
+            t_apex = (st.anchor + self._playout_delay + t_rel
+                      - self._latency)
             if t_apex < now - 0.15:
                 continue                      # too stale even to degrade
             if t_apex - now > 10.0:
@@ -194,10 +220,18 @@ class HandScheduler:
         if now - self._last_beat_t < self._beat_gap:
             return
         self._last_beat_t = now
+        # A stale accent still RAMPS over ~0.1 s from now — an attack
+        # window already mostly elapsed made the first render jump near
+        # peak in one tick (audit expr #4).
+        if t_apex - now < 0.1:
+            t_apex = now + 0.1
         self._envs.append(_Envelope(
-            t_apex, min(self._prep, max(0.08, t_apex - now)), 0.22,
+            t_apex, min(self._prep, max(0.1, t_apex - now)), 0.22,
             {"index": self._beat_amp, "middle": self._beat_amp * 0.8},
-            None, ("left", "right")))
+            None, ("left", "right"),
+            wrist_swing=self._beat_wrist))
+        if len(self._apex_log) > 200:      # bounded (audit expr #9)
+            del self._apex_log[:100]
         self._apex_log.append(t_apex)
 
     # ── rendering ────────────────────────────────────────────────────────────
@@ -269,22 +303,47 @@ class HandScheduler:
         dt = 1.0 / max(5.0, self._rate)
         while not self._stop_evt.wait(dt):
             if self._bus.estopped:
+                # Standing idle targets would be RE-POSTED by the bus the
+                # moment resume() runs — a minutes-old mid-gesture pose
+                # replayed onto the hands (audit expr #7). Drop everything.
+                if self._active or self._envs:
+                    with self._lock:
+                        self._envs.clear()
+                        for st in self._sentences.values():
+                            st.accents_pending.clear()
+                    self._bus.release("idle")
+                    self._active = False
                 continue
             now = time.monotonic()
+            # ANALYSIS RUNS LOCK-FREE. The lock below is shared with the TTS
+            # producer (on_audio) and the playback writer (on_playout);
+            # holding it across a 30-100 ms find_accents on the Pi would
+            # block the playback thread mid-word — the audio-underrun
+            # incident class in a second disguise (audit 2026-08-25 expr #1).
+            # RollingProsody.poll is safe without the scheduler lock: feed()
+            # REPLACES its buffer reference, poll() snapshots it once.
+            with self._lock:
+                snapshot = list(self._sentences.values())
+                speaking = now - self._last_playout < 0.5
+            fresh: list[tuple] = []
+            if speaking:
+                for st in snapshot:
+                    for t_rel in st.prosody.poll():
+                        fresh.append((st, t_rel))
             with self._lock:
                 speaking = now - self._last_playout < 0.5
                 if not speaking:
-                    # Playout ceased (sentence over, or barge-in): future
-                    # events are dead. Pending accents are dropped; an
-                    # envelope whose apex hasn't arrived turns around NOW
-                    # and decays out — the hand eases back instead of
-                    # completing a stroke for words never spoken.
+                    # Playout ceased (sentence over, or barge-in): pending
+                    # accents are dropped; live envelopes TURN AROUND from
+                    # their CURRENT weight and decay out — never a snap to
+                    # the full shape for words never spoken (audit expr #4).
                     for st in self._sentences.values():
                         st.accents_pending.clear()
                     for e in self._envs:
-                        if e.t_apex > now:
-                            e.t_apex = now
+                        e.turnaround(now)
                 else:
+                    for st, t_rel in fresh:
+                        st.accents_pending.append(t_rel)
                     for st in self._sentences.values():
                         self._schedule_from(st, now)
                 self._envs = [e for e in self._envs if not e.done(now)]
@@ -308,14 +367,17 @@ class HandScheduler:
                 if base:
                     self._bus.write("idle", base)
                     probe = next(iter(base))
-                    deadline = time.monotonic() + 0.5
-                    while time.monotonic() < deadline:
+                    deadline = time.monotonic() + 0.25
+                    while (time.monotonic() < deadline
+                           and not self._stop_evt.is_set()):
                         if abs(self._bus.last.get(probe, 1e9)
                                - base[probe]) < 1.0:
                             break
                         time.sleep(0.01)
-                self._bus.release("idle")
-                self._active = False
+                if time.monotonic() - self._last_playout > self._idle_release:
+                    # speech did NOT resume during the confirm wait
+                    self._bus.release("idle")
+                    self._active = False
 
     # ── lifecycle / introspection ────────────────────────────────────────────
     def apex_stats(self) -> dict:
@@ -324,7 +386,10 @@ class HandScheduler:
 
     def stop(self) -> None:
         self._stop_evt.set()
-        try:
+        t = self._thread
+        if t is not None and t.is_alive():
+            t.join(timeout=1.0)       # an in-flight tick must not re-write
+        try:                          # the claim after this release
             self._bus.release("idle")
         except Exception:
             pass

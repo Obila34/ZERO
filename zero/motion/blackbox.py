@@ -54,6 +54,11 @@ class JointAngleLog:
             self._conn = sqlite3.connect(self._path,
                                          check_same_thread=False)
             self._conn.execute("PRAGMA journal_mode=WAL")
+            # NORMAL under WAL: no fsync per commit (only on checkpoint).
+            # FULL made every insert an SD-card fsync ON THE MOTION TICK
+            # THREAD — a card stall would have stuttered every joint on the
+            # robot (audit 2026-08-25 #6). Crash cost: the last few rows.
+            self._conn.execute("PRAGMA synchronous=NORMAL")
             self._conn.executescript(_SCHEMA)
             self._conn.commit()
         except Exception as e:
@@ -72,13 +77,17 @@ class JointAngleLog:
                 return
             if dt < _MIN_INTERVAL_S and dd < _BIG_DELTA_DEG:
                 return
-        self._last[(joint, source)] = (now, float(angle_deg))
         try:
             with self._lock:
+                if self._conn is None:
+                    return
                 self._conn.execute(
                     "INSERT INTO joint_angles VALUES (?,?,?,?)",
                     (now, joint, float(angle_deg), source))
                 self._conn.commit()
+            # dedupe state advances only on a SUCCESSFUL insert — a
+            # transient write failure stays retryable (audit #12).
+            self._last[(joint, source)] = (now, float(angle_deg))
         except Exception as e:
             log.debug("black box write failed: %s", e)
 
@@ -115,12 +124,13 @@ class JointAngleLog:
             return {}
 
     def close(self) -> None:
-        if self._conn is not None:
-            try:
-                self._conn.close()
-            except Exception:
-                pass
-            self._conn = None
+        with self._lock:
+            if self._conn is not None:
+                try:
+                    self._conn.close()
+                except Exception:
+                    pass
+                self._conn = None
 
 
 def gateway_effective(tel: dict, offsets: dict) -> dict[str, float]:
@@ -139,6 +149,15 @@ def gateway_effective(tel: dict, offsets: dict) -> dict[str, float]:
     boot = stamps.most_common(1)[0][0] if stamps else None
     if boot is not None and stamps[boot] < 3:
         boot = None
+    # The boot cluster is the gateway's INIT stamp — always the OLDEST
+    # timestamp in the whole telemetry set. A cluster of joints genuinely
+    # commanded to zero within one second (a homing pose) is recent, and
+    # must not be misread as never-commanded (audit #11).
+    if boot is not None:
+        oldest = min(round(float(v.get("timestamp", 0)))
+                     for v in tel.values() if isinstance(v, dict))
+        if boot != oldest:
+            boot = None
     out: dict[str, float] = {}
     for j, v in tel.items():
         if j == "null" or not isinstance(v, dict):

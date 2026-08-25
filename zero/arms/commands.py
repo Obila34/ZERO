@@ -100,7 +100,7 @@ _JOINT_RE = re.compile(
     r"curl|straighten|extend|fold|tuck|put)\w*\b[^.?!]*?"
     rf"\b(?:your|the)?\s*(?P<side>right|left|both)?\s*"
     rf"(?P<part>{'|'.join(sorted(_PART_JOINT, key=len, reverse=True))})"
-    rf"(?P<plural>s)?\b",
+    rf"(?P<plural>s)?\b(?!\s*side\b)",
     re.IGNORECASE)
 _BARE_RE = re.compile(
     rf"^\s*(?:your\s+|the\s+)?(?P<side>right|left|both)?\s*"
@@ -133,7 +133,7 @@ _FIST_G = re.compile(
     # possessives only, so narrated speech ("he clenched his fists") never
     # moves the robot.
     r"|\b(?:clench(?:ing)?|squeez(?:e|ing)|ball(?:ing)?(?:\s+up)?)\s+"
-    r"(?:(?:your|the|a|my)\s+)?(?:fists?|hands?)\b",
+    r"(?:(?:your|the|a)\s+)?(?:fists?|hands?)\b",
     re.IGNORECASE)
 # "unclench/release your fist" -> open hand
 _UNCLENCH = re.compile(
@@ -144,7 +144,11 @@ _OK_SIGN = re.compile(
     re.IGNORECASE)
 _ROCK_ON = re.compile(r"\b(?:rock\s+on|rock\s+sign|the\s+horns)\b",
                       re.IGNORECASE)
-_PINCH = re.compile(r"\bpinch(?:ing)?\b", re.IGNORECASE)
+# "a pinch of salt" / "pinching pennies" must not move a hand: the pose
+# must be NAMED, not the bare verb (audit 2026-08-25 sign #1).
+_PINCH = re.compile(
+    r"\bpinch\s+(?:your\s+)?(?:fingers|thumb)\b"
+    r"|\b(?:do|make|show)\s+(?:me\s+|us\s+)?a\s+pinch\b", re.IGNORECASE)
 _WIGGLE = re.compile(
     rf"\b(?:wiggle|wave)\s+(?:your\s+|the\s+)?(?:{_SIDE}\s+)?fingers?\b",
     re.IGNORECASE)
@@ -162,28 +166,38 @@ _FINGER_CLOSE_VERB = re.compile(r"\b(?:curl|bend|close|flex)\b", re.IGNORECASE)
 # keeps "can you spell that" style fragments from spelling the word "that".
 _SPELL_NAME = re.compile(
     r"\b(?:spell|fingerspell|sign)\s+(?:out\s+)?my\s+name\b", re.IGNORECASE)
+# The noun "spell" ("a dry spell lately", "put a spell on me") must never
+# fingerspell — the verb is only imperative when not preceded by an
+# article/adjective/possessive (audit sign #1).
 _ASL_SPELL = re.compile(
-    r"\b(?:finger\s*spell|fingerspell|spell(?:\s+out)?|"
+    r"\b(?:finger\s*spell|fingerspell|"
+    r"(?<!\ba\s)(?<!dry\s)(?<!the\s)(?<!his\s)(?<!her\s)(?<!my\s)"
+    r"(?<!its\s)spell(?:\s+out)?|"
     r"how\s+do\s+you\s+spell|can\s+you\s+spell|sign\s+the\s+(?:word|name))\s+"
     r"(?:the\s+(?:word|name)\s+)?(?P<word>[A-Za-z]+)\b", re.IGNORECASE)
 _SPELL_STOP = frozenset({
     "THE", "THAT", "THIS", "IT", "ME", "MY", "YOUR", "OUT", "WORD", "NAME",
-    "SOMETHING", "ANYTHING", "A", "AN"})
+    "SOMETHING", "ANYTHING", "A", "AN",
+    "ON", "UP", "OF", "FOR", "IN", "OFF", "LATELY", "IS", "WAS", "TO"})
 # Known STT mishears of words people actually ask for — extend as they crop up.
 _SPELL_CORRECTIONS = {"PIT": "PETER", "PITA": "PETER"}
 _ASL_LETTER = re.compile(
-    r"\b(?:show\s+(?:me\s+|us\s+)?|sign|do|make)\s+(?:the\s+)?letter\s+"
+    r"\b(?:show(?:\s+me|\s+us)?|sign|do|make)\s+(?:the\s+)?letter\s+"
     r"(?P<letter>[A-Za-z])\b"
     r"|\bwhat(?:'s|\s+is)\s+(?:the\s+letter\s+)?(?P<l2>[A-Za-z])\s+in\s+"
     r"(?:sign(?:\s+language)?|ksl|asl)\b", re.IGNORECASE)
 # "sign hello" — a lexicon gloss. Checked AFTER the specific sign phrases
 # above so "sign peace"/"sign the word cow" resolve to their own kinds.
 _SIGN_WORD = re.compile(
-    r"\b(?:sign|show\s+(?:me\s+|us\s+)?the\s+sign\s+for)\s+"
+    r"\b(?:(?<!\ba\s)(?<!the\s)(?<!no\s)(?<!any\s)sign|"
+    r"show\s+(?:me\s+|us\s+)?the\s+sign\s+for)\s+"
     r"(?P<gloss>[A-Za-z]+)\b", re.IGNORECASE)
 _SIGN_STOP = frozenset({
     "the", "a", "an", "language", "letter", "word", "name", "here", "it",
-    "that", "this", "something", "me", "please"})
+    "that", "this", "something", "me", "please",
+    # "sign up for the class", "sign in", "sign off", "a sign of the times"
+    "up", "in", "out", "on", "off", "of", "for", "with", "them", "him",
+    "her", "us", "there"})
 
 
 def _both_side(t: str) -> str:
@@ -227,7 +241,7 @@ def parse_arm_command(text: str) -> dict | None:
                 "side": _both_side(t)}
     if _PEACE.search(t):
         return {"kind": "hand_gesture", "name": "peace", "side": _both_side(t)}
-    if _THUMBS_UP.search(t):
+    if _THUMBS_UP.search(t) and len(t.split()) <= 6:
         return {"kind": "hand_gesture", "name": "thumbs_up",
                 "side": _both_side(t)}
     if _UNCLENCH.search(t):

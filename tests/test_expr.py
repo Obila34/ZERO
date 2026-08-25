@@ -39,8 +39,11 @@ def _bus():
 
 
 def _sched(bus, over=None):
+    # playout_delay 0: tests call on_playout directly with no output
+    # prebuffer, so the anchor IS the audible time here.
     cfg = FakeCfg({"expression.hands.rate_hz": 100.0,
                    "expression.hands.latency_ms": 0.0,
+                   "expression.hands.playout_delay_ms": 0.0,
                    "expression.hands.beat.min_gap_s": 0.1,
                    "expression.hands.idle_release_s": 0.4})
     cfg.update(over or {})
@@ -193,6 +196,7 @@ def test_occupied_hand_is_left_alone():
     bus, t = _bus()
     cfg = FakeCfg({"expression.hands.rate_hz": 100.0,
                    "expression.hands.latency_ms": 0.0,
+                   "expression.hands.playout_delay_ms": 0.0,
                    "expression.hands.beat.min_gap_s": 0.1,
                    "expression.hands.idle_release_s": 0.4})
     sched = HandScheduler(cfg, bus, arms_provider=lambda: FakeArms())

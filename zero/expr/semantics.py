@@ -43,11 +43,15 @@ _BIG = re.compile(
     r"\b(?:huge|massive|enormous|gigantic|really\s+big|this\s+big|so\s+(?:big|large))\b",
     re.IGNORECASE)
 _SMALL = re.compile(
-    r"\b(?:tiny|minuscule|really\s+small|this\s+small|so\s+small|little\s+bit)\b",
+    r"\b(?:tiny|minuscule|really\s+small|this\s+small|so\s+small)\b",
     re.IGNORECASE)
+# Deliberately WITHOUT "I think"/"I guess": those are among the most
+# frequent phrases in conversational English, and palm-up firing at the
+# rate cap through ordinary talk is exactly the over-gesturing this module
+# forbids (audit expr #11). Only explicit uncertainty gestures.
 _EPISTEMIC = re.compile(
-    r"\b(?:maybe|perhaps|i\s+(?:think|guess|suppose)|who\s+knows|not\s+sure|"
-    r"hard\s+to\s+say|could\s+be)\b", re.IGNORECASE)
+    r"\b(?:maybe|perhaps|who\s+knows|not\s+sure|no\s+idea|"
+    r"hard\s+to\s+say|could\s+be|can'?t\s+say)\b", re.IGNORECASE)
 _NEGATION = re.compile(
     r"\b(?:no|never|not\s+at\s+all|absolutely\s+not|nope|no\s+way)\b[,.!]?",
     re.IGNORECASE)
@@ -103,14 +107,13 @@ def analyze(text: str) -> HandGesture | None:
                            wrist="up", hold_s=0.9)
 
     m = _NEGATION.search(text)
-    if m:
-        # meaningful mostly at utterance-initial position ("No, ...");
-        # a mid-sentence "not" is grammar, not a gesture.
-        if _word_index(text, m.start()) <= 1:
-            return HandGesture("negation", _word_index(text, m.start()),
-                               total, closure={f: 0.15 for f in FINGER_ORDER},
-                               wrist=None, sides=("right",), hold_s=0.5)
-        return None
+    if m and _word_index(text, m.start()) <= 1:
+        # meaningful at utterance-initial position ("No, ..."); a
+        # mid-sentence "not" is grammar, not a gesture — and it must FALL
+        # THROUGH to the later checks, not suppress them (audit expr #10).
+        return HandGesture("negation", _word_index(text, m.start()),
+                           total, closure={f: 0.15 for f in FINGER_ORDER},
+                           wrist=None, sides=("right",), hold_s=0.5)
 
     m = _SWEEP.search(text)
     if m:

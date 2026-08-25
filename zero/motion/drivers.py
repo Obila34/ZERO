@@ -98,8 +98,13 @@ class BusArmDriver:
                 name, min_deg=spec.min_deg, max_deg=spec.max_deg,
                 home_deg=spec.home_deg, deadband_deg=deadband_deg,
                 # Encoderless steppers keep the effective-degrees convention:
-                # mute until the gateway's stored offsets are known.
+                # mute until the gateway's stored offsets are known — and
+                # they WALK (max_jump) so an outage recovery never whips the
+                # whole accumulated error into a geared arm in one hop
+                # (audit 2026-08-25 #7). Hand servos stay unwalked: they are
+                # fast, absolute, and signing needs their snap.
                 use_offset=spec.is_stepper,
+                max_jump_deg=16.0 if spec.is_stepper else 0.0,
                 batch=name in HAND_JOINTS))
 
     @property
@@ -119,6 +124,16 @@ class BusArmDriver:
 
     def estop(self) -> None:
         self._bus.estop()
+
+    def resume(self) -> None:
+        # NOTHING called MotionBus.resume() before this existed: one estop
+        # froze the whole bus until process restart while the tool kept
+        # claiming success (audit sign #2).
+        self._bus.resume()
+
+    @property
+    def estopped(self) -> bool:
+        return self._bus.estopped
 
     def close(self) -> None:
         self._bus.release(self._track)
@@ -181,6 +196,13 @@ class BusHeadDriver:
 
     def estop(self) -> None:
         self._bus.estop()
+
+    def resume(self) -> None:
+        self._bus.resume()
+
+    @property
+    def estopped(self) -> bool:
+        return self._bus.estopped
 
     def close(self) -> None:
         self._bus.release("gaze")

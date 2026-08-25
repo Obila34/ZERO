@@ -336,8 +336,14 @@ def build_sign(cfg: Config):
 
         bus = get_bus(cfg)
         for name, s in hand_joint_specs().items():
-            bus.register(BusJoint(name, min_deg=s["min"], max_deg=s["max"],
-                                  home_deg=s["home"], batch=True))
+            # only when ABSENT: BusArmDriver registers config-merged specs
+            # for the same joints, and which build ran first must not decide
+            # whose envelope wins (audit sign #12 — voice mode and text mode
+            # built in opposite orders and silently disagreed)
+            if bus.spec(name) is None:
+                bus.register(BusJoint(name, min_deg=s["min"],
+                                      max_deg=s["max"],
+                                      home_deg=s["home"], batch=True))
         eng = SignEngine(cfg, bus)
         st = eng.status()
         log.info("sign engine up: %d exact letters, %d approximate, "

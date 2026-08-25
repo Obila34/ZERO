@@ -101,6 +101,10 @@ class SignEngine:
     def sign_names(self) -> list[str]:
         return sorted(self._lexicon)
 
+    @property
+    def estopped(self) -> bool:
+        return bool(self._bus.estopped)
+
     def describe_letter(self, ch: str) -> str:
         return describe(ch)
 
@@ -195,12 +199,18 @@ class SignEngine:
         return pose
 
     def _seed_pose(self, joints) -> None:
+        """Refresh belief from what the WIRE last saw — other tracks
+        (gestures, the expression layer) move these joints between signs,
+        and easing from a stale belief writes a first-frame snap (audit
+        sign #4). Unregistered joints are NOT seeded: they must be skipped,
+        not driven from a fantasy zero (audit sign #5)."""
         last = self._bus.last
         for j in joints:
-            if j not in self._pose:
-                spec = self._bus.spec(j)
-                self._pose[j] = last.get(
-                    j, spec.home_deg if spec is not None else 0.0)
+            spec = self._bus.spec(j)
+            if spec is None:
+                self._pose.pop(j, None)
+                continue
+            self._pose[j] = last.get(j, self._pose.get(j, spec.home_deg))
 
     def _stance_pose(self, sides) -> dict[str, float]:
         """Stance targets for the signing side(s), FILTERED to joints the
@@ -260,8 +270,13 @@ class SignEngine:
                          for j, v in (seg.get("arm") or {}).items()})
             frames.append((pose, float(seg.get("move_s", 0.4)),
                            float(seg.get("hold_s", 0.2))))
+        # every arm joint any segment raised comes back down at the end —
+        # a sign must not leave the arm parked at 40 deg (audit sign #7)
+        arm_joints = sorted({str(j) for seg in segments
+                             for j in (seg.get("arm") or {})})
         self._launch(frames, finish_open=True,
-                     sides=tuple(touched_sides) or ("left", "right"))
+                     sides=tuple(touched_sides) or ("left", "right"),
+                     lower=arm_joints)
 
     def _launch(self, frames, *, finish_open: bool, sides,
                 lower: list | None = None) -> None:
@@ -274,11 +289,23 @@ class SignEngine:
             name="sign-play", daemon=True)
         self._player.start()
 
+    def _release_if_mine(self, gen: int) -> None:
+        """Abort path: an e-stopped playback must NOT leave the priority-40
+        sign claim standing — resume would replay a stale mid-letter pose
+        and every later gesture would be masked forever (audit sign #3).
+        Preemption by a NEWER playback keeps the claim (the newer one owns
+        it now)."""
+        with self._lock:
+            mine = gen == self._gen
+        if mine:
+            self._bus.release("sign")
+
     def _play(self, frames, gen: int, finish_open: bool, sides,
               lower: list) -> None:
         dt = 1.0 / max(1.0, self._rate)
         for pose, move_s, hold_s in frames:
             if not self._ease_to(pose, move_s, gen, dt):
+                self._release_if_mine(gen)
                 return                    # preempted or e-stopped
             t_end = time.monotonic() + hold_s
             while time.monotonic() < t_end:
@@ -286,6 +313,7 @@ class SignEngine:
                     if gen != self._gen:
                         return
                 if self._bus.estopped:
+                    self._release_if_mine(gen)
                     return
                 time.sleep(dt)
         if finish_open:
@@ -301,6 +329,7 @@ class SignEngine:
             if not self._ease_to(
                     open_pose, self._stance_move_s if lower else 0.4,
                     gen, dt):
+                self._release_if_mine(gen)
                 return
         with self._lock:
             if gen == self._gen:          # only the newest playback releases
@@ -311,10 +340,10 @@ class SignEngine:
         open_pose: dict[str, float] = {}
         for s in ("left", "right"):
             open_pose.update(hands.open_hand_pose(s))
-        if self._ease_to(open_pose, 0.5, gen, dt):
-            with self._lock:
-                if gen == self._gen:
-                    self._bus.release("sign")
+        self._ease_to(open_pose, 0.5, gen, dt)
+        # released whether the ease completed or aborted — a leaked sign
+        # claim outranks everything forever (audit sign #3)
+        self._release_if_mine(gen)
 
     def _ease_to(self, target: dict[str, float], dur: float, gen: int,
                  dt: float) -> bool:
@@ -324,8 +353,9 @@ class SignEngine:
         start = {j: self._pose[j] for j in target if j in self._pose}
         goal = {j: v for j, v in target.items() if j in start}
         if not goal:
-            # Nothing registered (e.g. an arm-only segment before Phase 5) —
-            # skip the segment rather than stall the whole sign.
+            # Nothing registered (e.g. an arm-only segment before Phase-5
+            # registration) — skip the segment rather than stall the sign
+            # writing joints the bus drops (audit sign #5).
             return True
         # Per-joint speed caps: hand servos are quick, but a stance move
         # rides 160:1 geared steppers — those stretch the segment to their
