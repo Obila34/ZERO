@@ -88,6 +88,7 @@ class SignEngine:
         # the first ease starts from wherever the hands actually are.
         self._pose: dict[str, float] = {}
         self._gen = 0
+        self._stopping = False
         self._lock = threading.Lock()
         self._player: threading.Thread | None = None
 
@@ -161,6 +162,7 @@ class SignEngine:
         stopping the service must never abandon the arms mid-air with a
         letter frozen on the hands. Under e-stop it releases without
         moving — an e-stop means do NOT move, including to go home."""
+        self._stopping = True
         with self._lock:
             self._gen += 1               # kill any running playback
             gen = self._gen
@@ -237,13 +239,22 @@ class SignEngine:
             frames.append((dict(stance), self._stance_move_s, 0.15))
         for ch in letters:
             pose = self._letter_pose(ch, sides)
-            dwell = max(0.0, self._letter_s - self._move_s)
-            frames.append((pose, self._move_s, dwell))
-            for orient, secs in HANDSHAPES[ch].get("motion", []):
+            motion = HANDSHAPES[ch].get("motion", [])
+            if not motion:
+                dwell = max(0.0, self._letter_s - self._move_s)
+                frames.append((pose, self._move_s, dwell))
+                continue
+            # A traced letter (J) folds its sweep into the SAME letter_s
+            # slot — appending it after a full dwell added 0.7 s per J and
+            # desynced the spoken readout (audit sign #13).
+            frames.append((pose, self._move_s, 0.0))
+            budget = max(0.15, self._letter_s - self._move_s)
+            total = sum(secs for _o, secs in motion) or 1.0
+            for orient, secs in motion:
                 sweep = dict(pose)
                 for s in sides:
                     sweep[hands.wrist_name(s)] = hands.wrist_deg(s, orient)
-                frames.append((sweep, secs, 0.0))
+                frames.append((sweep, secs * budget / total, 0.0))
         if hold_last_s is not None and frames:
             pose, mv, _dw = frames[-1]
             frames[-1] = (pose, mv, hold_last_s)
@@ -280,6 +291,10 @@ class SignEngine:
 
     def _launch(self, frames, *, finish_open: bool, sides,
                 lower: list | None = None) -> None:
+        if self._stopping:
+            # a spell launched DURING shutdown outbids stop()'s preempt and
+            # keeps signing after stop() returned (audit sign #13)
+            return
         with self._lock:
             self._gen += 1
             gen = self._gen

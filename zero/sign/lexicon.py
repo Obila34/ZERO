@@ -132,4 +132,11 @@ def load_lexicon(path) -> dict[str, dict]:
         out[str(name).lower()] = entry
     if out:
         log.info("sign lexicon: %d sign(s) loaded", len(out))
+        if any(seg.get("head") for e in out.values()
+               for seg in e.get("segments", [])):
+            # schema-stable, playback-pending: better one honest line at
+            # load than a marker that silently never happens (audit sign #6)
+            log.info("sign lexicon: head markers present — validated but "
+                     "not yet played (non-manual markers land with the "
+                     "motion-sign phase)")
     return out

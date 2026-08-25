@@ -108,6 +108,7 @@ class MotionBus:
         self._estop = False
         self._fails = 0
         self._muted = False
+        self._closed = False
         self._lock = threading.Lock()
         self._stop_evt = threading.Event()
         self._wake = threading.Event()
@@ -136,6 +137,12 @@ class MotionBus:
         Unknown joints are dropped WITH a log — they must never reach the
         wire — and the accepted joint names are returned so the caller can
         say honestly what will move."""
+        if self._closed:
+            # A stale holder writing after reset_bus() got silence before:
+            # targets accepted, tick thread gone, nothing ever posted
+            # (audit motion #10). Refuse loudly instead.
+            log.warning("write to a CLOSED bus (track %r) — dropped", track)
+            return []
         if track not in TRACK_PRIORITY:
             log.warning("unknown motion track %r — write ignored", track)
             return []
@@ -230,7 +237,8 @@ class MotionBus:
         # otherwise suppress it and the robot would sit displaced while
         # `last` claims otherwise — audit #3); forgetting offsets forces a
         # refetch (audit #5).
-        self._posted.clear()
+        with self._lock:
+            self._posted.clear()
         self._offsets = None
         self._estop = False
         self._wake.set()
@@ -325,7 +333,8 @@ class MotionBus:
         if batch and not self._estop:
             if self._transport.post_pose(
                     {n: round(v, 2) for n, v in batch.items()}):
-                self._posted.update(batch)
+                with self._lock:
+                    self._posted.update(batch)
                 if self._blackbox is not None:
                     for n, v in batch.items():
                         self._blackbox.log(n, v, owners.get(n, "?"))
@@ -346,7 +355,8 @@ class MotionBus:
             wire = step - (self._offsets or {}).get(name, 0.0) \
                 if spec.use_offset else step
             if self._transport.post_joint(name, round(wire, 2)):
-                self._posted[name] = step
+                with self._lock:
+                    self._posted[name] = step
                 if self._blackbox is not None:
                     self._blackbox.log(name, step, owners.get(name, "?"))
             else:
@@ -363,7 +373,8 @@ class MotionBus:
                 # An outage long enough to notice may have been a gateway
                 # restart: its setpoints are gone and its stored offsets may
                 # differ. Re-learn both rather than trusting stale belief.
-                self._posted.clear()
+                with self._lock:
+                    self._posted.clear()
                 self._offsets = None
                 pending = True
             self._fails = 0
@@ -402,6 +413,7 @@ class MotionBus:
         return True
 
     def close(self) -> None:
+        self._closed = True
         self._stop_evt.set()
         self._wake.set()
         try:

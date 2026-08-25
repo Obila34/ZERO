@@ -691,6 +691,14 @@ class Zero:
                 self.arms.stop()
             except Exception:
                 pass
+        # every motion producer has parked: tear the bus down cleanly so
+        # its final posts, sampler and black box aren't killed mid-flight
+        # at interpreter exit (audit sign #13)
+        try:
+            from zero.motion.drivers import reset_bus
+            reset_bus()
+        except Exception:
+            pass
         self._end_conversation()
         self._join_memory_thread()
 
@@ -789,6 +797,11 @@ class Zero:
                     self.arms.stop()
                 except Exception:
                     pass
+            try:
+                from zero.motion.drivers import reset_bus
+                reset_bus()   # clean teardown; see run_text's stop
+            except Exception:
+                pass
             if self.eyes is not None:
                 self.eyes.stop()
             if self.indicator is not None:

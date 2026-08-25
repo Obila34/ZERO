@@ -207,7 +207,11 @@ class RollingProsody:
             t += self._offset_s
             if t >= horizon:
                 continue
-            if any(abs(t - r) < MIN_GAP_S / 2 for r in self._reported):
+            # tolerance = the detector's own minimum gap: re-analysis over
+            # a changed window can shift a peak's winning maximum by more
+            # than half a gap, re-reporting an already-gestured accent as a
+            # phantom second beat (audit expr #8)
+            if any(abs(t - r) < MIN_GAP_S for r in self._reported):
                 continue
             fresh.append(t)
         self._reported.extend(fresh)

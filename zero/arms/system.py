@@ -263,10 +263,9 @@ class ArmSystem:
                 name, word_i = inferred
                 if name.startswith("point") and not self._can_point:
                     inferred = None          # never point at an unseen target
-                elif self._hand_state.get(
-                        "left" if name.endswith("_left") else "right",
-                        "free") != "free":
-                    inferred = None          # that hand is holding something
+                elif any(self._hand_state.get(h, "free") != "free"
+                         for h in self._hands_used(name)):
+                    inferred = None          # a needed hand is occupied
                 elif self._play_at(name, word_i):
                     self._last_gesture_t = now
                     return name
@@ -285,10 +284,9 @@ class ArmSystem:
             return None
         if CUE_FUNCTION.get(cue) == "deictic" and not self._can_point:
             return None                     # never point at an unseen target
-        hand = ("left" if name.endswith("_left") or "left" in name
-                else "right")
-        if self._hand_state.get(hand, "free") != "free":
-            return None                     # that hand is holding something
+        if any(self._hand_state.get(h, "free") != "free"
+               for h in self._hands_used(name)):
+            return None                     # a needed hand is holding something
         if not self._play_on_word(name, text, cue):
             return None                     # uncalibrated / unknown: refuse
         self._last_gesture_t = now
@@ -321,6 +319,9 @@ class ArmSystem:
             return self.play(name)
         if not self._can_play(name):
             return False               # check BEFORE promising, not after
+        old_t = self._timer
+        if old_t is not None:
+            old_t.cancel()             # never two pending strokes at once
         t = threading.Timer(delay, self.play, args=(name,))
         t.daemon = True
         self._timer = t
@@ -335,11 +336,28 @@ class ArmSystem:
             return self.play(name)
         if not self._can_play(name):
             return False
+        old_t = self._timer
+        if old_t is not None:
+            old_t.cancel()             # never two pending strokes at once
         t = threading.Timer(delay, self.play, args=(name,))
         t.daemon = True
         self._timer = t
         t.start()
         return True
+
+    def _hands_used(self, name: str) -> set:
+        """Which hand(s) a gesture's frames actually drive — beat_both and
+        shrug use BOTH, and checking only one let an occupied left hand be
+        swung anyway (audit sign #13)."""
+        frames = self._gestures.get(name) or []
+        used = set()
+        for tg, _s in frames:
+            for j in tg:
+                if j.startswith("left_"):
+                    used.add("left")
+                elif j.startswith("right_"):
+                    used.add("right")
+        return used or {"right"}
 
     def _can_play(self, name: str) -> bool:
         """Whether play(name) would succeed, without starting it."""

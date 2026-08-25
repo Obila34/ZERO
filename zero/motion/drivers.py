@@ -22,6 +22,7 @@ from zero.utils.logging import get_logger
 log = get_logger("motion.drivers")
 
 _bus: MotionBus | None = None
+_bus_kind: str | None = None
 _sampler = None
 _bus_lock = threading.Lock()
 
@@ -30,10 +31,18 @@ def get_bus(cfg) -> MotionBus:
     """The process-wide MotionBus, created on first use from `motion.*`
     config. motion.driver: null (default — records, moves nothing) | http
     (MOVES THE ROBOT via the AF-1 gateway)."""
-    global _bus
+    global _bus, _bus_kind
     with _bus_lock:
+        if _bus is not None:
+            want = str(cfg.get("motion.driver", "null")).lower()
+            if want != _bus_kind:
+                # first caller's cfg won SILENTLY before (audit motion #10)
+                log.warning("get_bus: caller wants motion.driver=%r but the "
+                            "bus was built with %r — first build wins",
+                            want, _bus_kind)
         if _bus is None:
             kind = str(cfg.get("motion.driver", "null")).lower()
+            _bus_kind = kind
             if kind == "http":
                 transport = HttpTransport(
                     base_url=cfg.get("motion.gateway.base_url",
@@ -72,7 +81,7 @@ def get_bus(cfg) -> MotionBus:
 
 def reset_bus() -> None:
     """Tear down the shared bus (tests, shutdown)."""
-    global _bus, _sampler
+    global _bus, _bus_kind, _sampler
     with _bus_lock:
         if _sampler is not None:
             _sampler.stop()
@@ -80,6 +89,7 @@ def reset_bus() -> None:
         if _bus is not None:
             _bus.close()
             _bus = None
+        _bus_kind = None
 
 
 class BusArmDriver:
