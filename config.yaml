@@ -1050,6 +1050,37 @@ head:
 # Steppers (elbows/biceps/shoulders) have NO encoders and zero at whatever
 # pose the Nano booted in — they stay inert even when calibrated unless
 # allow_steppers is also true. Servo hands first; steppers later, carefully.
+# ── Living Hands — co-speech hand/wrist expression ──────────────────────────
+# The additive layer of docs/LIVING_HANDS_PLAN.md: prosody-timed micro-beats
+# that land on stressed syllables, semantic hand shapes (counting, sizing,
+# palm-up, negation, sweeps), and an optional micro-motion floor. Renders
+# ONLY to the MotionBus idle track (priority 0) — sign, commands, gestures
+# and gaze all preempt it by the bus's fixed arithmetic, so turning this off
+# (or on) cannot change any existing behavior.
+expression:
+  hands:
+    enabled: true
+    latency_ms: 60          # command->motion latency compensated out of each
+                            # apex; refine from black-box measurement (Phase A)
+    prep_lead_ms: 250       # preparation starts this early (anticipatory
+                            # co-articulation; strokes may lead, never lag)
+    rate_hz: 25             # render tick onto the bus
+    beat:
+      amp: 0.09             # closure pulse on accents (0..1)
+      wrist_deg: 2.0
+      min_gap_s: 0.35       # max beat rate — roughly stressed-syllable rate
+    semantic:
+      enabled: true
+      min_gap_s: 4.0        # most sentences should carry beats only
+    floor:
+      enabled: false        # PHASE-B GATE: measure PCA-servo bleed into the
+                            # mic before enabling continuous micro-motion —
+                            # the servos whine and the mic is close.
+      amp: 0.03             # closure drift band when enabled
+      wrist_deg: 1.5
+      quiet_rms: 150        # below this ambient RMS the floor ducks to zero
+    idle_release_s: 1.5     # quiet this long -> ease open, release the claim
+
 # ── Motion bus — ONE writer for every joint on the robot ────────────────────
 # Gaze (head), gestures (arms/hands) and sign language all write setpoints
 # onto prioritised tracks (sign > command > gesture > gaze > idle); one clock

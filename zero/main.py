@@ -57,6 +57,8 @@ from zero.memory.preferences import (apply_rate_delta, parse_preference,
 from zero.perception.affect import MoodTracker
 from zero.tools.base import ToolContext
 from zero.vision.learned import parse_object_teach
+from zero.expr import build_expr
+from zero.expr.tap import TAP as _speech_tap
 from zero.llm.persona import build_system_prompt
 from zero.state import State, can_transition
 from zero.tts.orchestrator import split_stream, strip_asides
@@ -265,6 +267,7 @@ class Zero:
         self.head = None
         self.arms = None
         self.sign = None
+        self.expr = None
         # Conversational expression (gesture cues in replies + the sentence-end
         # look-back). The hooks existed but were never called (audit H3); wired
         # into the playback loop now, still dark until head.express is on.
@@ -279,6 +282,16 @@ class Zero:
         except Exception as e:
             log.warning("sign subsystem unavailable: %s", e)
             self.sign = None
+        # Living Hands — additive co-speech hand expression; requires only
+        # the bus + config, providers late-bind to subsystems built later.
+        try:
+            self.expr = build_expr(
+                self.cfg,
+                arms_provider=lambda: getattr(self, "arms", None),
+                room_provider=lambda: getattr(self, "room", None))
+        except Exception as e:
+            log.warning("living hands unavailable: %s", e)
+            self.expr = None
 
         tool_block = (self.tool_registry.spec_block()
                       if self.tool_registry is not None else "")
@@ -660,6 +673,11 @@ class Zero:
                 self.head.stop()
             except Exception:
                 pass
+        if self.expr is not None:
+            try:
+                self.expr.stop()
+            except Exception:
+                pass
         # Order matters: sign OWNS the raised joints (highest-priority
         # track), so it must ease them down and release before the arms'
         # rest can reach the wire.
@@ -753,6 +771,11 @@ class Zero:
             if self.head is not None:
                 try:
                     self.head.stop()
+                except Exception:
+                    pass
+            if self.expr is not None:
+                try:
+                    self.expr.stop()
                 except Exception:
                     pass
             # Sign first — it owns the raised joints (see run_text's stop).
@@ -2088,12 +2111,16 @@ class Zero:
                         full.append(sentence)
                         idx = len(full) - 1
                         for piece in self.voice.synthesize_stream(sentence):
+                            _speech_tap.audio(idx, sentence, piece,
+                                              self.voice.sample_rate)
                             if not put_piece((idx, piece)):
                                 return
                 if buffer.strip():
                     full.append(buffer.strip())
                     idx = len(full) - 1
                     for piece in self.voice.synthesize_stream(buffer):
+                        _speech_tap.audio(idx, buffer.strip(), piece,
+                                          self.voice.sample_rate)
                         if not put_piece((idx, piece)):
                             return
             finally:
@@ -2161,6 +2188,7 @@ class Zero:
                     self._head_express(full[idx] if idx < len(full) else "",
                                        boundary=played >= 0)
                 played = idx
+                _speech_tap.playout(idx, len(piece))
                 yield piece
 
         # Barge-in: the monitor (started by the caller) keeps the mic live and
