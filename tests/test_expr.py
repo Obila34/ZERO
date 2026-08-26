@@ -278,3 +278,36 @@ def test_idle_polling_is_free_and_long_sentences_stay_correct():
     for _ in range(500):
         rp.poll()
     assert (time.perf_counter() - t0) < 0.01, "idle polls must be free"
+
+
+def test_gestures_chain_across_sentences_via_engagement():
+    """Phase D: between two gestural sentences the hands hold a warm
+    ready-posture (engagement) instead of collapsing to dead rest — and
+    still park fully once speech truly ends."""
+    bus, t = _bus()
+    sched = _sched(bus, {"expression.hands.engage_decay_s": 3.0,
+                         "expression.hands.engage_closure": 0.10})
+    hop = int(0.05 * SR)
+    # sentence 0 with a clear accent -> a beat fires -> engagement rises
+    a0 = _stress_sentence()
+    sched.on_audio(0, "well THAT is something", a0, SR)
+    for i in range(0, len(a0), hop):
+        sched.on_playout(0, hop)
+        time.sleep(0.05)
+    # short inter-sentence gap (0.3 s): still "speaking" window
+    time.sleep(0.3)
+    mid_gap = t.posted.get("left_indexp1_joint", 90.0)
+    # posture held: engaged closure keeps the index visibly off full-open
+    assert mid_gap < 89.0, f"hands collapsed to rest between sentences ({mid_gap})"
+    # sentence 1 plays; then real silence -> full park at open rest
+    a1 = _stress_sentence()
+    sched.on_audio(1, "and THIS one too", a1, SR)
+    for i in range(0, len(a1), hop):
+        sched.on_playout(1, hop)
+        time.sleep(0.05)
+    end = time.monotonic() + 6.0
+    while time.monotonic() < end and bus.owner("left_indexp1_joint") == "idle":
+        time.sleep(0.05)
+    time.sleep(0.1)
+    assert abs(t.posted["left_indexp1_joint"] - 90.0) < 2.0, "did not park"
+    sched.stop()

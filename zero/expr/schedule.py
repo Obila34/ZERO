@@ -139,6 +139,18 @@ class HandScheduler:
         self._last_sem_t = 0.0
         self._last_playout = 0.0
         self._active = False                 # currently holding an idle claim
+        # Engagement — the Kendon-unit carrier across SENTENCES: rises when
+        # gestures fire, decays over seconds, and holds the hands in a
+        # slightly lifted, softly curled ready-posture while high, so
+        # consecutive gestural sentences flow through a warm posture
+        # instead of collapsing to dead-rest between every one (Phase D).
+        self._engagement = 0.0
+        self._engage_decay_s = float(
+            g("expression.hands.engage_decay_s", 2.5))
+        self._engage_closure = float(
+            g("expression.hands.engage_closure", 0.07))
+        self._engage_wrist = float(
+            g("expression.hands.engage_wrist_deg", 4.0))
         self._lock = threading.Lock()
         self._stop_evt = threading.Event()
         self._apex_log: list[float] = []   # planned apex times
@@ -211,6 +223,7 @@ class HandScheduler:
             if abs(t_rel - frac * est_dur) < max(0.6, 0.25 * est_dur):
                 st.semantic_scheduled = True
                 self._last_sem_t = now
+                self._engagement = 1.0
                 self._envs.append(_Envelope(
                     t_apex, self._prep, sem.hold_s,
                     dict(sem.closure), sem.wrist, sem.sides,
@@ -220,6 +233,7 @@ class HandScheduler:
         if now - self._last_beat_t < self._beat_gap:
             return
         self._last_beat_t = now
+        self._engagement = min(1.0, self._engagement + 0.5)
         # A stale accent still RAMPS over ~0.1 s from now — an attack
         # window already mostly elapsed made the first render jump near
         # peak in one tick (audit expr #4).
@@ -263,11 +277,15 @@ class HandScheduler:
                   if floor_scale > 0 else {})
         wr_off = (self._floor.wrist_offsets(now, floor_scale)
                   if floor_scale > 0 else {})
+        eng = self._engagement
         pose: dict[str, float] = {}
         for side in sides:
-            closure = {f: cl_off.get((side, f), 0.0) for f in hands.FINGERS}
+            closure = {f: cl_off.get((side, f), 0.0)
+                       + eng * self._engage_closure
+                       for f in hands.FINGERS}
             wrist_deg = hands.wrist_deg(side, hands.REST_ORIENT) \
-                + wr_off.get(side, 0.0)
+                + wr_off.get(side, 0.0) \
+                + eng * self._engage_wrist * (1 if side == "right" else -1)
             wrist_w = 0.0
             for env in self._envs:
                 if side not in env.sides:
@@ -294,7 +312,8 @@ class HandScheduler:
                 c = max(0.0, min(1.0, closure[f]))
                 pose[hands.joint_name(side, f)] = hands.finger_deg(side, f, c)
             pose[hands.wrist_name(side)] = wrist_deg
-        if not speaking and floor_scale <= 0 and not self._envs:
+        if (not speaking and floor_scale <= 0 and not self._envs
+                and eng <= 0.02):
             return {}
         return pose
 
@@ -348,7 +367,14 @@ class HandScheduler:
                         self._schedule_from(st, now)
                 self._envs = [e for e in self._envs if not e.done(now)]
                 has_events = bool(self._envs)
-            if has_events or speaking or (
+            # engagement decays toward zero; while speaking it floors at
+            # 0.25 so the ready-posture persists BETWEEN gestural sentences
+            # — the chaining itself
+            step = dt / max(0.5, self._engage_decay_s)
+            self._engagement = max(
+                0.25 if (speaking and self._engagement > 0) else 0.0,
+                self._engagement - step)
+            if has_events or speaking or self._engagement > 0.02 or (
                     self._floor_on and self._active):
                 pose = self._render(now)
                 if pose:
@@ -376,6 +402,7 @@ class HandScheduler:
                         time.sleep(0.01)
                 if time.monotonic() - self._last_playout > self._idle_release:
                     # speech did NOT resume during the confirm wait
+                    self._engagement = 0.0
                     self._bus.release("idle")
                     self._active = False
 

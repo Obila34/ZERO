@@ -1067,6 +1067,10 @@ expression:
     enabled: true
     latency_ms: 60          # command->motion latency compensated out of each
                             # apex; refine from black-box measurement (Phase A)
+    playout_delay_ms: 320   # tap-to-audible delay: the playout tap fires when
+                            # a piece enters the output pipeline, ~prebuffer_ms
+                            # + sink latency before it is HEARD. Tune by ear
+                            # vs black box; raise for BT speakers.
     prep_lead_ms: 250       # preparation starts this early (anticipatory
                             # co-articulation; strokes may lead, never lag)
     rate_hz: 25             # render tick onto the bus
@@ -1078,9 +1082,9 @@ expression:
       enabled: true
       min_gap_s: 4.0        # most sentences should carry beats only
     floor:
-      enabled: false        # PHASE-B GATE: measure PCA-servo bleed into the
-                            # mic before enabling continuous micro-motion —
-                            # the servos whine and the mic is close.
+      enabled: true         # Phase-B gate PASSED 2026-08-26: operator
+                            # verified the finger servos are inaudible on
+                            # ZERO's own mic. The living floor is on.
       amp: 0.03             # closure drift band when enabled
       wrist_deg: 1.5
       quiet_rms: 150        # below this ambient RMS the floor ducks to zero
