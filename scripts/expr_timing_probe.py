@@ -105,26 +105,27 @@ def main() -> int:
     sched.on_audio(0, "well THAT was quite the THING to SEE", audio, SR)
     hop = int(0.05 * SR)
     t_anchor = time.time()
-    for i in range(0, len(audio), hop):
-        sched.on_playout(0, hop)
-        time.sleep(0.05)
-    time.sleep(2.5)
+    t_mono0 = time.monotonic()
+    trace = []          # in-process 20 ms trace of the ACKED index angle —
+    end = len(audio) / SR + 2.0     # the black box throttles to 200 ms,
+    i = 0               # far too coarse to time an apex
+    next_play = 0.0
+    while time.monotonic() - t_mono0 < end:
+        now = time.monotonic() - t_mono0
+        if now >= next_play and i < len(audio):
+            sched.on_playout(0, hop)
+            i += hop
+            next_play += 0.05
+        v = bus.last.get("left_indexp1_joint")
+        if v is not None:
+            trace.append((now, v))
+        time.sleep(0.02)
     sched.stop()
-
-    # 3) read the black box back: idle-track index-finger excursions
-    import sqlite3
-
-    db = cfg.get("motion.blackbox.db_path", "zero_joints.sqlite")
-    conn = sqlite3.connect(db)
-    rows = conn.execute(
-        "SELECT ts, angle_deg FROM joint_angles WHERE joint = ? AND "
-        "source = 'idle' AND ts >= ? ORDER BY ts",
-        ("left_indexp1_joint", t_anchor - 1)).fetchall()
-    conn.close()
+    rows = [(t_anchor + t, v) for t, v in trace]
     if not rows:
-        print("\nNo idle-track rows in the black box — did the hands move?")
+        print("\nNo acked index posts — did the hands move?")
         return 1
-    print(f"\nblack box: {len(rows)} index-finger rows recorded")
+    print(f"\ntrace: {len(rows)} acked samples at 20 ms")
     # find local minima (deepest curl) per accent window
     planned = [a + playout_delay / 1000.0 - latency_ms / 1000.0
                for a in accents]
