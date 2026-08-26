@@ -61,8 +61,21 @@ def make_audio(accents, dur=3.2):
     return x + 0.003 * np.random.randn(len(x)).astype(np.float32)
 
 
+# Amplitude boost for JUDGING: conversational texture is a 6-8 degree
+# finger twitch, nearly invisible across a room (operator, 2026-08-26:
+# "nothing happened"). Both renditions get the SAME boost, so the
+# comparison stays fair — this scales the motion, not the contest.
+_BOOST = {
+    "expression.hands.beat.amp": 0.22,
+    "expression.hands.engage_closure": 0.12,
+    "expression.hands.engage_wrist_deg": 8.0,
+    "expression.hands.floor.enabled": True,
+    "expression.hands.floor.amp": 0.06,
+}
+
+
 class _Cfg:
-    """Real config with per-run neural override."""
+    """Real config with per-run neural override + judge-visibility boost."""
 
     def __init__(self, base, neural_url):
         self._base = base
@@ -73,6 +86,8 @@ class _Cfg:
             return self._url is not None
         if k == "expression.hands.neural.url":
             return self._url or "mock"
+        if k in _BOOST:
+            return _BOOST[k]
         return self._base.get(k, d)
 
 
@@ -123,9 +138,12 @@ def main() -> int:
         order = ["procedural", "neural"]
         rng.shuffle(order)
         for j, mode in enumerate(order, 1):
-            input(f"trial {k+1}: press Enter for rendition {j}...")
+            input(f"\ntrial {k+1}, rendition {j}: EYES ON THE HANDS, "
+                  "then press Enter to play (~6 s)... ")
+            print("  playing...")
             play(cfg, bus, text,
                  audio, a.neural_url if mode == "neural" else None)
+            print("  done.")
         ans = ""
         while ans not in ("1", "2", "t"):
             ans = input("which felt more alive? [1/2/t] ").strip().lower()
