@@ -1098,8 +1098,13 @@ expression:
     # the default. url 'mock' = in-process plumbing-test model (NOT AI);
     # a real sidecar looks like http://<gpu>:8200.
     neural:
-      enabled: false
-      url: mock
+      enabled: true           # PROMOTED 2026-08-26: won the blind A/B 3-1
+                              # (operator, four trials, hidden order) — the
+                              # plan's gate. GestureTCN v2 trained on BEAT2
+                              # human co-speech motion; beat lag 50 ms.
+                              # Falls back to procedural seamlessly whenever
+                              # the sidecar is unreachable.
+      url: http://100.100.95.12:8200    # zerolabs2 gesture sidecar
       timeout_s: 0.8
 
 # ── Motion bus — ONE writer for every joint on the robot ────────────────────
