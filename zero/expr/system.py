@@ -16,11 +16,14 @@ log = get_logger("expr")
 
 class ExpressiveHands:
     def __init__(self, cfg, bus, *, arms_provider=None, room_provider=None):
+        from zero.expr.neural import build_neural
         from zero.expr.schedule import HandScheduler
         from zero.expr.tap import TAP
 
+        self._neural = build_neural(cfg)     # None unless opted in
         self._sched = HandScheduler(cfg, bus, arms_provider=arms_provider,
-                                    room_provider=room_provider)
+                                    room_provider=room_provider,
+                                    neural=self._neural)
         TAP.attach(self._sched)
         self._tap = TAP
 
@@ -33,6 +36,11 @@ class ExpressiveHands:
         except Exception:
             pass
         self._sched.stop()
+        if self._neural is not None:
+            try:
+                self._neural.stop()
+            except Exception:
+                pass
 
 
 def build_expr(cfg, *, arms_provider=None, room_provider=None):

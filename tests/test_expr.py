@@ -1,5 +1,6 @@
 """Living Hands: tap isolation, prosody-timed beats, semantic shapes,
 priority subordination — all against NullTransport (nothing moves)."""
+import json
 import time
 
 import numpy as np
@@ -344,3 +345,110 @@ def test_simultaneously_detected_accents_all_become_beats():
     n_apex = len(sched._apex_log)
     sched.stop()
     assert n_apex >= 3, f"only {n_apex} of 3 accents became beats"
+
+
+# ── Phase E: neural texture — N0 scaffolding (docs/NEURAL_GESTURES_PLAN.md) ─
+
+def test_neural_mock_texture_drives_hands_and_semantic_composites():
+    from zero.expr.neural import NeuralGestureClient
+
+    bus, t = _bus()
+    ncfg = FakeCfg({"expression.hands.neural.url": "mock"})
+    client = NeuralGestureClient(ncfg)
+    cfg = FakeCfg({"expression.hands.rate_hz": 100.0,
+                   "expression.hands.latency_ms": 0.0,
+                   "expression.hands.playout_delay_ms": 0.0,
+                   "expression.hands.beat.min_gap_s": 0.1,
+                   "expression.hands.idle_release_s": 0.4})
+    sched = HandScheduler(cfg, bus, neural=client)
+    # loud sentence with a semantic trigger ("three reasons" -> count)
+    audio = _stress_sentence()
+    sched.on_audio(0, "there are three reasons for that", audio, SR)
+    time.sleep(0.5)                      # mock inference happens off-thread
+    hop = int(0.05 * SR)
+    for i in range(0, len(audio), hop):
+        sched.on_playout(0, hop)
+        time.sleep(0.05)
+    time.sleep(0.3)
+    sched.stop()
+    client.stop()
+    # neural texture reached the wire: index closure varies with energy
+    idx = [p["left_indexp1_joint"] for p in t.posts
+           if "left_indexp1_joint" in p]
+    assert idx and min(idx) < 89.0, "neural texture never moved the hands"
+    # the semantic COUNT still composited: counting THREE extends
+    # index+middle+ring and CLOSES pinky+thumb — the pinky's curl is the
+    # signature that meaning stayed rule-based under the neural texture
+    pinky = [p["right_pinkyp1_joint"] for p in t.posts
+             if "right_pinkyp1_joint" in p]
+    assert pinky and min(pinky) < 30.0, "semantic count lost under neural"
+
+
+def test_neural_dead_sidecar_falls_back_to_procedural_seamlessly():
+    from zero.expr.neural import NeuralGestureClient
+
+    bus, t = _bus()
+    ncfg = FakeCfg({"expression.hands.neural.url": "http://127.0.0.1:1",
+                    "expression.hands.neural.timeout_s": 0.1})
+    client = NeuralGestureClient(ncfg)
+    sched = _sched(bus)
+    sched._neural = client
+    audio = _stress_sentence()
+    sched.on_audio(0, "well THAT is something", audio, SR)
+    hop = int(0.05 * SR)
+    for i in range(0, len(audio), hop):
+        sched.on_playout(0, hop)
+        time.sleep(0.05)
+    sched.stop()
+    client.stop()
+    assert not client.healthy            # it noticed the sidecar is dead
+    # ...and the procedural beat still fired regardless
+    idx = [p["left_indexp1_joint"] for p in t.posts
+           if "left_indexp1_joint" in p]
+    assert idx and min(idx) < 89.0, "procedural fallback failed"
+
+
+def test_neural_off_is_bit_identical():
+    from zero.expr.neural import build_neural
+
+    assert build_neural(FakeCfg({})) is None
+
+
+def test_gesture_sidecar_server_roundtrip():
+    import subprocess
+    import sys as _sys
+    import urllib.request as _rq
+
+    proc = subprocess.Popen(
+        [_sys.executable, "server/gesture_server.py", "--model", "mock",
+         "--port", "18200"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        deadline = time.monotonic() + 5.0
+        ok = False
+        while time.monotonic() < deadline:
+            try:
+                with _rq.urlopen("http://127.0.0.1:18200/health",
+                                 timeout=0.5) as r:
+                    ok = json.loads(r.read())["ok"]
+                    break
+            except Exception:
+                time.sleep(0.1)
+        assert ok, "sidecar never came up"
+        # a real client session against the real server
+        from zero.expr.neural import NeuralGestureClient
+        client = NeuralGestureClient(FakeCfg({
+            "expression.hands.neural.url": "http://127.0.0.1:18200",
+            "expression.hands.neural.timeout_s": 2.0}))
+        client.feed(0, _stress_sentence(), SR)
+        deadline = time.monotonic() + 4.0
+        fr = None
+        while time.monotonic() < deadline and fr is None:
+            fr = client.frames_for(0, 0.5)
+            time.sleep(0.05)
+        client.stop()
+        assert fr is not None and "closure" in fr, "no frames from sidecar"
+        assert 0.0 <= max(fr["closure"].values()) <= 0.35
+    finally:
+        proc.terminate()
+        proc.wait(timeout=3)

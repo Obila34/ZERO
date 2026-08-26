@@ -54,11 +54,11 @@ class _Envelope:
     """One gesture event: weight rises to peak at apex, falls to 0 after."""
 
     __slots__ = ("t_apex", "attack", "decay", "closure", "wrist", "sides",
-                 "wrist_swing", "peak")
+                 "wrist_swing", "peak", "semantic")
 
     def __init__(self, t_apex: float, attack: float, decay: float,
                  closure: dict, wrist: str | None, sides,
-                 wrist_swing: float = 0.0):
+                 wrist_swing: float = 0.0, semantic: bool = False):
         self.t_apex = t_apex
         self.attack = max(0.05, attack)
         self.decay = max(0.1, decay)
@@ -66,6 +66,7 @@ class _Envelope:
         self.wrist = wrist              # symbolic orientation or None
         self.sides = tuple(sides)
         self.wrist_swing = wrist_swing  # deg, for dynamic kinds (negation)
+        self.semantic = bool(semantic)  # meaning-bearing: survives neural
         self.peak = 1.0                 # scaled down by turnaround()
 
     def weight(self, now: float) -> float:
@@ -104,8 +105,13 @@ class _Sentence:
 
 
 class HandScheduler:
-    def __init__(self, cfg, bus, *, arms_provider=None, room_provider=None):
+    def __init__(self, cfg, bus, *, arms_provider=None, room_provider=None,
+                 neural=None):
         self._bus = bus
+        # Phase E: optional neural texture source (zero/expr/neural.py).
+        # frames_for() returning None ALWAYS means procedural — a dead
+        # sidecar changes nothing but the texture's flavor.
+        self._neural = neural
         self._arms = arms_provider or (lambda: None)
         self._room = room_provider or (lambda: None)
         g = lambda k, d: cfg.get(k, d)   # noqa: E731
@@ -174,6 +180,8 @@ class HandScheduler:
                 for k in [k for k in self._sentences if k < floor_idx]:
                     self._sentences.pop(k, None)
             st.prosody.feed(piece)
+        if self._neural is not None:
+            self._neural.feed(idx, piece, self._sr)
 
     def on_playout(self, idx: int, n_samples: int) -> None:
         now = time.monotonic()
@@ -233,7 +241,8 @@ class HandScheduler:
                 self._envs.append(_Envelope(
                     t_apex, self._prep, sem.hold_s,
                     dict(sem.closure), sem.wrist, sem.sides,
-                    wrist_swing=(25.0 if sem.kind == "negation" else 0.0)))
+                    wrist_swing=(25.0 if sem.kind == "negation" else 0.0),
+                    semantic=True))
                 self._apex_log.append(t_apex)
                 return
         if t_apex - self._last_beat_t < self._beat_gap:
@@ -284,18 +293,39 @@ class HandScheduler:
         wr_off = (self._floor.wrist_offsets(now, floor_scale)
                   if floor_scale > 0 else {})
         eng = self._engagement
+        # Phase E blend: a fresh neural frame supplies the TEXTURE (what
+        # beats + floor + engagement supply procedurally); semantic
+        # envelopes always composite on top — meaning stays rule-based.
+        neural_fr = None
+        if (self._neural is not None and speaking
+                and self._cur_idx is not None):
+            st = self._sentences.get(self._cur_idx)
+            if st is not None and st.anchor is not None:
+                t_rel = (now - st.anchor - self._playout_delay
+                         + self._latency)
+                neural_fr = self._neural.frames_for(self._cur_idx, t_rel)
         pose: dict[str, float] = {}
         for side in sides:
-            closure = {f: cl_off.get((side, f), 0.0)
-                       + eng * self._engage_closure
-                       for f in hands.FINGERS}
-            wrist_deg = hands.wrist_deg(side, hands.REST_ORIENT) \
-                + wr_off.get(side, 0.0) \
-                + eng * self._engage_wrist * (1 if side == "right" else -1)
+            if neural_fr is not None:
+                ncl = neural_fr.get("closure", {})
+                closure = {f: float(ncl.get(f, 0.0))
+                           for f in hands.FINGERS}
+                wrist_deg = hands.wrist_deg(side, hands.REST_ORIENT) \
+                    + float(neural_fr.get("wrist_deg", {}).get(side, 0.0))
+            else:
+                closure = {f: cl_off.get((side, f), 0.0)
+                           + eng * self._engage_closure
+                           for f in hands.FINGERS}
+                wrist_deg = hands.wrist_deg(side, hands.REST_ORIENT) \
+                    + wr_off.get(side, 0.0) \
+                    + eng * self._engage_wrist * (
+                        1 if side == "right" else -1)
             wrist_w = 0.0
             for env in self._envs:
                 if side not in env.sides:
                     continue
+                if neural_fr is not None and not env.semantic:
+                    continue          # texture is neural's job right now
                 w = env.weight(now)
                 if w <= 0.0:
                     continue

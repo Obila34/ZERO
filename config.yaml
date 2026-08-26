@@ -1092,6 +1092,15 @@ expression:
       wrist_deg: 1.5
       quiet_rms: 150        # below this ambient RMS the floor ducks to zero
     idle_release_s: 1.5     # quiet this long -> ease open, release the claim
+    # Phase E — neural gesture texture (docs/NEURAL_GESTURES_PLAN.md).
+    # Replaces beats+floor TEXTURE only; semantic shapes and sign stay
+    # rule-based. OFF by default; the A/B gate decides if it ever becomes
+    # the default. url 'mock' = in-process plumbing-test model (NOT AI);
+    # a real sidecar looks like http://<gpu>:8200.
+    neural:
+      enabled: false
+      url: mock
+      timeout_s: 0.8
 
 # ── Motion bus — ONE writer for every joint on the robot ────────────────────
 # Gaze (head), gestures (arms/hands) and sign language all write setpoints
