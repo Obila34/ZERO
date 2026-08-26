@@ -102,6 +102,10 @@ def main() -> int:
     ap.add_argument("--steps", type=int, default=4000)
     ap.add_argument("--lr", type=float, default=3e-4)
     ap.add_argument("--smoke", action="store_true")
+    ap.add_argument("--vel-weight", type=float, default=2.0,
+                    help="velocity-matching loss weight — raise to fight "
+                         "damped/mushy motion (v1 evaluated 0.63x human "
+                         "velocity at 2.0)")
     a = ap.parse_args()
 
     import torch
@@ -140,7 +144,7 @@ def main() -> int:
         vel = torch.nn.functional.l1_loss(
             (p[:, 1:] - p[:, :-1]).abs().mean(),
             (y[:, 1:] - y[:, :-1]).abs().mean())
-        loss = mse + 2.0 * vel
+        loss = mse + a.vel_weight * vel
         opt.zero_grad()
         loss.backward()
         opt.step()
