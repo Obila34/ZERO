@@ -53,12 +53,23 @@ def build_clip(wav_path: Path, npz_path: Path):
         return None
     m = np.load(npz_path)
     fps = float(m["mocap_frame_rate"]) if "mocap_frame_rate" in m else 30.0
-    lh = np.asarray(m["left_hand_pose"], dtype=np.float32).reshape(-1, 45)
-    rh = np.asarray(m["right_hand_pose"], dtype=np.float32).reshape(-1, 45)
-    lw = (np.asarray(m["left_wrist"], dtype=np.float32).reshape(-1, 3)
-          if "left_wrist" in m else None)
-    rw = (np.asarray(m["right_wrist"], dtype=np.float32).reshape(-1, 3)
-          if "right_wrist" in m else None)
+    if "poses" in m:
+        # BEAT2/EMAGE smplxflame_30 schema: one (T, 165) SMPL-X pose
+        # vector. Fixed slices: global 0:3, body 3:66 (21 joints), jaw/
+        # eyes 66:75, left hand 75:120, right hand 120:165. Wrists are
+        # body joints 20/21 -> absolute 60:63 and 63:66.
+        poses = np.asarray(m["poses"], dtype=np.float32).reshape(-1, 165)
+        lh = poses[:, 75:120]
+        rh = poses[:, 120:165]
+        lw = poses[:, 60:63]
+        rw = poses[:, 63:66]
+    else:
+        lh = np.asarray(m["left_hand_pose"], dtype=np.float32).reshape(-1, 45)
+        rh = np.asarray(m["right_hand_pose"], dtype=np.float32).reshape(-1, 45)
+        lw = (np.asarray(m["left_wrist"], dtype=np.float32).reshape(-1, 3)
+              if "left_wrist" in m else None)
+        rw = (np.asarray(m["right_wrist"], dtype=np.float32).reshape(-1, 3)
+              if "right_wrist" in m else None)
     n = min(len(feats), int(len(lh) / fps * FRAME_HZ))
     feats = feats[:n]
     lh = _resample_rows(lh, fps, n).reshape(n, 15, 3)
@@ -79,9 +90,10 @@ def main() -> int:
     wavs = sorted(Path(a.clips_dir).rglob("*.wav"))
     built = skipped = 0
     for wav in wavs:
-        npz = wav.with_suffix("").with_suffix(".smplx.npz") \
-            if wav.suffix == ".wav" else None
         npz = Path(str(wav)[:-4] + ".smplx.npz")
+        if not npz.exists():
+            # BEAT2 layout: .../wave16k/x.wav <-> .../smplxflame_30/x.npz
+            npz = wav.parent.parent / "smplxflame_30" / (wav.stem + ".npz")
         if not npz.exists():
             skipped += 1
             continue
