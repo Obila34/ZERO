@@ -326,7 +326,21 @@ class HandScheduler:
     # ── the tick ─────────────────────────────────────────────────────────────
     def _run(self) -> None:
         dt = 1.0 / max(5.0, self._rate)
+        # Cadence watchdog: on a loaded Pi the 25 Hz tick can degrade to
+        # ~8 Hz (hardware probe 2026-08-26 — thread scheduling, not tick
+        # cost: a render profiles at 0.4 ms). Degradation quantizes beat
+        # delivery, so it must be VISIBLE, not silent.
+        _t_prev = time.monotonic()
+        _slow = 0
         while not self._stop_evt.wait(dt):
+            _t_now = time.monotonic()
+            if _t_now - _t_prev > 2.5 * dt:
+                _slow += 1
+                if _slow in (10, 100) or _slow % 1000 == 0:
+                    log.warning("living-hands tick degraded: %.0f ms "
+                                "interval (want %.0f) — %d slow ticks",
+                                (_t_now - _t_prev) * 1000, dt * 1000, _slow)
+            _t_prev = _t_now
             if self._bus.estopped:
                 # Standing idle targets would be RE-POSTED by the bus the
                 # moment resume() runs — a minutes-old mid-gesture pose
