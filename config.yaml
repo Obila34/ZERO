@@ -1065,8 +1065,11 @@ head:
 expression:
   hands:
     enabled: true
-    latency_ms: 60          # command->motion latency compensated out of each
-                            # apex; refine from black-box measurement (Phase A)
+    latency_ms: 140         # command->motion latency compensated out of each
+                            # apex. MEASURED on hardware 2026-08-26 (probe:
+                            # +137 ms delivery lag on a confirmed beat; raw
+                            # gateway ack is 22 ms — the rest is tick grid,
+                            # render cadence and servo motion).
     playout_delay_ms: 320   # tap-to-audible delay: the playout tap fires when
                             # a piece enters the output pipeline, ~prebuffer_ms
                             # + sink latency before it is HEARD. Tune by ear

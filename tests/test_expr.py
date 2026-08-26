@@ -311,3 +311,36 @@ def test_gestures_chain_across_sentences_via_engagement():
     time.sleep(0.1)
     assert abs(t.posted["left_indexp1_joint"] - 90.0) < 2.0, "did not park"
     sched.stop()
+
+
+def test_simultaneously_detected_accents_all_become_beats():
+    """Hardware probe regression (2026-08-26): analysis returning a whole
+    sentence's accents in one poll must yield a beat for EACH — the old
+    spawn-time rate limiter dropped all but the first."""
+    bus, t = _bus()
+    sched = _sched(bus, {"expression.hands.beat.min_gap_s": 0.3})
+    # one long sentence, three well-separated accents, audio fully pre-fed
+    x = np.zeros(int(3.2 * SR), dtype=np.float32)
+
+    def place(tt0, f0, amp, blen):
+        n = int(blen * SR)
+        ts = np.arange(n) / SR
+        f = f0 * (1 + 0.3 * np.sin(np.pi * ts / blen))
+        sig = np.hanning(n) * amp * np.sin(2 * np.pi * np.cumsum(f) / SR)
+        i = int(tt0 * SR)
+        x[i:i + n] += sig[:len(x) - i]
+
+    for tt in (0.2, 0.5, 1.3, 2.4):
+        place(tt, 140, 0.15, 0.14)
+    for a in (0.8, 1.7, 2.7):
+        place(a - 0.09, 185, 0.5, 0.18)
+    x += 0.003 * np.random.randn(len(x)).astype(np.float32)
+    sched.on_audio(0, "one TWO three FOUR five SIX", x, SR)
+    hop = int(0.05 * SR)
+    for i in range(0, len(x), hop):
+        sched.on_playout(0, hop)
+        time.sleep(0.05)
+    time.sleep(0.5)
+    n_apex = len(sched._apex_log)
+    sched.stop()
+    assert n_apex >= 3, f"only {n_apex} of 3 accents became beats"

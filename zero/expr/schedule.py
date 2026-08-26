@@ -206,8 +206,14 @@ class HandScheduler:
                       - self._latency)
             if t_apex < now - 0.15:
                 continue                      # too stale even to degrade
-            if t_apex - now > 10.0:
-                remaining.append(t_rel)       # far future: keep pending
+            if t_apex - now > self._prep + 0.25:
+                # NOT DUE YET: stay pending. Spawning everything the moment
+                # it was detected pushed every accent after the first into
+                # the beat-gap check in the same tick — and they were
+                # DROPPED, not deferred: a whole sentence's beats vanished
+                # whenever analysis returned them together (hardware probe,
+                # 2026-08-26: scheduler planned 1 apex of 3).
+                remaining.append(t_rel)
                 continue
             self._spawn_for(st, t_rel, max(t_apex, now + 0.02), now)
         st.accents_pending = remaining
@@ -230,9 +236,9 @@ class HandScheduler:
                     wrist_swing=(25.0 if sem.kind == "negation" else 0.0)))
                 self._apex_log.append(t_apex)
                 return
-        if now - self._last_beat_t < self._beat_gap:
-            return
-        self._last_beat_t = now
+        if t_apex - self._last_beat_t < self._beat_gap:
+            return          # two apexes can't land closer than the gap
+        self._last_beat_t = t_apex
         self._engagement = min(1.0, self._engagement + 0.5)
         # A stale accent still RAMPS over ~0.1 s from now — an attack
         # window already mostly elapsed made the first render jump near

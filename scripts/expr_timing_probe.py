@@ -120,12 +120,15 @@ def main() -> int:
         if v is not None:
             trace.append((now, v))
         time.sleep(0.02)
+    planned_sched = [t - t_mono0 for t in sched._apex_log]
     sched.stop()
     rows = [(t_anchor + t, v) for t, v in trace]
     if not rows:
         print("\nNo acked index posts — did the hands move?")
         return 1
     print(f"\ntrace: {len(rows)} acked samples at 20 ms")
+    print("scheduler's own planned apexes:",
+          [round(t, 2) for t in planned_sched])
     # find local minima (deepest curl) per accent window
     planned = [a + playout_delay / 1000.0 - latency_ms / 1000.0
                for a in accents]
