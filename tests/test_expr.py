@@ -452,3 +452,85 @@ def test_gesture_sidecar_server_roundtrip():
     finally:
         proc.terminate()
         proc.wait(timeout=3)
+
+
+# ── Phase E N2/N3: retarget, features, model ────────────────────────────────
+
+def test_retarget_closure_bounds_and_monotonicity():
+    from zero.expr.retarget import (hand_pose_to_closure,
+                                    sequence_to_targets, wrist_pose_to_deg)
+
+    flat = np.zeros((15, 3), dtype=np.float32)
+    open_c = hand_pose_to_closure(flat)
+    assert all(v == 0.0 for v in open_c.values())
+    # more index flexion -> more index closure, bounded at 1
+    a = flat.copy(); a[0:3, 0] = 0.8
+    b = flat.copy(); b[0:3, 0] = 2.0
+    assert hand_pose_to_closure(a)["index"] < hand_pose_to_closure(b)["index"] <= 1.0
+    # negative (hyperextension) never goes below 0
+    c = flat.copy(); c[0:3, 0] = -1.0
+    assert hand_pose_to_closure(c)["index"] == 0.0
+    assert abs(wrist_pose_to_deg(np.array([0.5, 0, 0]))) <= 45.0
+    seq = sequence_to_targets(np.zeros((4, 15, 3)), np.zeros((4, 15, 3)))
+    assert seq.shape == (4, 12) and (seq == 0).all()
+
+
+def test_features_deterministic_and_shaped():
+    from zero.expr.features import FEAT_DIM, FRAME_HZ, extract
+
+    audio = _stress_sentence()
+    f1, f2 = extract(audio, SR), extract(audio, SR)
+    assert f1.shape[1] == FEAT_DIM
+    assert abs(len(f1) - len(audio) / SR * FRAME_HZ) <= 2
+    assert np.allclose(f1, f2)
+    assert np.isfinite(f1).all()
+
+
+def test_gesture_tcn_smoke_train_and_serve_caps():
+    import importlib.util
+    if importlib.util.find_spec("torch") is None:
+        import pytest
+        pytest.skip("torch not installed")
+    import subprocess, sys as _sys, tempfile
+
+    with tempfile.TemporaryDirectory() as td:
+        ck = f"{td}/tcn.pt"
+        r = subprocess.run(
+            [_sys.executable, "scripts/neural_train.py", "--smoke",
+             "--steps", "30", "--out", ck],
+            capture_output=True, text=True, timeout=300)
+        assert r.returncode == 0, r.stdout + r.stderr
+        from zero.expr.model import TCNServeModel
+        m = TCNServeModel(ck)
+        frames = m.frames(_stress_sentence(), SR)
+        assert frames, "serve model produced no frames"
+        for fr in frames:
+            assert all(0.0 <= v <= m.TEXTURE_CAP
+                       for v in fr["closure"].values())
+            assert all(abs(v) <= m.WRIST_CAP_DEG
+                       for v in fr["wrist_deg"].values())
+
+
+def test_dataset_builder_on_synthetic_fixture(tmp_path):
+    import soundfile as sf
+    import subprocess, sys as _sys
+
+    clips = tmp_path / "clips"
+    clips.mkdir()
+    audio = _stress_sentence(dur=3.0)
+    sf.write(clips / "clip1.wav", audio, SR)
+    n_mocap = int(3.0 * 30)
+    np.savez(clips / "clip1.smplx.npz",
+             left_hand_pose=np.random.rand(n_mocap, 45).astype(np.float32) * 0.5,
+             right_hand_pose=np.random.rand(n_mocap, 45).astype(np.float32) * 0.5,
+             mocap_frame_rate=30.0)
+    out = tmp_path / "shards"
+    r = subprocess.run(
+        [_sys.executable, "scripts/neural_dataset.py", str(clips),
+         "--out", str(out)],
+        capture_output=True, text=True, timeout=120)
+    assert r.returncode == 0, r.stdout + r.stderr
+    d = np.load(out / "clip1.npz")
+    assert d["feats"].shape[0] == d["targets"].shape[0] > 40
+    assert d["targets"].shape[1] == 12
+    assert (d["targets"][:, :10] >= 0).all() and (d["targets"][:, :10] <= 1).all()

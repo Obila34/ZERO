@@ -24,7 +24,17 @@ import numpy as np  # noqa: E402
 
 from zero.expr.neural import EnergyMockModel  # noqa: E402
 
-MODELS = {"mock": EnergyMockModel}
+
+def _tcn_factory():
+    # lazy: torch only loads when the tcn model is requested
+    from zero.expr.model import TCNServeModel
+
+    ckpt = os.environ.get("GESTURE_CKPT", "models/gesture/tcn_v1.pt")
+    device = os.environ.get("GESTURE_DEVICE", "cpu")
+    return TCNServeModel(ckpt, device=device)
+
+
+MODELS = {"mock": EnergyMockModel, "tcn": _tcn_factory}
 _model = None
 _model_name = "?"
 
