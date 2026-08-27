@@ -67,17 +67,28 @@ def main() -> int:
     from zero.arms.driver import load_joints, make_arm_driver
     make_arm_driver(cfg, load_joints(cfg))
     # Encoderless steppers stay MUTE until the gateway's stored zero
-    # offsets are read — commanding without them lands wherever the
-    # offset says. Wait for them.
-    deadline = time.monotonic() + 10.0
+    # offsets are read — and the bus only FETCHES offsets when a stepper
+    # write is pending (deliberate: no idle polling of a possibly-broken
+    # endpoint). Prime it by writing each stepper's HOME — zero motion,
+    # the arms are already at rest — then wait for the offsets to load.
+    prime = {}
+    for n, _ in JOINTS:
+        spec = bus.spec(n)
+        if spec is not None:
+            prime[n] = spec.home_deg
+    if prime:
+        bus.write("gesture", prime)
+    deadline = time.monotonic() + 15.0
     while getattr(bus, "_offsets", None) is None \
             and time.monotonic() < deadline:
         time.sleep(0.25)
+    bus.release("gesture")
     if getattr(bus, "_offsets", None) is None:
         print("stepper zero offsets never arrived from the gateway — "
               "stepper commands would stay mute. Abort (is the AF-1 "
               "gateway up?).")
         return 1
+    print("stepper offsets loaded — steppers are live.")
 
     present = [(n, d) for n, d in JOINTS if bus.spec(n) is not None]
     if not present:
