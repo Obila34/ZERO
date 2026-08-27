@@ -1116,7 +1116,11 @@ expression:
   # below. E-stop, envelopes, speed walking and the black box all apply
   # unchanged — this layer only writes the idle track, lowest priority.
   arms:
-    enabled: false
+    enabled: true           # ENABLED 2026-08-27: operator ran the
+                            # supervised stream probe — all six stepper
+                            # joints passed (smooth, correct direction,
+                            # clean return to rest) — and accepted
+                            # unsupervised gesture motion within max_deg.
     elbow_deg: 9.0          # forearm lift at full engagement
     raise_deg: 4.0          # shoulder up/down share
     sway_deg: 1.5           # slow breathing sway amplitude (elbow)
