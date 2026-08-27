@@ -62,7 +62,22 @@ def main() -> int:
         print("motion.driver is not http — nothing would move. Abort.")
         return 1
     bus = get_bus(cfg)
-    time.sleep(1.0)          # let offsets load before steppers unmute
+    # Register the arm joints EXACTLY the way production does — through
+    # the arms driver (envelopes, offsets, stepper walking all included).
+    from zero.arms.driver import load_joints, make_arm_driver
+    make_arm_driver(cfg, load_joints(cfg))
+    # Encoderless steppers stay MUTE until the gateway's stored zero
+    # offsets are read — commanding without them lands wherever the
+    # offset says. Wait for them.
+    deadline = time.monotonic() + 10.0
+    while getattr(bus, "_offsets", None) is None \
+            and time.monotonic() < deadline:
+        time.sleep(0.25)
+    if getattr(bus, "_offsets", None) is None:
+        print("stepper zero offsets never arrived from the gateway — "
+              "stepper commands would stay mute. Abort (is the AF-1 "
+              "gateway up?).")
+        return 1
 
     present = [(n, d) for n, d in JOINTS if bus.spec(n) is not None]
     if not present:
