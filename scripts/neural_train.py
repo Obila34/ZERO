@@ -5,10 +5,12 @@
     python scripts/neural_train.py --smoke        # synthetic end-to-end check
 
 Loss = MSE on targets + PER-FRAME velocity L1 + PER-FRAME acceleration L1
-(v1/v2 used a scalar mean-velocity match — literature and our own eval
-agree it barely fights mean-collapse; matching the frame-by-frame motion
-derivative does), plus a per-sequence noise latent the model can attribute
-style to instead of averaging styles away. Eval prints the metrics the
++ a motion-energy match (closures/wrists separately). The per-frame terms
+teach WHEN and HOW motion happens (v1/v2's scalar-only match couldn't:
+0.63x human speed); the energy term forbids the degenerate answer of
+stillness-when-unsure the per-frame terms alone reward (0.11x without
+it). A per-sequence noise latent lets the model commit to one style
+instead of averaging styles away. Eval prints the metrics the
 plan commits to before any robot time:
   * velocity distribution ratio vs data (want ~1, mush -> ~0)
   * beat alignment: lag of the peak audio-energy/motion-speed
@@ -128,6 +130,12 @@ def main() -> int:
     ap.add_argument("--acc-weight", type=float, default=0.5,
                     help="per-frame acceleration L1 weight — sharpness "
                          "of direction changes, the 'snap' of a beat")
+    ap.add_argument("--mag-weight", type=float, default=4.0,
+                    help="motion-energy matching weight (closures and "
+                         "wrists separately). Per-frame derivative "
+                         "losses alone teach stillness when the model "
+                         "is unsure — v3's first cut moved at 0.11x "
+                         "human speed without this term")
     ap.add_argument("--noise-dim", type=int, default=8,
                     help="style-latent channels (0 disables); recorded "
                          "in the checkpoint and re-seeded per sentence "
@@ -175,13 +183,24 @@ def main() -> int:
         vel = torch.nn.functional.l1_loss(dp, dy)
         acc = torch.nn.functional.l1_loss(dp[:, 1:] - dp[:, :-1],
                                           dy[:, 1:] - dy[:, :-1])
-        loss = mse + a.vel_weight * vel + a.acc_weight * acc
+        # motion-energy match per item, closures and wrists separately
+        # (wrists are 2 of 12 dims — pooled they'd drown): the per-frame
+        # terms teach WHEN to move, this one forbids going still overall
+        mag = (torch.nn.functional.l1_loss(
+                   dp[..., :10].abs().mean(dim=(1, 2)),
+                   dy[..., :10].abs().mean(dim=(1, 2)))
+               + torch.nn.functional.l1_loss(
+                   dp[..., 10:].abs().mean(dim=(1, 2)),
+                   dy[..., 10:].abs().mean(dim=(1, 2))))
+        loss = (mse + a.vel_weight * vel + a.acc_weight * acc
+                + a.mag_weight * mag)
         opt.zero_grad()
         loss.backward()
         opt.step()
         if step % max(1, a.steps // 10) == 0:
             print(f"  step {step:5d}  mse {mse.item():.4f}  "
-                  f"vel {vel.item():.4f}  acc {acc.item():.4f}")
+                  f"vel {vel.item():.4f}  acc {acc.item():.4f}  "
+                  f"mag {mag.item():.4f}")
     model.eval()
     metrics = evaluate(model, vx, vy, device)
     print(f"\neval: {metrics}")
