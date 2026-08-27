@@ -20,7 +20,12 @@ _CHANNELS = 96
 _LAYERS = 6          # dilations 1..32 -> ~3.2 s receptive field at 20 Hz
 
 
-def build_model():
+def build_model(noise_dim: int = 0):
+    """noise_dim > 0 adds a style-latent input channel (anti-mean-collapse:
+    a deterministic audio->pose map trained with MSE regresses to the mean
+    gesture; giving the model a latent to 'blame' diversity on lets it
+    commit to one lively trajectory per sample — Gesticulator/Audio2Gestures
+    lineage). The latent is one vector per sequence, broadcast over time."""
     import torch.nn as nn
 
     class _Block(nn.Module):
@@ -40,14 +45,24 @@ def build_model():
     class GestureTCN(nn.Module):
         def __init__(self):
             super().__init__()
-            self.inp = nn.Conv1d(FEAT_DIM, _CHANNELS, 1)
+            self.noise_dim = int(noise_dim)
+            self.inp = nn.Conv1d(FEAT_DIM + self.noise_dim, _CHANNELS, 1)
             self.blocks = nn.ModuleList(
                 [_Block(_CHANNELS, 2 ** i) for i in range(_LAYERS)])
             self.out = nn.Conv1d(_CHANNELS, TARGET_DIM, 1)
 
-        def forward(self, feats):                # (B, T, FEAT) -> (B, T, 12)
+        def forward(self, feats, noise=None):    # (B, T, FEAT) -> (B, T, 12)
             import torch
 
+            if self.noise_dim:
+                if noise is None:
+                    noise = torch.zeros(feats.shape[0], self.noise_dim,
+                                        device=feats.device,
+                                        dtype=feats.dtype)
+                feats = torch.cat(
+                    [feats,
+                     noise[:, None, :].expand(-1, feats.shape[1], -1)],
+                    dim=-1)
             x = self.inp(feats.transpose(1, 2))
             for b in self.blocks:
                 x = b(x)
@@ -64,6 +79,7 @@ def save_checkpoint(model, path: str, meta: dict | None = None) -> None:
 
     torch.save({"state": model.state_dict(),
                 "feat_dim": FEAT_DIM, "target_dim": TARGET_DIM,
+                "noise_dim": int(getattr(model, "noise_dim", 0)),
                 "meta": meta or {}}, path)
 
 
@@ -72,7 +88,7 @@ def load_checkpoint(path: str):
 
     ck = torch.load(path, map_location="cpu", weights_only=False)
     assert ck["feat_dim"] == FEAT_DIM, "checkpoint/feature mismatch"
-    m = build_model()
+    m = build_model(noise_dim=int(ck.get("noise_dim", 0)))
     m.load_state_dict(ck["state"])
     m.eval()
     return m
@@ -88,7 +104,9 @@ class TCNServeModel:
 
     FRAME_HZ = FRAME_HZ
     TEXTURE_CAP = 0.35
-    WRIST_CAP_DEG = 6.0
+    # Shard audit 2026-08-27: wrist targets carry real signal (~13.5 deg
+    # std in BEAT2) — the old 6 deg cap was muting most of it.
+    WRIST_CAP_DEG = 10.0
 
     def __init__(self, checkpoint: str, device: str = "cpu"):
         import torch
@@ -97,7 +115,8 @@ class TCNServeModel:
         self._model = load_checkpoint(checkpoint).to(device)
         self._device = device
 
-    def frames(self, audio: np.ndarray, sr: int) -> list[dict]:
+    def frames(self, audio: np.ndarray, sr: int,
+               seed: int = 0) -> list[dict]:
         from zero.expr.features import extract
 
         feats = extract(audio, sr)
@@ -105,18 +124,35 @@ class TCNServeModel:
             return []
         with self._torch.no_grad():
             x = self._torch.from_numpy(feats[None]).to(self._device)
-            y = self._model(x)[0].cpu().numpy()
+            noise = None
+            nd = getattr(self._model, "noise_dim", 0)
+            if nd:
+                # Style latent, seeded by sentence id: the SAME sentence
+                # must re-render identical frames on every incremental
+                # poll (audio-so-far grows, prefix must not flicker),
+                # while different sentences get different styles.
+                z = np.random.default_rng(int(seed)).normal(
+                    size=(1, nd)).astype(np.float32)
+                noise = self._torch.from_numpy(z).to(self._device)
+            y = self._model(x, noise)[0].cpu().numpy()
         fingers = ("thumb", "index", "middle", "ring", "pinky")
         out = []
         for t in range(len(y)):
-            # both hands' closures averaged into the (symmetric) texture
-            # frame the client consumes; per-side wrists kept
-            cl = {f: float(np.clip(
-                0.5 * (y[t, k] + y[t, 5 + k]) * self.TEXTURE_CAP,
-                0.0, self.TEXTURE_CAP)) for k, f in enumerate(fingers)}
+            # Per-hand closures: BEAT2 left/right closure correlation is
+            # 0.04 (audit 2026-08-27) — averaging the sides erased nearly
+            # all of the human asymmetry. `closure` (the mean) stays for
+            # older clients; new renderers read closure_l/closure_r.
+            cl_l = {f: float(np.clip(y[t, k] * self.TEXTURE_CAP,
+                                     0.0, self.TEXTURE_CAP))
+                    for k, f in enumerate(fingers)}
+            cl_r = {f: float(np.clip(y[t, 5 + k] * self.TEXTURE_CAP,
+                                     0.0, self.TEXTURE_CAP))
+                    for k, f in enumerate(fingers)}
             out.append({
                 "t": round(t / self.FRAME_HZ, 3),
-                "closure": cl,
+                "closure": {f: 0.5 * (cl_l[f] + cl_r[f]) for f in fingers},
+                "closure_l": cl_l,
+                "closure_r": cl_r,
                 "wrist_deg": {
                     "left": float(np.clip(y[t, 10] * 45.0,
                                           -self.WRIST_CAP_DEG,

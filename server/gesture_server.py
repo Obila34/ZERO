@@ -66,7 +66,10 @@ class Handler(BaseHTTPRequestHandler):
             req = json.loads(self.rfile.read(n).decode())
             audio = np.frombuffer(bytes.fromhex(req["audio"]),
                                   dtype=np.float16).astype(np.float32)
-            frames = _model.frames(audio, int(req["sr"]))
+            # sentence id doubles as the style-latent seed: same sentence
+            # -> same frames on every incremental poll (no flicker)
+            frames = _model.frames(audio, int(req["sr"]),
+                                   seed=int(req.get("sentence", 0)))
             self._json(200, {"frames": frames})
         except Exception as e:
             self._json(500, {"ok": False, "error": str(e)})

@@ -10,6 +10,11 @@ here; that rule is the plan's, not a preference.
     .venv/bin/python scripts/gesture_ab.py --neural-url http://<gpu>:8200
     .venv/bin/python scripts/gesture_ab.py --neural-url mock   # plumbing only
 
+Model-vs-model (every retrain faces the incumbent blind, same rule):
+
+    .venv/bin/python scripts/gesture_ab.py \
+        --neural-url http://<gpu>:8200 --b-url http://<gpu>:8201
+
 MOVES THE HANDS. Run on the Pi, eyes on the robot.
 """
 from __future__ import annotations
@@ -112,6 +117,10 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--neural-url", required=True,
                     help="sidecar URL, or 'mock' (plumbing test only)")
+    ap.add_argument("--b-url", default=None,
+                    help="second sidecar URL: judge --neural-url (A) vs "
+                         "--b-url (B) instead of procedural vs neural — "
+                         "run the challenger checkpoint on another port")
     ap.add_argument("--trials", type=int, default=4)
     a = ap.parse_args()
 
@@ -128,6 +137,13 @@ def main() -> int:
             bus.register(BusJoint(name, min_deg=sp["min"], max_deg=sp["max"],
                                   home_deg=sp["home"], batch=True))
 
+    # contestant name -> neural url (None = procedural rendition)
+    if a.b_url:
+        contest = {"A(incumbent)": a.neural_url, "B(challenger)": a.b_url}
+    else:
+        contest = {"procedural": None, "neural": a.neural_url}
+    names = list(contest)
+
     rng = random.Random()
     results = []
     print(f"{a.trials} trial(s); each plays the SAME utterance twice.\n"
@@ -135,14 +151,13 @@ def main() -> int:
     for k in range(a.trials):
         text, accents = SENTENCES[k % len(SENTENCES)]
         audio = make_audio(accents)
-        order = ["procedural", "neural"]
+        order = list(names)
         rng.shuffle(order)
         for j, mode in enumerate(order, 1):
             input(f"\ntrial {k+1}, rendition {j}: EYES ON THE HANDS, "
                   "then press Enter to play (~6 s)... ")
             print("  playing...")
-            play(cfg, bus, text,
-                 audio, a.neural_url if mode == "neural" else None)
+            play(cfg, bus, text, audio, contest[mode])
             print("  done.")
         ans = ""
         while ans not in ("1", "2", "t"):
@@ -151,12 +166,19 @@ def main() -> int:
         results.append(winner)
         print()
     reset_bus()
-    n_p = results.count("procedural")
-    n_n = results.count("neural")
+    n_a = results.count(names[0])
+    n_b = results.count(names[1])
     n_t = results.count("tie")
     print("=" * 50)
-    print(f"UNBLINDED: procedural {n_p} · neural {n_n} · ties {n_t}")
-    if n_n > n_p:
+    print(f"UNBLINDED: {names[0]} {n_a} · {names[1]} {n_b} · ties {n_t}")
+    if a.b_url:
+        if n_b > n_a:
+            print("Challenger WINS — point GESTURE_CKPT at the new "
+                  "checkpoint and restart the sidecar.")
+        else:
+            print("Challenger does not win — the incumbent stays, "
+                  "by the plan's own gate.")
+    elif n_b > n_a:
         print("Neural WINS this round — it may be promoted "
               "(expression.hands.neural.enabled: true).")
     else:

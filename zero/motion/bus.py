@@ -265,6 +265,15 @@ class MotionBus:
 
     # ── the clock ────────────────────────────────────────────────────────────
     def _run(self) -> None:
+        # Best-effort realtime priority: this thread carries every joint
+        # command on the robot. No-op without CAP_SYS_NICE (grant via a
+        # systemd drop-in: [Service] AmbientCapabilities=CAP_SYS_NICE).
+        try:
+            import os
+            os.sched_setscheduler(0, os.SCHED_FIFO, os.sched_param(11))
+            log.info("motion-bus: realtime priority acquired")
+        except (PermissionError, OSError, AttributeError):
+            pass
         while not self._stop_evt.is_set():
             self._wake.wait(timeout=0.5)
             self._wake.clear()

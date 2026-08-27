@@ -40,7 +40,8 @@ class EnergyMockModel:
     FRAME_HZ = 20.0
     FINGERS = ("thumb", "index", "middle", "ring", "pinky")
 
-    def frames(self, audio: np.ndarray, sr: int) -> list[dict]:
+    def frames(self, audio: np.ndarray, sr: int,
+               seed: int = 0) -> list[dict]:
         x = np.asarray(audio, dtype=np.float32).reshape(-1)
         hop = max(1, int(sr / self.FRAME_HZ))
         n = len(x) // hop
@@ -52,12 +53,22 @@ class EnergyMockModel:
         out = []
         for i, e in enumerate(env):
             t = i / self.FRAME_HZ
-            cl = {}
+            # right hand rides a ~250 ms delayed envelope and shifted
+            # phase: the mock must exercise the genuinely-per-side path
+            # the real model now uses (hands lead/lag in human data)
+            er = env[max(0, i - 5)]
+            cl_l, cl_r = {}, {}
             for k, f in enumerate(self.FINGERS):
                 phase = 1.7 * t + 0.9 * k
-                cl[f] = float(np.clip(
+                cl_l[f] = float(np.clip(
                     0.10 * e * (1.0 + 0.6 * np.sin(phase)), 0.0, 0.35))
-            out.append({"t": round(t, 3), "closure": cl,
+                cl_r[f] = float(np.clip(
+                    0.10 * er * (1.0 + 0.6 * np.sin(phase + 1.3)),
+                    0.0, 0.35))
+            out.append({"t": round(t, 3),
+                        "closure": {f: 0.5 * (cl_l[f] + cl_r[f])
+                                    for f in self.FINGERS},
+                        "closure_l": cl_l, "closure_r": cl_r,
                         "wrist_deg": {"left": float(-3.0 * e),
                                       "right": float(3.0 * e)}})
         return out
@@ -141,7 +152,7 @@ class NeuralGestureClient:
             return
         try:
             if self._mock is not None:
-                frames = self._mock.frames(audio, sr)
+                frames = self._mock.frames(audio, sr, seed=idx)
             else:
                 body = json.dumps({
                     "sentence": idx, "sr": sr,

@@ -384,6 +384,44 @@ def test_neural_mock_texture_drives_hands_and_semantic_composites():
     assert pinky and min(pinky) < 30.0, "semantic count lost under neural"
 
 
+def test_neural_per_hand_frames_render_asymmetric_hands():
+    """BEAT2's hands are nearly independent (L/R closure corr 0.04);
+    frames carrying closure_l/closure_r must reach the wire per side,
+    not averaged back into a mirror."""
+    import numpy as np
+    from zero.expr.neural import NeuralGestureClient
+
+    bus, t = _bus()
+    ncfg = FakeCfg({"expression.hands.neural.url": "mock"})
+    client = NeuralGestureClient(ncfg)
+    cfg = FakeCfg({"expression.hands.rate_hz": 100.0,
+                   "expression.hands.latency_ms": 0.0,
+                   "expression.hands.playout_delay_ms": 0.0,
+                   "expression.hands.idle_release_s": 0.4})
+    sched = HandScheduler(cfg, bus, neural=client)
+    audio = _stress_sentence()
+    sched.on_audio(0, "and it kept going after that", audio, SR)
+    time.sleep(0.5)
+    hop = int(0.05 * SR)
+    for i in range(0, len(audio), hop):
+        sched.on_playout(0, hop)
+        time.sleep(0.05)
+    sched.stop()
+    client.stop()
+    li = [p["left_indexp1_joint"] for p in t.posts
+          if "left_indexp1_joint" in p and "right_indexp1_joint" in p]
+    ri = [p["right_indexp1_joint"] for p in t.posts
+          if "left_indexp1_joint" in p and "right_indexp1_joint" in p]
+    assert len(li) >= 8, "not enough paired posts to judge"
+    li, ri = np.asarray(li), np.asarray(ri)
+    assert li.std() > 1e-3 and ri.std() > 1e-3, "a hand never moved"
+    # a symmetric render maps ONE closure through two linear calibrations:
+    # |correlation| would be ~1. The mock's per-side phase offset must
+    # survive to the wire as genuinely decorrelated fingers.
+    corr = abs(float(np.corrcoef(li, ri)[0, 1]))
+    assert corr < 0.95, f"hands still mirrored (|corr|={corr:.3f})"
+
+
 def test_neural_dead_sidecar_falls_back_to_procedural_seamlessly():
     from zero.expr.neural import NeuralGestureClient
 
@@ -505,10 +543,20 @@ def test_gesture_tcn_smoke_train_and_serve_caps():
         frames = m.frames(_stress_sentence(), SR)
         assert frames, "serve model produced no frames"
         for fr in frames:
-            assert all(0.0 <= v <= m.TEXTURE_CAP
-                       for v in fr["closure"].values())
+            for key in ("closure", "closure_l", "closure_r"):
+                assert all(0.0 <= v <= m.TEXTURE_CAP
+                           for v in fr[key].values()), key
             assert all(abs(v) <= m.WRIST_CAP_DEG
                        for v in fr["wrist_deg"].values())
+        # the style latent must be deterministic per sentence seed (an
+        # incremental re-poll of the same sentence CANNOT flicker) and
+        # different across sentences
+        audio = _stress_sentence()
+        a1 = m.frames(audio, SR, seed=1)
+        a2 = m.frames(audio, SR, seed=1)
+        b = m.frames(audio, SR, seed=2)
+        assert a1 == a2, "same seed must reproduce identical frames"
+        assert a1 != b, "different sentences must get different styles"
 
 
 def test_dataset_builder_on_synthetic_fixture(tmp_path):

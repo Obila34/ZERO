@@ -160,9 +160,20 @@ class HandScheduler:
         self._lock = threading.Lock()
         self._stop_evt = threading.Event()
         self._apex_log: list[float] = []   # planned apex times
+        # Fresh accents flow analysis-thread -> tick through this list.
+        self._fresh: list[tuple] = []
         self._thread = threading.Thread(target=self._run, name="living-hands",
                                         daemon=True)
         self._thread.start()
+        # THE CADENCE FIX (hardware probe 2026-08-26): prosody analysis
+        # (30-100 ms on the Pi) used to run ON the render tick — during
+        # speech, precisely when beats fire, the 25 Hz tick degraded to
+        # ~8 Hz and quantized delivery into ~120 ms plateaus. Analysis now
+        # owns its own thread; the tick is pure sub-millisecond math.
+        self._analysis = threading.Thread(target=self._run_analysis,
+                                          name="living-hands-analysis",
+                                          daemon=True)
+        self._analysis.start()
 
     # ── SpeechTap listener interface ─────────────────────────────────────────
     def on_audio(self, idx: int, sentence: str, piece, sr: int) -> None:
@@ -307,7 +318,11 @@ class HandScheduler:
         pose: dict[str, float] = {}
         for side in sides:
             if neural_fr is not None:
-                ncl = neural_fr.get("closure", {})
+                # per-hand texture when the frame carries it (v3+ models);
+                # symmetric `closure` is the back-compat fallback
+                ncl = neural_fr.get(
+                    "closure_l" if side == "left" else "closure_r") \
+                    or neural_fr.get("closure", {})
                 closure = {f: float(ncl.get(f, 0.0))
                            for f in hands.FINGERS}
                 wrist_deg = hands.wrist_deg(side, hands.REST_ORIENT) \
@@ -353,8 +368,38 @@ class HandScheduler:
             return {}
         return pose
 
+    # ── analysis thread: polls prosody, never touches the render ────────────
+    def _run_analysis(self) -> None:
+        while not self._stop_evt.wait(0.1):
+            with self._lock:
+                speaking = time.monotonic() - self._last_playout < 0.5
+                snapshot = list(self._sentences.values()) if speaking else []
+            fresh: list[tuple] = []
+            for st in snapshot:
+                for t_rel in st.prosody.poll():     # the 30-100 ms call
+                    fresh.append((st, t_rel))
+            if fresh:
+                with self._lock:
+                    self._fresh.extend(fresh)
+
+    @staticmethod
+    def _try_elevate_priority() -> None:
+        """Best-effort realtime priority for THIS thread. Works when the
+        service grants CAP_SYS_NICE (systemd drop-in:
+        [Service] AmbientCapabilities=CAP_SYS_NICE); silently a no-op
+        otherwise — degraded cadence is logged by the watchdog either
+        way, never hidden."""
+        try:
+            import os
+            os.sched_setscheduler(
+                0, os.SCHED_FIFO, os.sched_param(10))
+            log.info("living-hands tick: realtime priority acquired")
+        except (PermissionError, OSError, AttributeError):
+            pass
+
     # ── the tick ─────────────────────────────────────────────────────────────
     def _run(self) -> None:
+        self._try_elevate_priority()
         dt = 1.0 / max(5.0, self._rate)
         # Cadence watchdog: on a loaded Pi the 25 Hz tick can degrade to
         # ~8 Hz (hardware probe 2026-08-26 — thread scheduling, not tick
@@ -392,15 +437,8 @@ class HandScheduler:
             # RollingProsody.poll is safe without the scheduler lock: feed()
             # REPLACES its buffer reference, poll() snapshots it once.
             with self._lock:
-                snapshot = list(self._sentences.values())
                 speaking = now - self._last_playout < 0.5
-            fresh: list[tuple] = []
-            if speaking:
-                for st in snapshot:
-                    for t_rel in st.prosody.poll():
-                        fresh.append((st, t_rel))
-            with self._lock:
-                speaking = now - self._last_playout < 0.5
+                fresh, self._fresh = self._fresh, []
                 if not speaking:
                     # Playout ceased (sentence over, or barge-in): pending
                     # accents are dropped; live envelopes TURN AROUND from

@@ -4,13 +4,18 @@
     python scripts/neural_train.py data/gesture_shards --out models/gesture/tcn_v1.pt
     python scripts/neural_train.py --smoke        # synthetic end-to-end check
 
-Loss = MSE on targets + a velocity-matching term (the texture must MOVE
-like the data, not just sit at its mean — plain MSE regresses gesture to
-mush; velocity matching is the cheap defence). Eval prints the two
-metrics the plan commits to before any robot time:
+Loss = MSE on targets + PER-FRAME velocity L1 + PER-FRAME acceleration L1
+(v1/v2 used a scalar mean-velocity match — literature and our own eval
+agree it barely fights mean-collapse; matching the frame-by-frame motion
+derivative does), plus a per-sequence noise latent the model can attribute
+style to instead of averaging styles away. Eval prints the metrics the
+plan commits to before any robot time:
   * velocity distribution ratio vs data (want ~1, mush -> ~0)
   * beat alignment: lag of the peak audio-energy/motion-speed
     cross-correlation (want |lag| <= 150 ms)
+  * L/R asymmetry: left-right closure correlation (BEAT2 ground truth
+    ~0.04 — near 1.0 means the model mirrors, humans don't)
+  * wrist velocity ratio vs data (the wrists must move too)
 """
 from __future__ import annotations
 
@@ -74,14 +79,25 @@ def _windows(xs, ys, rng):
 def evaluate(model, xs, ys, device) -> dict:
     import torch
 
+    nd = getattr(model, "noise_dim", 0)
     vel_pred, vel_true, lags = [], [], []
+    wvel_pred, wvel_true, asym = [], [], []
     with torch.no_grad():
-        for x, y in zip(xs, ys):
-            p = model(torch.from_numpy(x[None]).to(device))[0].cpu().numpy()
-            vp = np.abs(np.diff(p[:, :10], axis=0)).mean()
-            vt = np.abs(np.diff(y[:, :10], axis=0)).mean()
-            vel_pred.append(vp)
-            vel_true.append(vt)
+        for i, (x, y) in enumerate(zip(xs, ys)):
+            noise = None
+            if nd:
+                z = np.random.default_rng(i).normal(
+                    size=(1, nd)).astype(np.float32)
+                noise = torch.from_numpy(z).to(device)
+            p = model(torch.from_numpy(x[None]).to(device),
+                      noise)[0].cpu().numpy()
+            vel_pred.append(np.abs(np.diff(p[:, :10], axis=0)).mean())
+            vel_true.append(np.abs(np.diff(y[:, :10], axis=0)).mean())
+            wvel_pred.append(np.abs(np.diff(p[:, 10:], axis=0)).mean())
+            wvel_true.append(np.abs(np.diff(y[:, 10:], axis=0)).mean())
+            pl, pr = p[:, :5].mean(1), p[:, 5:10].mean(1)
+            if pl.std() > 1e-6 and pr.std() > 1e-6:
+                asym.append(np.corrcoef(pl, pr)[0, 1])
             speed = np.abs(np.diff(p[:, :10], axis=0)).mean(axis=1)
             e = x[1:, 0] - x[1:, 0].mean()
             s = speed - speed.mean()
@@ -90,7 +106,11 @@ def evaluate(model, xs, ys, device) -> dict:
                 lag = (np.argmax(xc) - (len(e) - 1)) / FRAME_HZ
                 lags.append(lag)
     vr = (np.mean(vel_pred) / max(np.mean(vel_true), 1e-9))
+    wvr = (np.mean(wvel_pred) / max(np.mean(wvel_true), 1e-9))
     return {"velocity_ratio": round(float(vr), 3),
+            "wrist_velocity_ratio": round(float(wvr), 3),
+            "lr_closure_corr": round(float(np.mean(asym)), 3)
+            if asym else None,
             "beat_lag_ms": round(float(np.median(lags)) * 1000.0, 0)
             if lags else None}
 
@@ -102,10 +122,16 @@ def main() -> int:
     ap.add_argument("--steps", type=int, default=4000)
     ap.add_argument("--lr", type=float, default=3e-4)
     ap.add_argument("--smoke", action="store_true")
-    ap.add_argument("--vel-weight", type=float, default=2.0,
-                    help="velocity-matching loss weight — raise to fight "
-                         "damped/mushy motion (v1 evaluated 0.63x human "
-                         "velocity at 2.0)")
+    ap.add_argument("--vel-weight", type=float, default=1.0,
+                    help="per-frame velocity L1 weight (v1/v2's scalar "
+                         "mean-match barely helped: 0.63x human velocity)")
+    ap.add_argument("--acc-weight", type=float, default=0.5,
+                    help="per-frame acceleration L1 weight — sharpness "
+                         "of direction changes, the 'snap' of a beat")
+    ap.add_argument("--noise-dim", type=int, default=8,
+                    help="style-latent channels (0 disables); recorded "
+                         "in the checkpoint and re-seeded per sentence "
+                         "at serve time")
     a = ap.parse_args()
 
     import torch
@@ -127,9 +153,9 @@ def main() -> int:
     tx, ty = xs[n_val:] or xs, ys[n_val:] or ys
     print(f"{len(tx)} train / {len(vx)} val clips, device={device}")
 
-    model = build_model().to(device)
+    model = build_model(noise_dim=a.noise_dim).to(device)
     n_par = sum(p.numel() for p in model.parameters())
-    print(f"GestureTCN: {n_par/1e6:.2f} M params")
+    print(f"GestureTCN: {n_par/1e6:.2f} M params, noise_dim={a.noise_dim}")
     opt = torch.optim.AdamW(model.parameters(), lr=a.lr)
     rng = np.random.default_rng(0)
     gen = _windows(tx, ty, rng)
@@ -139,18 +165,23 @@ def main() -> int:
         L = min(len(b[0]) for b in batch)
         x = torch.from_numpy(np.stack([b[0][:L] for b in batch])).to(device)
         y = torch.from_numpy(np.stack([b[1][:L] for b in batch])).to(device)
-        p = model(x)
+        noise = (torch.randn(len(batch), a.noise_dim, device=device)
+                 if a.noise_dim else None)
+        p = model(x, noise)
         mse = torch.nn.functional.mse_loss(p, y)
-        vel = torch.nn.functional.l1_loss(
-            (p[:, 1:] - p[:, :-1]).abs().mean(),
-            (y[:, 1:] - y[:, :-1]).abs().mean())
-        loss = mse + a.vel_weight * vel
+        # per-frame motion derivatives, not scalar means: the model must
+        # move WHEN and HOW FAST the data moves, frame by frame
+        dp, dy = p[:, 1:] - p[:, :-1], y[:, 1:] - y[:, :-1]
+        vel = torch.nn.functional.l1_loss(dp, dy)
+        acc = torch.nn.functional.l1_loss(dp[:, 1:] - dp[:, :-1],
+                                          dy[:, 1:] - dy[:, :-1])
+        loss = mse + a.vel_weight * vel + a.acc_weight * acc
         opt.zero_grad()
         loss.backward()
         opt.step()
         if step % max(1, a.steps // 10) == 0:
             print(f"  step {step:5d}  mse {mse.item():.4f}  "
-                  f"vel {vel.item():.4f}")
+                  f"vel {vel.item():.4f}  acc {acc.item():.4f}")
     model.eval()
     metrics = evaluate(model, vx, vy, device)
     print(f"\neval: {metrics}")
