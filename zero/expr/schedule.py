@@ -157,6 +157,24 @@ class HandScheduler:
             g("expression.hands.engage_closure", 0.07))
         self._engage_wrist = float(
             g("expression.hands.engage_wrist_deg", 4.0))
+        # Arm carrier (Phase G1) — the SLOW layer above the hands: steppers
+        # geared 160:1 cannot twitch per-beat, and in humans the proximal
+        # joints carry slow strokes anyway. Engagement lifts the forearms
+        # a few degrees; a slow sway breathes; silence eases back to rest.
+        # Directions are the sign-stance ones, hardware-verified
+        # 2026-08-17: elbow bend forward = negative both sides, raise =
+        # +up_down right / -up_down left. Ships OFF: enabling means
+        # steppers move UNSUPERVISED in conversation — the operator's
+        # call, made after scripts/arm_stream_probe.py, never a default.
+        self._arm_on = bool(g("expression.arms.enabled", False))
+        self._arm_elbow = float(g("expression.arms.elbow_deg", 9.0))
+        self._arm_raise = float(g("expression.arms.raise_deg", 4.0))
+        self._arm_sway = float(g("expression.arms.sway_deg", 1.5))
+        self._arm_sway_s = float(g("expression.arms.sway_s", 5.0))
+        self._arm_lag = float(g("expression.arms.lag_s", 1.2))
+        self._arm_cap = float(g("expression.arms.max_deg", 12.0))
+        self._arm_cur: dict[str, float] = {}   # eased posture (deltas)
+        self._arm_t = 0.0                      # last easing step time
         self._lock = threading.Lock()
         self._stop_evt = threading.Event()
         self._apex_log: list[float] = []   # planned apex times
@@ -363,10 +381,42 @@ class HandScheduler:
                 c = max(0.0, min(1.0, closure[f]))
                 pose[hands.joint_name(side, f)] = hands.finger_deg(side, f, c)
             pose[hands.wrist_name(side)] = wrist_deg
+        if self._arm_on:
+            pose.update(self._render_arms(now, eng))
         if (not speaking and floor_scale <= 0 and not self._envs
                 and eng <= 0.02):
             return {}
         return pose
+
+    def _render_arms(self, now: float, eng: float) -> dict[str, float]:
+        """Slow arm posture from engagement: eased first-order toward a
+        small lift, hard-capped, and only for joints actually registered
+        on the bus (steppers off -> silently hands-only, same rule as
+        the sign stance)."""
+        dt = min(0.2, now - self._arm_t) if self._arm_t else 0.0
+        self._arm_t = now
+        k = min(1.0, dt / max(0.1, self._arm_lag))
+        sway = self._arm_sway * eng * math.sin(
+            2.0 * math.pi * now / max(1.0, self._arm_sway_s))
+        targets = {
+            # elbow bend forward is negative on BOTH sides (stance truth)
+            "right_elbow_joint": -(self._arm_elbow * eng + sway),
+            "left_elbow_joint": -(self._arm_elbow * eng - sway),
+            # raise: mirrored motors — right positive, left negative
+            "right_up_down_joint": self._arm_raise * eng,
+            "left_up_down_joint": -self._arm_raise * eng,
+        }
+        out: dict[str, float] = {}
+        for name, delta in targets.items():
+            spec = self._bus.spec(name)
+            if spec is None:
+                continue
+            delta = max(-self._arm_cap, min(self._arm_cap, delta))
+            cur = self._arm_cur.get(name, 0.0)
+            cur += (delta - cur) * k
+            self._arm_cur[name] = cur
+            out[name] = spec.clamp(spec.home_deg + cur)
+        return out
 
     # ── analysis thread: polls prosody, never touches the render ────────────
     def _run_analysis(self) -> None:
@@ -425,6 +475,8 @@ class HandScheduler:
                         self._envs.clear()
                         for st in self._sentences.values():
                             st.accents_pending.clear()
+                    self._arm_cur.clear()
+                    self._arm_t = 0.0
                     self._bus.release("idle")
                     self._active = False
                 continue
@@ -478,9 +530,23 @@ class HandScheduler:
                 base: dict[str, float] = {}
                 for side in self._free_sides():
                     base.update(hands.open_hand_pose(side))
+                # Arms park at HOME: the bus holds last values on release,
+                # so without this the arms would freeze mid-lift forever.
+                for name in list(self._arm_cur):
+                    spec = self._bus.spec(name)
+                    if spec is not None:
+                        base[name] = spec.home_deg
+                self._arm_cur.clear()
+                self._arm_t = 0.0
                 if base:
                     self._bus.write("idle", base)
-                    probe = next(iter(base))
+                    # Confirm on the joint FARTHEST from its park target:
+                    # probing an arbitrary joint that already sits at rest
+                    # confirms instantly, and release then deletes the
+                    # others' targets before the bus clock ever samples
+                    # them — an arm would freeze mid-lift forever.
+                    probe = max(base, key=lambda j: abs(
+                        self._bus.last.get(j, 1e9) - base[j]))
                     deadline = time.monotonic() + 0.25
                     while (time.monotonic() < deadline
                            and not self._stop_evt.is_set()):

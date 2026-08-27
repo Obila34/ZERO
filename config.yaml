@@ -1106,6 +1106,23 @@ expression:
                               # the sidecar is unreachable.
       url: http://100.100.95.12:8200    # zerolabs2 gesture sidecar
       timeout_s: 0.8
+  # Phase G1 — the arm carrier: engagement lifts the forearms a few
+  # degrees and a slow sway breathes while ZERO talks; silence eases back
+  # to rest. The SLOW layer above the hands (steppers are geared 160:1 —
+  # they carry posture, not beats). Directions are the sign-stance ones,
+  # hardware-verified 2026-08-17. OFF until the operator has run
+  # scripts/arm_stream_probe.py (supervised) and accepted that these
+  # steppers now move UNSUPERVISED during conversation, within the caps
+  # below. E-stop, envelopes, speed walking and the black box all apply
+  # unchanged — this layer only writes the idle track, lowest priority.
+  arms:
+    enabled: false
+    elbow_deg: 9.0          # forearm lift at full engagement
+    raise_deg: 4.0          # shoulder up/down share
+    sway_deg: 1.5           # slow breathing sway amplitude (elbow)
+    sway_s: 5.0             # sway period
+    lag_s: 1.2              # first-order easing toward posture
+    max_deg: 12.0           # HARD cap on any commanded delta from home
 
 # ── Motion bus — ONE writer for every joint on the robot ────────────────────
 # Gaze (head), gestures (arms/hands) and sign language all write setpoints

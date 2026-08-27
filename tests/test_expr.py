@@ -384,6 +384,70 @@ def test_neural_mock_texture_drives_hands_and_semantic_composites():
     assert pinky and min(pinky) < 30.0, "semantic count lost under neural"
 
 
+def _arm_bus():
+    """Hand bus + the six arm stepper joints (one-sided in/out envelopes,
+    matching the Phase 5 config)."""
+    bus, t = _bus()
+    for name, lo, hi in [("right_elbow_joint", -73.5, 73.5),
+                         ("left_elbow_joint", -73.5, 73.5),
+                         ("right_up_down_joint", -68.8, 106.0),
+                         ("left_up_down_joint", -106.0, 68.8),
+                         ("right_in_out_joint", 0.0, 136.5),
+                         ("left_in_out_joint", -136.5, 0.0)]:
+        bus.register(BusJoint(name, min_deg=lo, max_deg=hi, home_deg=0.0))
+    return bus, t
+
+
+def test_arm_carrier_lifts_within_caps_and_parks_home():
+    """Phase G1: engagement lifts the arms a few degrees on the idle
+    track, every command stays inside the hard cap, and quiet parks the
+    arms back at home (bus holds on release — freezing mid-lift would
+    be permanent)."""
+    bus, t = _arm_bus()
+    sched = _sched(bus, over={"expression.arms.enabled": True,
+                              "expression.hands.engage_decay_s": 0.5})
+    audio = _stress_sentence()
+    sched.on_audio(0, "well THAT was really something", audio, SR)
+    hop = int(0.05 * SR)
+    for i in range(0, len(audio), hop):
+        sched.on_playout(0, hop)
+        time.sleep(0.05)
+    elbows = [p["right_elbow_joint"] for p in t.posts
+              if "right_elbow_joint" in p]
+    assert elbows, "arm carrier never wrote the elbow"
+    assert min(elbows) < -0.5, "engagement never lifted the forearm"
+    for p in t.posts:
+        for j in ("right_elbow_joint", "left_elbow_joint",
+                  "right_up_down_joint", "left_up_down_joint"):
+            if j in p:
+                assert abs(p[j]) <= 12.0 + 1e-6, f"{j} broke the cap"
+    time.sleep(1.4)                      # idle_release 0.4 + park
+    sched.stop()
+    last = {}
+    for p in t.posts:
+        last.update(p)
+    assert abs(last["right_elbow_joint"]) < 0.6, \
+        "arm did not park at home before release"
+
+
+def test_arm_carrier_off_is_bit_identical():
+    """expression.arms.enabled false (the default): not one arm-stepper
+    command, ever — the layer as shipped."""
+    bus, t = _arm_bus()
+    sched = _sched(bus)
+    audio = _stress_sentence()
+    sched.on_audio(0, "well THAT was really something", audio, SR)
+    hop = int(0.05 * SR)
+    for i in range(0, len(audio), hop):
+        sched.on_playout(0, hop)
+        time.sleep(0.05)
+    time.sleep(1.2)
+    sched.stop()
+    for p in t.posts:
+        assert not any("elbow" in j or "up_down" in j or "in_out" in j
+                       for j in p), f"arm command with the layer off: {p}"
+
+
 def test_neural_per_hand_frames_render_asymmetric_hands():
     """BEAT2's hands are nearly independent (L/R closure corr 0.04);
     frames carrying closure_l/closure_r must reach the wire per side,
