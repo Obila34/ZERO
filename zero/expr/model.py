@@ -20,12 +20,13 @@ _CHANNELS = 96
 _LAYERS = 6          # dilations 1..32 -> ~3.2 s receptive field at 20 Hz
 
 
-def build_model(noise_dim: int = 0):
+def build_model(noise_dim: int = 0, channels: int = _CHANNELS):
     """noise_dim > 0 adds a style-latent input channel (anti-mean-collapse:
     a deterministic audio->pose map trained with MSE regresses to the mean
     gesture; giving the model a latent to 'blame' diversity on lets it
     commit to one lively trajectory per sample — Gesticulator/Audio2Gestures
-    lineage). The latent is one vector per sequence, broadcast over time."""
+    lineage). The latent is one vector per sequence, broadcast over time.
+    channels widens the TCN (recorded in the checkpoint — v1-v3 were 96)."""
     import torch.nn as nn
 
     class _Block(nn.Module):
@@ -46,10 +47,12 @@ def build_model(noise_dim: int = 0):
         def __init__(self):
             super().__init__()
             self.noise_dim = int(noise_dim)
-            self.inp = nn.Conv1d(FEAT_DIM + self.noise_dim, _CHANNELS, 1)
+            self.channels = int(channels)
+            self.inp = nn.Conv1d(FEAT_DIM + self.noise_dim,
+                                 self.channels, 1)
             self.blocks = nn.ModuleList(
-                [_Block(_CHANNELS, 2 ** i) for i in range(_LAYERS)])
-            self.out = nn.Conv1d(_CHANNELS, TARGET_DIM, 1)
+                [_Block(self.channels, 2 ** i) for i in range(_LAYERS)])
+            self.out = nn.Conv1d(self.channels, TARGET_DIM, 1)
 
         def forward(self, feats, noise=None):    # (B, T, FEAT) -> (B, T, 12)
             import torch
@@ -80,6 +83,7 @@ def save_checkpoint(model, path: str, meta: dict | None = None) -> None:
     torch.save({"state": model.state_dict(),
                 "feat_dim": FEAT_DIM, "target_dim": TARGET_DIM,
                 "noise_dim": int(getattr(model, "noise_dim", 0)),
+                "channels": int(getattr(model, "channels", _CHANNELS)),
                 "meta": meta or {}}, path)
 
 
@@ -88,7 +92,8 @@ def load_checkpoint(path: str):
 
     ck = torch.load(path, map_location="cpu", weights_only=False)
     assert ck["feat_dim"] == FEAT_DIM, "checkpoint/feature mismatch"
-    m = build_model(noise_dim=int(ck.get("noise_dim", 0)))
+    m = build_model(noise_dim=int(ck.get("noise_dim", 0)),
+                    channels=int(ck.get("channels", _CHANNELS)))
     m.load_state_dict(ck["state"])
     m.eval()
     return m

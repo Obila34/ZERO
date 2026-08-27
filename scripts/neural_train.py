@@ -131,11 +131,22 @@ def main() -> int:
                     help="per-frame acceleration L1 weight — sharpness "
                          "of direction changes, the 'snap' of a beat")
     ap.add_argument("--mag-weight", type=float, default=4.0,
-                    help="motion-energy matching weight (closures and "
-                         "wrists separately). Per-frame derivative "
-                         "losses alone teach stillness when the model "
-                         "is unsure — v3's first cut moved at 0.11x "
+                    help="motion-energy matching weight (left hand, "
+                         "right hand and wrists each matched "
+                         "separately). Per-frame derivative losses "
+                         "alone teach stillness when the model is "
+                         "unsure — v3's first cut moved at 0.11x "
                          "human speed without this term")
+    ap.add_argument("--corr-weight", type=float, default=1.0,
+                    help="hand-coordination matching weight: each "
+                         "window's predicted L/R closure correlation "
+                         "must match that window's HUMAN correlation "
+                         "(BEAT2 global ~0.04; v3 drifted to 0.77 — "
+                         "the energy term made mirroring the cheap "
+                         "way to move)")
+    ap.add_argument("--channels", type=int, default=96,
+                    help="TCN width (recorded in the checkpoint; "
+                         "v1-v3 = 96)")
     ap.add_argument("--noise-dim", type=int, default=8,
                     help="style-latent channels (0 disables); recorded "
                          "in the checkpoint and re-seeded per sentence "
@@ -161,7 +172,8 @@ def main() -> int:
     tx, ty = xs[n_val:] or xs, ys[n_val:] or ys
     print(f"{len(tx)} train / {len(vx)} val clips, device={device}")
 
-    model = build_model(noise_dim=a.noise_dim).to(device)
+    model = build_model(noise_dim=a.noise_dim,
+                        channels=a.channels).to(device)
     n_par = sum(p.numel() for p in model.parameters())
     print(f"GestureTCN: {n_par/1e6:.2f} M params, noise_dim={a.noise_dim}")
     opt = torch.optim.AdamW(model.parameters(), lr=a.lr)
@@ -183,24 +195,41 @@ def main() -> int:
         vel = torch.nn.functional.l1_loss(dp, dy)
         acc = torch.nn.functional.l1_loss(dp[:, 1:] - dp[:, :-1],
                                           dy[:, 1:] - dy[:, :-1])
-        # motion-energy match per item, closures and wrists separately
-        # (wrists are 2 of 12 dims — pooled they'd drown): the per-frame
-        # terms teach WHEN to move, this one forbids going still overall
+        # motion-energy match per item — LEFT, RIGHT and wrists each
+        # matched separately (pooled, one hand can hide behind the
+        # other; wrists are 2 of 12 dims and would drown): the
+        # per-frame terms teach WHEN to move, this forbids stillness
         mag = (torch.nn.functional.l1_loss(
-                   dp[..., :10].abs().mean(dim=(1, 2)),
-                   dy[..., :10].abs().mean(dim=(1, 2)))
+                   dp[..., :5].abs().mean(dim=(1, 2)),
+                   dy[..., :5].abs().mean(dim=(1, 2)))
+               + torch.nn.functional.l1_loss(
+                   dp[..., 5:10].abs().mean(dim=(1, 2)),
+                   dy[..., 5:10].abs().mean(dim=(1, 2)))
                + torch.nn.functional.l1_loss(
                    dp[..., 10:].abs().mean(dim=(1, 2)),
                    dy[..., 10:].abs().mean(dim=(1, 2))))
+        # hand-coordination match per item: the window's predicted L/R
+        # correlation must equal the window's human one — sometimes the
+        # hands DO move together; mostly they don't (global ~0.04).
+        # Matching per window is honest where a global decorrelation
+        # penalty would just be a statistic to game.
+        def _corr(u, v, eps=1e-6):
+            u = u - u.mean(dim=1, keepdim=True)
+            v = v - v.mean(dim=1, keepdim=True)
+            return ((u * v).mean(dim=1)
+                    / (u.std(dim=1) * v.std(dim=1) + eps))
+        cor = torch.nn.functional.mse_loss(
+            _corr(p[..., :5].mean(-1), p[..., 5:10].mean(-1)),
+            _corr(y[..., :5].mean(-1), y[..., 5:10].mean(-1)))
         loss = (mse + a.vel_weight * vel + a.acc_weight * acc
-                + a.mag_weight * mag)
+                + a.mag_weight * mag + a.corr_weight * cor)
         opt.zero_grad()
         loss.backward()
         opt.step()
         if step % max(1, a.steps // 10) == 0:
             print(f"  step {step:5d}  mse {mse.item():.4f}  "
                   f"vel {vel.item():.4f}  acc {acc.item():.4f}  "
-                  f"mag {mag.item():.4f}")
+                  f"mag {mag.item():.4f}  cor {cor.item():.4f}")
     model.eval()
     metrics = evaluate(model, vx, vy, device)
     print(f"\neval: {metrics}")
