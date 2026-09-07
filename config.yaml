@@ -1192,7 +1192,10 @@ sign:
   # (scripts/sign_dict_probe.py) — recorded human arm motion drives the
   # steppers, capped but unreviewed.
   dictionary:
-    enabled: false
+    enabled: true             # ENABLED 2026-09-07: operator watched the
+                              # supervised probe (hello/please/yes/no/
+                              # thankyou with the stance lift) — "it
+                              # looked like signing"
     path: data/sign_dictionary.npz
     keyframe_s: 0.12          # playback keyframe spacing (source ~24fps)
     arm_cap_deg: 45.0         # hard clamp at play time, atop compile caps
