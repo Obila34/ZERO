@@ -1,5 +1,5 @@
-"""Sign-along: word picking, one-shot firing per sentence, tee-forwarding,
-skip-when-busy, and the ships-dark gate."""
+"""Sign-along: time-budgeted picking, spell fallback, one-shot firing,
+tee-forwarding, skip-when-busy, recent-word suppression, ships-dark gate."""
 import os
 import sys
 import time
@@ -10,6 +10,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from zero.sign.along import SignAlong, build_sign_along  # noqa: E402
 
+SR = 16000
+
 
 class FakeCfg(dict):
     def get(self, k, d=None):
@@ -17,7 +19,8 @@ class FakeCfg(dict):
 
 
 class FakeEngine:
-    def __init__(self, knows=("water", "book", "help", "yes")):
+    def __init__(self, knows=("water", "book", "help", "yes", "school",
+                              "teacher")):
         self._knows = set(knows)
         self.sequences: list = []
         self.busy = False
@@ -27,9 +30,23 @@ class FakeEngine:
     def knows_sign(self, g):
         return g in self._knows
 
-    def sign_sequence(self, words):
-        self.sequences.append(list(words))
-        return list(words)
+    def sign_sequence(self, tokens, spell_letter_s=None):
+        self.sequences.append(list(tokens))
+        return [t[1] if isinstance(t, tuple) else t for t in tokens]
+
+
+def _along(engine, inner=None, over=None):
+    cfg = FakeCfg({})
+    cfg.update(over or {})
+    return SignAlong(cfg, inner, engine)
+
+
+def _speak(al, idx, sentence, seconds):
+    """Feed a sentence with `seconds` of audio, then its first playout."""
+    piece = np.zeros(SR, dtype=np.float32)
+    for _ in range(int(seconds)):
+        al.on_audio(idx, sentence, piece, SR)
+    al.on_playout(idx, SR)
 
 
 class RecordingInner:
@@ -44,51 +61,70 @@ class RecordingInner:
         self.playout.append(idx)
 
 
-def _along(engine, inner=None, over=None):
-    cfg = FakeCfg({"sign.along.max_words_per_sentence": 3})
-    cfg.update(over or {})
-    return SignAlong(cfg, inner, engine)
-
-
-def test_picks_dictionary_words_and_fires_once():
+def test_budget_picks_what_fits_and_fires_once():
     eng = FakeEngine()
     inner = RecordingInner()
     al = _along(eng, inner)
-    piece = np.zeros(160, dtype=np.float32)
-    al.on_audio(0, "I can help you find the water and a book today", piece,
-                16000)
-    al.on_playout(0, 160)
-    al.on_playout(0, 160)          # second playout: must NOT re-fire
+    # ~5 s sentence -> budget 6.25 s -> 2 signs fit (2.2 s each), not 3
+    _speak(al, 0, "the teacher put the book near the water for school", 5)
+    al.on_playout(0, SR)             # second playout: must NOT re-fire
     time.sleep(0.3)
     al.stop()
-    assert eng.sequences == [["help", "water", "book"]]
-    assert inner.audio == [0] and inner.playout == [0, 0], \
-        "inner listener must receive every event untouched"
+    assert eng.sequences == [["teacher", "book"]]
+    assert inner.playout == [0, 0], "inner must receive every event"
+
+
+def test_long_sentence_takes_more_signs():
+    eng = FakeEngine()
+    al = _along(eng)
+    _speak(al, 0, "the teacher put the book near the water for school", 8)
+    time.sleep(0.3)
+    al.stop()
+    assert eng.sequences == [["teacher", "book", "water", "school"]]
+
+
+def test_unknown_name_gets_spelled_once():
+    eng = FakeEngine()
+    al = _along(eng)
+    _speak(al, 0, "maxwell brought the water to garissa", 6)
+    time.sleep(0.3)
+    al.stop()
+    (seq,) = eng.sequences
+    assert "water" in seq
+    assert ("spell", "maxwell") in seq
+    assert ("spell", "garissa") not in seq, "one spelled word per sentence"
+
+
+def test_name_only_sentence_spells_even_on_tight_budget():
+    eng = FakeEngine(knows=())
+    al = _along(eng)
+    _speak(al, 0, "kamau", 1)
+    time.sleep(0.3)
+    al.stop()
+    assert eng.sequences == [[("spell", "kamau")]]
+
+
+def test_recent_word_not_resigned():
+    eng = FakeEngine()
+    al = _along(eng)
+    _speak(al, 0, "here is the water", 4)
+    time.sleep(0.3)
+    _speak(al, 1, "more water is coming", 4)
+    time.sleep(0.3)
+    al.stop()
+    assert eng.sequences == [["water"]], eng.sequences
 
 
 def test_busy_engine_skips_sentence_never_queues():
     eng = FakeEngine()
     eng.busy = True
     al = _along(eng)
-    piece = np.zeros(160, dtype=np.float32)
-    al.on_audio(0, "water please", piece, 16000)
-    al.on_playout(0, 160)
+    _speak(al, 0, "water please", 4)
     time.sleep(0.3)
-    eng.busy = False               # freeing later must not replay old text
+    eng.busy = False
     time.sleep(0.3)
     al.stop()
     assert eng.sequences == []
-
-
-def test_stopwords_and_unknown_words_ignored():
-    eng = FakeEngine(knows=("yes",))
-    al = _along(eng)
-    piece = np.zeros(160, dtype=np.float32)
-    al.on_audio(1, "well yes that is the thing I was saying", piece, 16000)
-    al.on_playout(1, 160)
-    time.sleep(0.3)
-    al.stop()
-    assert eng.sequences == [["yes"]]
 
 
 def test_gate_off_and_no_dictionary():

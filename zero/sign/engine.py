@@ -173,21 +173,44 @@ class SignEngine:
                 return f"Signing {gloss}."
         return None
 
-    def sign_sequence(self, glosses) -> list[str]:
-        """Play several dictionary/lexicon-free words back to back under ONE
-        stance rise — the sign-along path (ZERO signing what it says).
-        Returns the glosses actually played; unknown words are skipped
+    def sign_sequence(self, tokens,
+                      spell_letter_s: float | None = None) -> list[str]:
+        """Play a mixed run of words under ONE stance rise — the sign-along
+        path (ZERO signing what it says). Each token is either a plain
+        gloss string (dictionary sign) or ("spell", word) — a word with no
+        sign, FINGERSPELLED inline the way an interpreter handles a name.
+        Returns what actually played; unplayable tokens are skipped
         silently (speech carries them regardless)."""
-        if self._dictionary is None or self._bus.estopped:
+        if self._bus.estopped:
             return []
         stance_all = (self._stance_pose(("left", "right"))
                       if self._stance_on else {})
+        letter_s = float(spell_letter_s or self._letter_s)
         frames: list = []
         arm_all: set[str] = set()
         sides_all: set[str] = set()
         played: list[str] = []
-        for g in glosses:
-            got = self._dictionary.frames(str(g), stance=stance_all)
+        for tok in tokens:
+            kind, word = (tok if isinstance(tok, tuple) else ("sign", tok))
+            word = str(word)
+            if kind == "spell":
+                letters = [c for c in word.upper()
+                           if c.isalpha() and c in HANDSHAPES]
+                if not letters:
+                    continue
+                # one-handed spelling, dominant (right) hand
+                for ch in letters:
+                    pose = self._letter_pose(ch, ("right",))
+                    dwell = max(0.0, letter_s - self._move_s)
+                    frames.append((pose, self._move_s, dwell))
+                pose, mv, _ = frames[-1]
+                frames[-1] = (pose, mv, max(0.25, dwell))
+                sides_all.add("right")
+                played.append(word)
+                continue
+            if self._dictionary is None:
+                continue
+            got = self._dictionary.frames(word, stance=stance_all)
             if got is None:
                 continue
             f, arm_joints, sides = got
@@ -196,7 +219,7 @@ class SignEngine:
             frames[-1] = (pose, mv, 0.25)      # brief settle between words
             arm_all.update(arm_joints)
             sides_all.update(sides)
-            played.append(str(g))
+            played.append(word)
         if not frames:
             return []
         stance = self._stance_pose(tuple(sorted(sides_all)))
