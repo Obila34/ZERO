@@ -88,6 +88,13 @@ class FaceTracker:
         self._scan_next_t = 0.0
         self._scan_cycles = 0
         self._scan_active = False
+        # Voice-triggered search (2026-09-07): a HEARD voice with no face
+        # visible requests an immediate scan burst — "someone spoke, look
+        # for them" — independent of the idle scan_after gate, which the
+        # 28ce9ee tuning war left OFF (a head that revolves for no reason
+        # reads as agitated; one that turns because you SPOKE reads as
+        # attention).
+        self._voice_scan_until = 0.0
         # SATURATION micro-reset — track continuous fight at ±max_offset when
         # |ex|/|ey| KEEPS growing. After sat_reset_after_s snap to 0,0 + drop
         # the latch + pause `sat_reset_pause_s` so neck/camera catch up.
@@ -166,6 +173,13 @@ class FaceTracker:
         log.info("attention -> %s (deadband=%.3f kp=(%.2f,%.2f))",
                  state, self._deadband, self._kp_pan, self._kp_tilt)
 
+    def search_for_voice(self, duration_s: float = 12.0) -> None:
+        """A voice was HEARD with nobody in frame: sweep the room now, the
+        way a person turns toward their name. The burst self-cancels the
+        moment a face is acquired, or after the scan's own give-up rules."""
+        self._voice_scan_until = time.monotonic() + float(duration_s)
+        self._scan_cycles = 0
+
     def _clamp(self, v: float) -> float:
         return self._max if v > self._max else (-self._max if v < -self._max else v)
 
@@ -185,7 +199,9 @@ class FaceTracker:
             # SCAN state (Design 3): after scan_after_s of no face, sweep pan
             # waypoints so ZERO visibly LOOKS AROUND instead of freezing. After
             # scan_max_cycles full sweeps with no acquisition, PARK at 0,0.
-            if (self._scan_after > 0 and elapsed > self._scan_after
+            voice_wants = now < self._voice_scan_until
+            idle_wants = self._scan_after > 0 and elapsed > self._scan_after
+            if ((voice_wants or idle_wants)
                     and self._scan_cycles < self._scan_max_cycles):
                 if not self._scan_active:
                     self._scan_active = True
@@ -212,6 +228,7 @@ class FaceTracker:
             self._scan_active = False
             self._scan_idx = 0
             self._scan_cycles = 0
+            self._voice_scan_until = 0.0
 
         self._last_face_t = now
         cx, cy, _w, _h = face

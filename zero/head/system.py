@@ -369,6 +369,16 @@ class HeadSystem:
             except Exception:
                 pass
 
+    def search_for_voice(self, duration_s: float = 12.0) -> None:
+        """Voice heard, nobody visible — sweep until the face framer locks.
+        No-op without a tracker (voice-only builds)."""
+        t = getattr(self, "_tracker", None)
+        if t is not None:
+            try:
+                t.search_for_voice(duration_s)
+            except Exception as e:
+                log.debug("voice search unavailable: %s", e)
+
     def estop(self) -> None:
         self._estop = True
         try:

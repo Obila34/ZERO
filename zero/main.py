@@ -869,6 +869,22 @@ class Zero:
                 self.indicator.close()
             self._join_memory_thread()
 
+    def _search_if_unseen(self) -> None:
+        """A voice was heard: if no face is currently visible, ask the head
+        to sweep the room until the framer locks. Sense-of-direction v1 —
+        ears say WHEN, eyes find WHERE (a mic array will one day say WHERE
+        directly). Never raises; a robot without head/eyes just skips."""
+        try:
+            head, eyes = getattr(self, "head", None), self.eyes
+            if head is None or eyes is None:
+                return
+            gone = eyes.face_gone_s()
+            if gone is None or gone > 2.0:
+                head.search_for_voice()
+                log.info("voice heard, nobody visible — searching")
+        except Exception as e:
+            log.debug("voice search skipped: %s", e)
+
     def _wait_for_wake(self) -> None:
         self._to(State.IDLE)
         self.wake.reset()
@@ -895,6 +911,7 @@ class Zero:
                 _room.maybe_log(time.monotonic())
             if self.wake.process(frame):
                 log.info("wake word! let's talk.")
+                self._search_if_unseen()
                 return
 
     # -- conversation -------------------------------------------------------
@@ -1121,6 +1138,10 @@ class Zero:
 
                 self.mic.pause()
                 self._to(State.THINKING)
+                # They SPOKE. If nobody is in frame, look for them — the
+                # human reflex of turning toward a voice (no mic array yet,
+                # so it sweeps instead of snapping to a bearing).
+                self._search_if_unseen()
             self._stage("capture->pause")
 
             # Duplex from the moment the turn commits: the monitor runs through
