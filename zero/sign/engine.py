@@ -155,11 +155,21 @@ class SignEngine:
             self._start_segments(entry["segments"])
             return f"Signing {gloss}."
         if self._dictionary is not None:
-            got = self._dictionary.frames(gloss)
+            stance_all = (self._stance_pose(("left", "right"))
+                          if self._stance_on else {})
+            got = self._dictionary.frames(gloss, stance=stance_all)
             if got is not None:
                 frames, arm_joints, sides = got
+                # Arms rise into the signing stance BEFORE the sign, at
+                # stepper-safe speed — same preparation rule as spelling;
+                # a chest-height sign from hanging arms shows only the
+                # recording's small deltas (first dictionary probe).
+                stance = self._stance_pose(sides)
+                if stance:
+                    frames.insert(0, (dict(stance), self._stance_move_s,
+                                      0.15))
                 self._launch(frames, finish_open=True, sides=sides,
-                             lower=arm_joints)
+                             lower=sorted(set(arm_joints) | set(stance)))
                 return f"Signing {gloss}."
         return None
 

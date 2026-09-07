@@ -59,13 +59,20 @@ class SignDictionary:
     def _normalize(gloss: str) -> str:
         return "".join(c for c in gloss.lower().strip() if c.isalnum())
 
-    def frames(self, gloss: str):
+    def frames(self, gloss: str, stance: dict[str, float] | None = None):
         """Keyframes [(pose, move_s, hold_s), ...] for the engine's player,
         plus the arm joints used (for the engine's lower-at-end rule) and
-        the sides involved. None when the gloss is unknown."""
+        the sides involved. None when the gloss is unknown.
+
+        `stance` is the engine's signing-stance arm pose: signs happen at
+        CHEST height, so the recorded arm motion rides on top of the
+        stance lift — without it the arms hang and only the small
+        recorded deltas show (operator, first probe: 'the other joints
+        didn't move completely')."""
         i = self._idx.get(self._normalize(gloss))
         if i is None:
             return None
+        stance = dict(stance or {})
         cl = np.asarray(self._closures[i], np.float32)     # (T,10)
         wr = np.asarray(self._wrists[i], np.float32)       # (T,2)
         ar = np.asarray(self._arms[i], np.float32)         # (T,6)
@@ -97,10 +104,14 @@ class SignDictionary:
                     arm = {}
                     for k in range(3):
                         name = _ARM_JOINTS[k if side == "right" else 3 + k]
-                        deg = float(np.clip(ar[t, (0 if side == "right"
-                                                   else 3) + k],
+                        raw = float(ar[t, (0 if side == "right"
+                                           else 3) + k])
+                        base = float(stance.get(name, 0.0))
+                        # stance lift + recorded delta, both clamped —
+                        # sign at chest height, move like the recording
+                        deg = float(np.clip(base + raw,
                                             -self._cap, self._cap))
-                        if abs(deg) > 0.5:
+                        if abs(deg) > 0.5 or name in stance:
                             arm[name] = deg
                             arm_used.add(name)
                     last[side] = (closure, wrist, arm)
