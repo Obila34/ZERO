@@ -1159,6 +1159,21 @@ motion:
 # loud and offered as fingerspelling, never invented. P, Q, R, V and Z are
 # mechanically approximate — the engine speaks each letter as it signs, so a
 # spelled word stays unambiguous, and the model is told to be honest about it.
+# Sign-sense — fingerspell READING (PerceptX lumen-codex on zerolabs1).
+# ZERO's first sign INPUT: watches the camera for a hand spelling letters,
+# debounces them into words, and posts each word on the event bus (spoken
+# acknowledgement + echoed back in sign). Strictly additive: OFF ships
+# bit-identical; ON can only add announcements at safe turn boundaries.
+# Enable AFTER the sidecar accuracy is verified on real hand photos.
+sign_sense:
+  enabled: false
+  url: http://100.110.56.17:8210  # sign-sense sidecar (zerolabs1)
+  fps: 6.0                  # camera polls per second (side consumer)
+  stable_frames: 3          # same letter this many frames = accepted
+  word_gap_s: 1.2           # quiet hands this long = word boundary
+  min_confidence: 0.55      # prototype-gate floor (tune on real photos)
+  echo_sign: true           # fingerspell the read word back to the speller
+
 sign:
   enabled: true             # rides on arms.enabled; false = no sign engine
   side: both                # sign bilaterally (left | right | both)

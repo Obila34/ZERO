@@ -497,6 +497,16 @@ class Zero:
             self._to(State.SPEAKING)
             try:
                 self._speak_one(event.text)
+                # A read fingerspelled word gets echoed back IN SIGN — the
+                # deaf speller sees their word confirmed the way they said
+                # it. Best-effort: a missing sign engine loses only the echo.
+                if (event.kind == "sign" and event.meta.get("echo_sign")
+                        and event.meta.get("sign_word")
+                        and getattr(self, "sign", None) is not None):
+                    try:
+                        self.sign.spell(str(event.meta["sign_word"]))
+                    except Exception as e:
+                        log.info("sign echo failed: %s", e)
                 if (self.reward is not None
                         and event.kind in ("greet", "curiosity", "remark")):
                     # Await the human's reaction: their next words (or their
@@ -723,6 +733,16 @@ class Zero:
             except Exception as e:  # a missing camera must not stop voice working
                 log.warning("could not start eyes — running voice-only: %s", e)
                 self.eyes = None
+        # Sign-sense — fingerspell READING (after eyes: it watches the same
+        # camera as a side consumer). Dark unless sign_sense.enabled; posts
+        # words onto the event bus only, so it can never alter a turn.
+        try:
+            from zero.sign_sense import build_sign_sense
+            self.sign_watch = build_sign_sense(self.cfg, self.eyes,
+                                               self.events)
+        except Exception as e:
+            log.warning("sign-sense unavailable: %s", e)
+            self.sign_watch = None
         # Head / attention subsystem (after eyes so it can read the digital gaze).
         # Dark unless head.enabled; NullDriver unless head.driver names a real
         # sink. A failure here must never stop the conversation.
@@ -802,6 +822,8 @@ class Zero:
                 reset_bus()   # clean teardown; see run_text's stop
             except Exception:
                 pass
+            if getattr(self, "sign_watch", None) is not None:
+                self.sign_watch.stop()
             if self.eyes is not None:
                 self.eyes.stop()
             if self.indicator is not None:
