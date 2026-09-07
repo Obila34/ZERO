@@ -768,6 +768,35 @@ class Zero:
         except Exception as e:
             log.warning("arm subsystem unavailable: %s", e)
             self.arms = None
+        # Rest-on-START (operator, 2026-09-07: elbows woke up wherever the
+        # last session left them). Mirror of rest-on-stop: every session
+        # BEGINS from the commanded home pose. Background thread because
+        # encoderless steppers stay mute until the gateway offsets load —
+        # the rest itself triggers that fetch, we just wait for it to land
+        # and nudge once more so no held target is lost to a release race.
+        if (self.arms is not None
+                and self.cfg.get("arms.rest_on_start", True)):
+            def _rest_on_start(arms=self.arms):
+                try:
+                    time.sleep(1.0)               # let the bus settle
+                    arms.rest()                   # triggers offsets fetch
+                    from zero.motion.drivers import get_bus
+                    bus = get_bus(self.cfg)
+                    deadline = time.monotonic() + 12.0
+                    while (getattr(bus, "_offsets", None) is None
+                           and time.monotonic() < deadline):
+                        time.sleep(0.25)
+                    if getattr(bus, "_offsets", None) is not None:
+                        time.sleep(0.5)
+                        arms.rest()               # steppers now un-muted
+                        log.info("arms rested to home on startup")
+                    else:
+                        log.warning("rest-on-start: offsets never loaded "
+                                    "— hand servos rested, steppers held")
+                except Exception as e:
+                    log.warning("rest-on-start failed: %s", e)
+            threading.Thread(target=_rest_on_start, name="arms-rest-start",
+                             daemon=True).start()
         try:
             if self.sign is None:
                 self.sign = build_sign(self.cfg)

@@ -1259,6 +1259,14 @@ arms:
   max_speed_dps: 120        # per-joint speed cap during playback. 60 was slow
                             # enough that a gesture frame ended before the
                             # joint arrived, leaving the move half-made.
+  rest_on_start: true       # every session BEGINS at commanded home: on
+                            # startup the arms ease to rest once the
+                            # stepper offsets load (mirror of the
+                            # rest-on-stop guarantee). NOTE: commanded
+                            # home, not physically-verified home — if the
+                            # arm Nano rebooted away from the reference
+                            # pose, the stored offsets are stale and only
+                            # a supervised re-calibration truly re-aligns.
   allow_steppers: true      # STEPPERS LIVE (Phase 5, 2026-08-24): operator
                             # accepted the URDF envelopes as-is — they carry
                             # real runtime history from the 2026-08-17 live
