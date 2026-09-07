@@ -79,7 +79,7 @@ def test_hand_joints_batch_into_one_pose_cmd():
     bus.close()
 
 
-def test_offset_joint_is_mute_until_offsets_known_then_subtracts():
+def test_offset_joint_is_mute_until_offsets_known_then_posts_effective():
     class NoOffsets(NullTransport):
         def __init__(self):
             super().__init__()
@@ -94,11 +94,14 @@ def test_offset_joint_is_mute_until_offsets_known_then_subtracts():
     bus.write("command", {"s": 10.0})
     time.sleep(0.1)
     assert "s" not in t.posted               # mute: offsets unknown
-    t.offsets = {"s": -150.0}                # the real 2026-08-17 case
-    # the WIRE value subtracted the stored offset (effective -> raw): posting
-    # a raw 10 would have commanded the shoulder 150 deg off. The bus's own
-    # belief stays in effective degrees.
-    assert _wait(lambda: t.posted.get("s") == 160.0)
+    t.offsets = {"s": -150.0}
+    # CONVENTION (2026-09-07): the bus posts EFFECTIVE degrees verbatim —
+    # the GATEWAY owns the offset translation (calibrated = angle +
+    # stored offset). When the bus also subtracted here the two cancelled
+    # and stepper commands landed in raw Nano-boot counter space,
+    # silently erasing calibration. The fetch/mute stays: it proves the
+    # gateway's translation layer is alive before a stepper may move.
+    assert _wait(lambda: t.posted.get("s") == 10.0)
     assert bus.last["s"] == 10.0
     bus.close()
 

@@ -28,8 +28,11 @@ Safety, inherited from the drivers this replaces (audit H1/C2):
   * per-joint max_jump: after an outage the bus WALKS to the target instead
     of whipping — slew limits upstream live in belief space only;
   * stepper joints marked use_offset stay MUTE until the gateway's stored
-    zero offsets have been read — commanding an encoderless stepper without
-    them lands wherever the offset says (that is how you break an arm);
+    zero offsets have been READ — not because the bus applies them (it
+    posts EFFECTIVE degrees; the GATEWAY adds its stored offset, one
+    owner for the translation since the 2026-09-07 convention fix), but
+    as proof the gateway's calibration layer is alive before an
+    encoderless stepper is allowed to move;
   * estop() posts /api/stop, freezes ALL posting (every track, every joint)
     until resume() — the shared e-stop no pair of independent drivers had.
 
@@ -361,8 +364,17 @@ class MotionBus:
                 # retry next tick anyway (audit #9).
                 pending = True
                 break
-            wire = step - (self._offsets or {}).get(name, 0.0) \
-                if spec.use_offset else step
+            # CONVENTION FIX (2026-09-07 audit): the bus posts EFFECTIVE
+            # degrees, untranslated. The gateway ADDS its stored zero
+            # offset (calibrated = angle + offset) — so when the bus also
+            # subtracted the same offset here, the two cancelled exactly
+            # and every stepper command landed in raw Nano-boot counter
+            # space, silently discarding calibration. That is how a
+            # supervised elbow re-zero was undone by the next
+            # rest-on-start. One owner now: the GATEWAY translates, its
+            # offsets = counter-at-true-rest, re-zeroed via
+            # /api/save_calibration with eyes on the robot.
+            wire = step
             if self._transport.post_joint(name, round(wire, 2)):
                 with self._lock:
                     self._posted[name] = step
