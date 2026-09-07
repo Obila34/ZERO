@@ -54,3 +54,5 @@ server/vision/.cache/
 # joint-angle black box — runtime DB, never tracked
 zero_joints.sqlite
 zero_joints.sqlite-*
+*.sqlite-shm
+*.sqlite-wal
