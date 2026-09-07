@@ -31,6 +31,12 @@ class SpeechTap:
         self._listener = None
 
     @property
+    def listener(self):
+        """The currently attached listener (for wrappers that tee events —
+        sign-along forwards everything to Living Hands' scheduler)."""
+        return self._listener
+
+    @property
     def attached(self) -> bool:
         return self._listener is not None
 

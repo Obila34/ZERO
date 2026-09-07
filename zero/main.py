@@ -292,6 +292,14 @@ class Zero:
         except Exception as e:
             log.warning("living hands unavailable: %s", e)
             self.expr = None
+        # Sign-along — ZERO signs what it says (after expr, so it wraps the
+        # tap listener and forwards to Living Hands untouched).
+        self.sign_along = None
+        try:
+            from zero.sign.along import build_sign_along
+            self.sign_along = build_sign_along(self.cfg, self.sign)
+        except Exception as e:
+            log.warning("sign-along unavailable: %s", e)
 
         tool_block = (self.tool_registry.spec_block()
                       if self.tool_registry is not None else "")
@@ -824,6 +832,8 @@ class Zero:
                 pass
             if getattr(self, "sign_watch", None) is not None:
                 self.sign_watch.stop()
+            if getattr(self, "sign_along", None) is not None:
+                self.sign_along.stop()
             if self.eyes is not None:
                 self.eyes.stop()
             if self.indicator is not None:

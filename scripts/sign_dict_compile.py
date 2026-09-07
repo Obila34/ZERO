@@ -138,10 +138,31 @@ def compile_dictionary(vault: str):
                 present[..., 0])
     # sign conventions (hardware-verified via the stance): raise = +R/-L
     # up_down, outward = +R/-L in_out, elbow bend forward = negative both
-    arms = np.concatenate([
+    arms_f = np.concatenate([
         right * np.array([1.0, 1.0, 1.0]),
         left * np.array([1.0, -1.0, -1.0]),
-    ], axis=-1).astype(np.float16)                                 # (N,T,6)
+    ], axis=-1)                                                    # (N,T,6)
+
+    # v2 — MOTION, not posture: at play time the signing STANCE carries
+    # the arm height, so absolute chest-level offsets flatten into a
+    # static residue that hides the sign's path (first probe: arms
+    # "didn't move completely"). Center each sign's arm trajectory on
+    # its own visible mean and amplify the dynamics — the recording now
+    # contributes the SHAPE of the movement (THANKYOU's chin->out sweep)
+    # and only that, tightly capped.
+    DYN_GAIN = 1.6
+    DYN_CAP = 20.0
+    with np.errstate(invalid="ignore"):
+        for cols, j in ((slice(0, 3), 1), (slice(3, 6), 0)):
+            vis = present[..., j]                                  # (N,T)
+            block = arms_f[:, :, cols]
+            mu = np.nanmean(np.where(vis[..., None], block, np.nan),
+                            axis=1, keepdims=True)
+            mu = np.nan_to_num(mu)
+            block = np.clip((block - mu) * DYN_GAIN, -DYN_CAP, DYN_CAP)
+            block[~vis] = 0.0
+            arms_f[:, :, cols] = block
+    arms = arms_f.astype(np.float16)
 
     return {"glosses": glosses, "closures": closures, "wrists": wrists,
             "arms": arms, "present": present}

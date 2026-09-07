@@ -34,6 +34,8 @@ def _synthetic_vault(tmp_path):
     arm[:, 1] = (0.6, 0.0, 0.0)
     arm[:, 2] = (0.38, 0.25, 0.0)          # elbow below shoulder
     arm[:, 4] = (0.36, -0.30, 0.0)         # data-left wrist ABOVE shoulder
+    # the wrist BOBS: compile keeps motion (centered dynamics), not posture
+    arm[:, 4, 1] = -0.30 + 0.15 * np.sin(t)
     frames[0, :, :18] = arm.reshape(T, 18)
     # sign 1 'still': nothing visible at all
     np.savez_compressed(tmp_path / "sign_motion.npz",
@@ -55,7 +57,9 @@ def test_compile_swaps_handedness_and_caps_arms(tmp_path):
     r_cl = np.float32(out["closures"][0, :, 5:])
     assert r_cl.std() > 0.01, "finger motion lost"
     arms = np.float32(out["arms"][0])
-    assert arms[:, 1].max() > 5.0, "raised arm lost"          # R raise +
+    # motion-centered: the bobbing wrist survives as raise DYNAMICS
+    assert arms[:, 1].std() > 2.0, "arm motion lost"          # R raise
+    assert abs(arms[:, 1].mean()) < 2.0, "posture not centered out"
     assert np.abs(arms).max() <= 45.0 + 1e-3, "arm cap broken"
     # invisible sign compiles to stillness, not garbage
     assert np.float32(out["closures"][1]).max() == 0.0
@@ -66,11 +70,17 @@ def test_dictionary_frames_and_engine_playback(tmp_path):
     np.savez_compressed(tmp_path / "dict.npz", **out)
     d = SignDictionary(str(tmp_path / "dict.npz"))
     assert "wave" in d and "WAVE " in [g.upper() + " " for g in ["wave"]]
-    got = d.frames("wave")
+    # play-time contract: the stance carries height, deltas ride on top
+    stance = {"right_up_down_joint": 45.0, "right_elbow_joint": -30.0}
+    got = d.frames("wave", stance=stance)
     assert got is not None
     frames, arm_joints, sides = got
     assert sides == ("right",)
     assert "right_up_down_joint" in arm_joints
+    ud = [p["right_up_down_joint"] for p, _m, _h in frames
+          if "right_up_down_joint" in p]
+    assert max(ud) - min(ud) > 3.0, "arm dynamics lost at play time"
+    assert 30.0 < np.mean(ud) <= 65.0, "stance base missing from arm"
     assert len(frames) > 8
     for pose, mv, hold in frames:
         for j, v in pose.items():

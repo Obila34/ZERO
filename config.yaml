@@ -1199,6 +1199,17 @@ sign:
     path: data/sign_dictionary.npz
     keyframe_s: 0.12          # playback keyframe spacing (source ~24fps)
     arm_cap_deg: 45.0         # hard clamp at play time, atop compile caps
+  # Sign-along — ZERO signs what it SAYS: the content words each spoken
+  # sentence contains, in spoken order (sign-supported speech; full
+  # grammatical translation needs a gloss model and comes later). Rides
+  # the Living Hands speech tap as a wrapper; the sign track's priority
+  # already settles hands between signing and gesturing. A sentence that
+  # arrives while the previous one is still being signed is skipped —
+  # signs never lag the voice by more than one sentence.
+  along:
+    enabled: true             # the mission: a robot that interprets itself
+    max_words_per_sentence: 3
+    min_word_len: 3
   # Signing stance — the arm(s) rise into a forward KSL stance before the
   # first letter and ease back to rest after the last (the firmware's own
   # fingerspell does the same). Targets are EFFECTIVE degrees with each

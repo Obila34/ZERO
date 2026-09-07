@@ -173,6 +173,46 @@ class SignEngine:
                 return f"Signing {gloss}."
         return None
 
+    def sign_sequence(self, glosses) -> list[str]:
+        """Play several dictionary/lexicon-free words back to back under ONE
+        stance rise — the sign-along path (ZERO signing what it says).
+        Returns the glosses actually played; unknown words are skipped
+        silently (speech carries them regardless)."""
+        if self._dictionary is None or self._bus.estopped:
+            return []
+        stance_all = (self._stance_pose(("left", "right"))
+                      if self._stance_on else {})
+        frames: list = []
+        arm_all: set[str] = set()
+        sides_all: set[str] = set()
+        played: list[str] = []
+        for g in glosses:
+            got = self._dictionary.frames(str(g), stance=stance_all)
+            if got is None:
+                continue
+            f, arm_joints, sides = got
+            frames.extend(f)
+            pose, mv, _ = frames[-1]
+            frames[-1] = (pose, mv, 0.25)      # brief settle between words
+            arm_all.update(arm_joints)
+            sides_all.update(sides)
+            played.append(str(g))
+        if not frames:
+            return []
+        stance = self._stance_pose(tuple(sorted(sides_all)))
+        if stance:
+            frames.insert(0, (dict(stance), self._stance_move_s, 0.1))
+        self._launch(frames, finish_open=True,
+                     sides=tuple(sorted(sides_all)),
+                     lower=sorted(arm_all | set(stance)))
+        return played
+
+    @property
+    def busy(self) -> bool:
+        """A playback thread is currently signing."""
+        p = self._player
+        return p is not None and p.is_alive()
+
     def rest(self) -> None:
         """Ease to open hands and release the sign track."""
         with self._lock:
