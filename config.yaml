@@ -1184,6 +1184,18 @@ sign:
   max_speed_dps: 360        # hand-servo speed cap during signing
   rate_hz: 30               # sign playback tick (writes to the bus)
   lexicon_path: data/sign_lexicon.yaml
+  # Motion dictionary — 2,298 recorded ASL signs (PerceptX vault),
+  # machine-retargeted to ZERO's joints by scripts/sign_dict_compile.py.
+  # Real signing instead of letter-by-letter for every word the
+  # dictionary knows. Precedence: signer-approved lexicon > dictionary >
+  # fingerspell. Ships OFF until the operator has WATCHED a sample play
+  # (scripts/sign_dict_probe.py) — recorded human arm motion drives the
+  # steppers, capped but unreviewed.
+  dictionary:
+    enabled: false
+    path: data/sign_dictionary.npz
+    keyframe_s: 0.12          # playback keyframe spacing (source ~24fps)
+    arm_cap_deg: 45.0         # hard clamp at play time, atop compile caps
   # Signing stance — the arm(s) rise into a forward KSL stance before the
   # first letter and ease back to rest after the last (the firmware's own
   # fingerspell does the same). Targets are EFFECTIVE degrees with each

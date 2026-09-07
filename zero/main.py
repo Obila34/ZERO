@@ -2403,9 +2403,25 @@ class Zero:
 
     def _pop_afterthoughts(self) -> str:
         """Everything transcribed from gap remarks since the turn committed,
-        joined — '' when there were none. One-shot."""
+        joined — '' when there were none. One-shot, and EXPIRING: an
+        afterthought older than ~20 s belongs to a turn that no longer
+        exists. During the 2026-08-31 STT outage a stale remark survived
+        several aborted turns and was merged, minutes later, into an empty
+        transcript — ZERO answered words nobody had just said."""
+        max_age = float(self.cfg.get("stt.afterthought_max_age_s", 20.0))
+        now = time.monotonic()
         parts, self._afterthoughts = self._afterthoughts, []
-        return " ".join(p for p in parts if p).strip()
+        fresh, stale = [], 0
+        for item in parts:
+            t, text = item if isinstance(item, tuple) else (now, item)
+            if text and now - t <= max_age:
+                fresh.append(text)
+            elif text:
+                stale += 1
+        if stale:
+            log.info("dropped %d stale afterthought(s) (>%.0fs old)",
+                     stale, max_age)
+        return " ".join(fresh).strip()
 
     def _transcribe_afterthought(self, frames) -> None:
         """Monitor thread: transcribe a finished gap remark right away, so the
@@ -2419,7 +2435,7 @@ class Zero:
                     audio, self.cfg.get("audio.sample_rate", 16000)) or "").strip()
             if text:
                 log.info("afterthought heard: %r", text)
-                self._afterthoughts.append(text)
+                self._afterthoughts.append((time.monotonic(), text))
         except Exception as e:  # a lost afterthought must never break playback
             log.debug("afterthought stt failed: %s", e)
 

@@ -75,6 +75,10 @@ class SignEngine:
         self._rate = float(cfg.get("sign.rate_hz", 30.0))
         self._lexicon = load_lexicon(cfg.get("sign.lexicon_path",
                                              "data/sign_lexicon.yaml"))
+        # Motion dictionary (recorded ASL, machine-retargeted; ships dark).
+        # Precedence: signer-approved lexicon > dictionary > fingerspell.
+        from zero.sign.dictionary import load_dictionary
+        self._dictionary = load_dictionary(cfg)
         # Signing stance (Phase 5, in/out live): arms rise into a forward
         # KSL stance around the letters, at a STEPPER-safe speed. Targets
         # are effective degrees with motor direction baked in (config).
@@ -97,7 +101,10 @@ class SignEngine:
         return ch.upper() in HANDSHAPES
 
     def knows_sign(self, gloss: str) -> bool:
-        return gloss.lower() in self._lexicon
+        if gloss.lower() in self._lexicon:
+            return True
+        return (self._dictionary is not None
+                and gloss in self._dictionary)
 
     def sign_names(self) -> list[str]:
         return sorted(self._lexicon)
@@ -138,13 +145,23 @@ class SignEngine:
         return f"Spelling {''.join(letters)}: {readout}."
 
     def sign(self, gloss: str) -> str | None:
-        """Play a lexicon sign. None when the lexicon doesn't have it — the
+        """Play a sign. Signer-approved lexicon first; then the recorded
+        motion dictionary (when enabled); None when neither has it — the
         caller says so out loud rather than inventing a movement."""
-        entry = self._lexicon.get(gloss.lower().strip())
-        if entry is None or self._bus.estopped:
+        if self._bus.estopped:
             return None
-        self._start_segments(entry["segments"])
-        return f"Signing {gloss}."
+        entry = self._lexicon.get(gloss.lower().strip())
+        if entry is not None:
+            self._start_segments(entry["segments"])
+            return f"Signing {gloss}."
+        if self._dictionary is not None:
+            got = self._dictionary.frames(gloss)
+            if got is not None:
+                frames, arm_joints, sides = got
+                self._launch(frames, finish_open=True, sides=sides,
+                             lower=arm_joints)
+                return f"Signing {gloss}."
+        return None
 
     def rest(self) -> None:
         """Ease to open hands and release the sign track."""
