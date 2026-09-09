@@ -1219,6 +1219,13 @@ sign:
                               # inline, interpreter-style
     spell_letter_s: 0.45      # along-mode spelling pace (solo spell 0.85)
     spell_min_len: 4          # shorter unknowns aren't worth spelling
+    # S3.2 — gloss translation: the LLM reorders each sentence into
+    # sign grammar (topic-comment) via an async side-call; miss/timeout
+    # falls back to the plain picker, so this can only improve signing.
+    # Enable after judging by eye (ideally with a signer present).
+    gloss:
+      enabled: false
+      timeout_s: 1.5
   # Signing stance — the arm(s) rise into a forward KSL stance before the
   # first letter and ease back to rest after the last (the firmware's own
   # fingerspell does the same). Targets are EFFECTIVE degrees with each

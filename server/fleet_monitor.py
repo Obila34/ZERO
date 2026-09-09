@@ -65,6 +65,8 @@ def _check_blackbox():
              "r=c.execute('SELECT MAX(ts) FROM joint_angles').fetchone();"
              "print(int(time.time()-r[0]) if r and r[0] else -1)\""],
             capture_output=True, text=True, timeout=10).stdout.split()
+        if not out:
+            return False, "robot offline"
         active, age = out[0] == "active", int(out[-1])
         if not active:
             return True, "robot idle (service stopped)"

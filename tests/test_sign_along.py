@@ -133,3 +133,38 @@ def test_gate_off_and_no_dictionary():
     eng._dictionary = None
     assert build_sign_along(FakeCfg({"sign.along.enabled": True}),
                             eng) is None
+
+
+class FakeGloss:
+    def __init__(self, out):
+        self.out = out
+        self.calls = []
+
+    def gloss(self, sentence):
+        self.calls.append(sentence)
+        return self.out
+
+
+def test_gloss_order_wins_and_hallucinations_are_gated():
+    eng = FakeEngine(knows=("school", "water", "go"))
+    al = _along(eng)
+    # LLM glosses topic-comment; 'xylophone' is hallucinated (unknown,
+    # long) -> becomes at most the single spell fallback, never a sign
+    al._gloss = FakeGloss(["school", "water", "go", "xylophone"])
+    _speak(al, 0, "I will go to the school to get water", 8)
+    time.sleep(0.3)
+    al.stop()
+    (seq,) = eng.sequences
+    assert seq[:3] == ["school", "water", "go"], seq
+    assert "xylophone" not in seq
+    assert al._gloss.calls == ["I will go to the school to get water"]
+
+
+def test_gloss_failure_falls_back_to_plain_picker():
+    eng = FakeEngine(knows=("water",))
+    al = _along(eng)
+    al._gloss = FakeGloss(None)
+    _speak(al, 0, "please bring the water", 4)
+    time.sleep(0.3)
+    al.stop()
+    assert eng.sequences == [["water"]]

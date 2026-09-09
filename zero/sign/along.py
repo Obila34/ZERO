@@ -61,6 +61,10 @@ class SignAlong:
         g = lambda k, d: cfg.get(k, d)   # noqa: E731
         self._inner = inner              # Living Hands scheduler (or None)
         self._engine = engine
+        # Optional gloss translation (S3.2): the LLM reorders each
+        # sentence into sign grammar; miss/timeout -> plain picker.
+        from zero.sign.gloss import build_gloss
+        self._gloss = build_gloss(cfg)
         self._budget_scale = float(g("sign.along.budget_scale", 1.25))
         self._spell_on = bool(g("sign.along.spell_fallback", True))
         self._spell_letter_s = float(g("sign.along.spell_letter_s", 0.45))
@@ -117,7 +121,19 @@ class SignAlong:
                 if self._engine.busy or self._engine.estopped:
                     log.info("sign-along: still signing — sentence skipped")
                     continue
-                tokens = self._pick(st["text"], st["dur"])
+                tokens = None
+                if self._gloss is not None:
+                    gw = self._gloss.gloss(st["text"])
+                    if gw:
+                        # gloss words pass the SAME dictionary/spell gates
+                        # as picked words — a hallucinated gloss token
+                        # simply doesn't play
+                        tokens = self._filter(gw, st["dur"],
+                                              skip_stop=False)
+                        if tokens:
+                            log.info("sign-along: gloss order %s", gw)
+                if not tokens:
+                    tokens = self._pick(st["text"], st["dur"])
                 if not tokens:
                     continue
                 played = self._engine.sign_sequence(
@@ -133,15 +149,22 @@ class SignAlong:
     def _pick(self, sentence: str, dur_s: float) -> list:
         """Signs that FIT the sentence, in spoken order, plus at most one
         fingerspelled fallback for an important unknown word."""
+        return self._filter(_WORD.findall(sentence or ""), dur_s,
+                            skip_stop=True)
+
+    def _filter(self, words, dur_s: float, *, skip_stop: bool) -> list:
+        """The shared gate: an ordered word list (spoken words, or the
+        LLM's gloss order) -> playable tokens within the time budget.
+        skip_stop is off for gloss input — the translator already drops
+        grammar words, and gloss uses words like YOU/ME deliberately."""
         budget = max(2.5, float(dur_s) * self._budget_scale)
         now = time.monotonic()
         out: list = []
         seen: set[str] = set()
         spell_candidate: str | None = None
-        words = _WORD.findall(sentence or "")
         for pos, w in enumerate(words):
             lw = w.lower().replace("'", "")
-            if lw in _STOP or len(lw) < 2 or lw in seen:
+            if (skip_stop and lw in _STOP) or len(lw) < 2 or lw in seen:
                 continue
             seen.add(lw)
             if now - self._recent.get(lw, -1e9) < _RECENT_S:
@@ -156,7 +179,8 @@ class SignAlong:
                   # (how TTS text writes a name), or a longer word that
                   # is not everyday vocabulary
                   and ((w[0].isupper() and pos > 0)
-                       or (len(lw) >= 5 and lw not in _COMMON))):
+                       or (len(lw) >= 5 and lw not in _COMMON)
+                       or not skip_stop)):
                 spell_candidate = lw
         if spell_candidate is not None:
             cost = len(spell_candidate) * self._spell_letter_s + 0.5
