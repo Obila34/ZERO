@@ -63,6 +63,7 @@ from zero.llm.persona import build_system_prompt
 from zero.state import State, can_transition
 from zero.tts.orchestrator import split_stream, strip_asides
 from zero.utils.logging import get_logger, setup_logging
+from zero.turn import Transcriber
 from zero.voicelines import VoiceLines
 
 log = get_logger("main")
@@ -242,6 +243,10 @@ class Zero:
             # text-based ends_mid_thought heuristic. Read from audio at each pause.
             self.turn = build_turn_detector(self.cfg)
             self.stt = build_stt(self.cfg)
+            # Audio->text machinery for a turn (M4.2a surgery slice):
+            # live-session lifecycle, the shared STT lock, afterthoughts,
+            # batch rescue. The loop keeps the choreography; this owns how.
+            self.turnstt = Transcriber(self.cfg, self.stt)
             self.voice = build_voice(self.cfg)
             # Eyes: always-on camera + detection (or None if vision disabled /
             # the camera stack isn't installed). Started in run().
@@ -383,7 +388,6 @@ class Zero:
         self._t_utterance_end = 0.0    # end-of-speech marker for the latency budget
         self._bg_monitor = None        # live duplex monitor (stop_event, thread)
         self._speculation = None       # in-flight bet on an unfinished sentence
-        self._live_stt = None          # live ASR session for the current turn
         self._llm_unreachable = False  # last turn failed to reach the model
         self._degenerate = False       # last reply collapsed into repetition
         # Voice level ASKED FOR ("talk quietly", "speak up"). Persists across
@@ -392,7 +396,6 @@ class Zero:
         self._voice_level = 1.0
         self._stage_marks: list = []   # per-turn latency breakdown
         self._stage_t = None
-        self._afterthoughts: list = [] # transcribed gap remarks awaiting merge
         self._overheard: list = []     # backchannels heard mid-reply -> next context
         # Speculative prefill needs the RAW engine (the tool router doesn't
         # proxy it) — None simply means the old first-token latency.
@@ -400,7 +403,6 @@ class Zero:
                              if self.cfg.get("llm.speculative_prefill", True)
                              else None)
         self._mood = MoodTracker()     # cross-turn emotional state
-        self._stt_lock = threading.Lock()  # serialize speculative vs final STT
         self._memory_thread: threading.Thread | None = None  # background fact save
         self._summary_thread: threading.Thread | None = None  # rolling compaction
         self._face_name = None         # who the camera recognises (log/perception only)
@@ -964,9 +966,9 @@ class Zero:
                 # person talks, so the transcript is essentially written by the
                 # time they stop — instead of a ~0.5-1.2s transcription that
                 # only starts once they've finished.
-                live = self._open_live_stt(sr)
+                live = self.turnstt.open_live(sr)
                 if live is not None:
-                    frames_src = self._tee_to_live(frames_src, live)
+                    frames_src = self.turnstt.tee_to_live(frames_src, live)
 
                 def _on_pause(audio_i16):
                     # Always record the pause audio + the turn-model verdict —
@@ -1015,12 +1017,11 @@ class Zero:
                     res: dict = {}
 
                     def run():
-                        with self._stt_lock:
-                            try:
-                                res["text"] = self.stt.transcribe(
-                                    audio_i16.astype("float32") / 32768.0, sr)
-                            except Exception as e:
-                                log.debug("speculative stt failed: %s", e)
+                        try:
+                            res["text"] = self.turnstt.transcribe(
+                                audio_i16.astype("float32") / 32768.0, sr)
+                        except Exception as e:
+                            log.debug("speculative stt failed: %s", e)
                         # Speculative LLM prefill: warm the KV cache with this
                         # transcript while the endpoint is still waiting out
                         # the silence — by commit time the model has usually
@@ -1150,7 +1151,7 @@ class Zero:
                 stt_result = {"text": live.finalize(
                     timeout=self.cfg.get("stt.finalize_timeout", 3.0))}
                 self._stage("transcript")
-                self._close_live_stt()   # tail is in — now release the socket
+                self.turnstt.close_live()   # tail is in — release the socket
                 if not stt_result["text"]:
                     # Socket died mid-turn OR the model finalized with zero
                     # words on real speech (Kyutai's venue failure mode).
@@ -1172,11 +1173,10 @@ class Zero:
             elif not (self.privacy is not None
                       and getattr(self.privacy, "mode", "") == "strict"):
                 def _stt(u=utterance):
-                    with self._stt_lock:
-                        try:
-                            stt_result["text"] = self.stt.transcribe(u, sr)
-                        except Exception as e:
-                            log.warning("stt failed: %s", e)
+                    try:
+                        stt_result["text"] = self.turnstt.transcribe(u, sr)
+                    except Exception as e:
+                        log.warning("stt failed: %s", e)
                 stt_thread = threading.Thread(target=_stt, name="stt", daemon=True)
                 stt_thread.start()
 
@@ -1279,14 +1279,15 @@ class Zero:
             elif stt_result.get("text"):
                 text = stt_result["text"].strip()  # queued turn: already transcribed
             else:
-                rescue = getattr(self.stt, "rescue_transcribe", None)
-                if stt_rescue and callable(rescue):
+                rescued = (self.turnstt.rescue(utterance, sr)
+                           if stt_rescue else None)
+                if rescued is not None:
                     # The streaming session already came up empty on this very
                     # audio — go straight to the engine that can hear it
                     # (Whisper) instead of paying the primary a second time.
-                    text = rescue(utterance, sr).strip()
+                    text = rescued
                 else:
-                    text = self.stt.transcribe(utterance, sr).strip()
+                    text = self.turnstt.transcribe(utterance, sr)
             if not text:
                 # A turn that produces nothing used to vanish in silence — a
                 # visitor spoke and got no answer, with no trace of why.
@@ -1462,7 +1463,7 @@ class Zero:
             # Afterthought merge, round 1: a remark finished during the STT/
             # identity work ("...oh and make it two") joins the turn BEFORE the
             # LLM ever sees it — the cheapest conversation-turn there is.
-            extra = self._pop_afterthoughts()
+            extra = self.turnstt.pop_afterthoughts()
             if extra:
                 log.info("afterthought merged pre-LLM: %r", extra)
                 text = f"{text} {extra}"
@@ -1504,7 +1505,7 @@ class Zero:
             # vision/recall context was being built. The in-flight stream is
             # abandoned and restarted with the completed thought — the warm
             # prefix makes the restart cost roughly one first-token.
-            extra = self._pop_afterthoughts()
+            extra = self.turnstt.pop_afterthoughts()
             if extra:
                 llm_stop.set()   # covers a speculative stream too
                 log.info("afterthought merged, reply restarted: %r", extra)
@@ -2347,13 +2348,15 @@ class Zero:
         self._interrupt_note = None
         self._was_interrupted = False
         self._last_backchannel = 0.0
-        self._afterthoughts = []
         self._overheard = []
         self._degenerate = False
         if self._speculation is not None:
             self._speculation.abandon()
             self._speculation = None
-        self._close_live_stt()
+        ts = getattr(self, "turnstt", None)
+        if ts is not None:            # voice mode only
+            ts.clear_afterthoughts()
+            ts.close_live()
         if not self.text_mode:
             self.speaker.unduck()
 
@@ -2374,116 +2377,6 @@ class Zero:
         m, self._bg_monitor = self._bg_monitor, None
         if m is not None:
             self._stop_bargein(m)
-
-    def _pop_afterthoughts(self) -> str:
-        """Everything transcribed from gap remarks since the turn committed,
-        joined — '' when there were none. One-shot, and EXPIRING: an
-        afterthought older than ~20 s belongs to a turn that no longer
-        exists. During the 2026-08-31 STT outage a stale remark survived
-        several aborted turns and was merged, minutes later, into an empty
-        transcript — ZERO answered words nobody had just said."""
-        max_age = float(self.cfg.get("stt.afterthought_max_age_s", 20.0))
-        now = time.monotonic()
-        parts, self._afterthoughts = self._afterthoughts, []
-        fresh, stale = [], 0
-        for item in parts:
-            t, text = item if isinstance(item, tuple) else (now, item)
-            if text and now - t <= max_age:
-                fresh.append(text)
-            elif text:
-                stale += 1
-        if stale:
-            log.info("dropped %d stale afterthought(s) (>%.0fs old)",
-                     stale, max_age)
-        return " ".join(fresh).strip()
-
-    def _transcribe_afterthought(self, frames) -> None:
-        """Monitor thread: transcribe a finished gap remark right away, so the
-        merge point (just before speaking) finds text, not raw audio."""
-        import numpy as np
-
-        try:
-            audio = np.concatenate(frames).astype("float32") / 32768.0
-            with self._stt_lock:
-                text = (self.stt.transcribe(
-                    audio, self.cfg.get("audio.sample_rate", 16000)) or "").strip()
-            if text:
-                log.info("afterthought heard: %r", text)
-                self._afterthoughts.append((time.monotonic(), text))
-        except Exception as e:  # a lost afterthought must never break playback
-            log.debug("afterthought stt failed: %s", e)
-
-    def _close_live_stt(self) -> None:
-        live, self._live_stt = self._live_stt, None
-        if live is not None:
-            try:
-                live.close()
-            except Exception as e:
-                log.debug("live STT close failed: %s", e)
-
-    def _open_live_stt(self, sr: int):
-        """A live ASR session for this turn, or None when streaming is off /
-        the engine can't do it / it fails to open. Never raises — a failure
-        here just means the old record-then-transcribe path."""
-        if not self.cfg.get("stt.streaming", True):
-            return None
-        engine = self.stt
-        maker = getattr(engine, "live_session", None)
-        if maker is None:  # unwrap FallbackSTT to reach the primary
-            maker = getattr(getattr(engine, "_primary", None),
-                            "live_session", None)
-        if maker is None:
-            return None
-        try:
-            self._close_live_stt()   # never leak a previous turn's socket
-            session = maker(sr)
-            session.start()
-            self._live_stt = session
-            return session
-        except Exception as e:
-            log.warning("live STT unavailable (%s) — using batch path", e)
-            return None
-
-    def _tee_to_live(self, frames, live):
-        """Pass mic frames through to the endpointer while also feeding the
-        live recogniser. push() never blocks or raises, so the capture loop's
-        timing is unaffected.
-
-        Room tone is held back rather than streamed: frames go into a short
-        ring until speech actually starts, then the ring is flushed so the
-        first word still has its lead-in. Waiting silently for someone to
-        speak used to cost ~960 kbps to a machine across the internet."""
-        import numpy as _np
-
-        def _rms(f):
-            return float(_np.sqrt(_np.mean(_np.asarray(f, dtype=_np.float32) ** 2)))
-
-        # Well below the VAD's own start gate: this only decides when the wire
-        # opens, so erring open costs a little bandwidth, while erring closed
-        # would clip the start of a sentence.
-        gate = max(40.0, self.cfg.get("vad.energy_threshold", 150) * 0.4)
-        pre: list = []
-        speaking = False
-        pad = max(1, self.cfg.get("vad.speech_pad_ms", 200)
-                  // max(1, self.cfg.get("audio.block_ms", 30)))
-        for frame in frames:
-            if speaking:
-                live.push(frame)
-            else:
-                pre.append(frame)
-                if len(pre) > pad + 1:
-                    pre.pop(0)
-                # STATELESS level check on purpose. Calling the endpointer's
-                # VAD here double-fed it: capture() runs the same frames
-                # through the same stateful TEN VAD, so each frame was
-                # consumed twice and the model's hop buffer desynchronised —
-                # which silently broke both utterance detection and barge-in.
-                if _rms(frame) >= gate:
-                    speaking = True
-                    for f in pre:      # flush the lead-in, keep the first word
-                        live.push(f)
-                    pre = []
-            yield frame
 
     def _maybe_speculate(self, partial: str, turn_p) -> None:
         """Start generating a reply BEFORE the person finishes, when the turn
@@ -2637,8 +2530,7 @@ class Zero:
         audio = np.concatenate(frames).astype("float32") / 32768.0
         text, stt_failed = "", False
         try:
-            with self._stt_lock:
-                text = (self.stt.transcribe(audio, sr) or "").strip()
+            text = self.turnstt.transcribe(audio, sr)
         except Exception as e:
             stt_failed = True
             log.debug("interrupt stt failed: %s", e)
@@ -2783,7 +2675,7 @@ class Zero:
                         frames_af = speech.take_afterthought()
                         if frames_af:
                             threading.Thread(
-                                target=self._transcribe_afterthought,
+                                target=self.turnstt.note_afterthought,
                                 args=(frames_af,), name="afterthought-stt",
                                 daemon=True).start()
                     except Exception as e:  # never let the monitor crash playback
@@ -2999,8 +2891,7 @@ class Zero:
                             person_id: int | None = None) -> dict:
         """Full turn from an AF1-recorded utterance: STT → brain → Pi speaker."""
         try:
-            with self._stt_lock:
-                text = self.stt.transcribe(audio, sr).strip()
+            text = self.turnstt.transcribe(audio, sr)
         except Exception as e:
             log.warning("external stt failed: %s", e)
             return {"ok": False, "error": f"stt: {str(e)[:120]}"}
