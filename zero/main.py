@@ -63,6 +63,7 @@ from zero.llm.persona import build_system_prompt
 from zero.state import State, can_transition
 from zero.tts.orchestrator import split_stream, strip_asides
 from zero.utils.logging import get_logger, setup_logging
+from zero.voicelines import VoiceLines
 
 log = get_logger("main")
 
@@ -418,10 +419,9 @@ class Zero:
         self._last_ext: dict = {}   # last external turn, for /zero/status
         self._control = None        # ControlServer when control.enabled
 
-        # Voice-only extras (need the voice/mic): owner verification + spoken fillers.
-        self._filler_prob = self.cfg.get("conversation.filler_probability", 0.5)
+        # Voice-only extras (need the voice/mic): owner verification + spoken
+        # fillers/recovery — the canned-speech subsystem (zero/voicelines.py).
         self._filler_grace_s = self.cfg.get("conversation.filler_grace_ms", 600) / 1000.0
-        self._fillers = {}
         self._person = None  # IdentityResult of the current speaker (or None)
         if not text_mode:
             self.voiceid, self._voiceprint = build_voiceid(self.cfg)
@@ -440,11 +440,11 @@ class Zero:
                 identity=self.identity, memory=self.memory,
                 is_idle=lambda: self.state == State.IDLE,
             )
-            self._fillers = self._presynth_fillers()
-            self._recovery = self._presynth_recovery()
+            self.lines = VoiceLines(self.cfg, self.voice.synthesize)
+            self.lines.presynth()
         else:
             self.voiceid, self._voiceprint = None, None
-            self._recovery = {}
+            self.lines = VoiceLines(self.cfg, lambda _t: None)
             self.identity = None
             self.guests = None
             self.privacy, self.indicator = None, None
@@ -536,48 +536,9 @@ class Zero:
     # network is known good and held in RAM, so they still play when every
     # remote service is down. Silence in front of an audience reads as "it's
     # broken"; a short human line reads as "it's thinking".
-    _RECOVERY_LINES = {
-        "retry": ["Give me one second.", "Hang on, let me try that again."],
-        "lost": ["Sorry, I lost my train of thought there. Say that again?",
-                 "I didn't quite catch that — one more time?"],
-        "slow": ["My connection is being slow right now — bear with me.",
-                 "Give me a moment, I'm having a slow moment."],
-    }
-
-    _DEFAULT_FILLERS = {
-        "question": ["Good question, let me think.", "Hmm, let me think about that.",
-                     "Let me think for a second."],
-        "default": ["Okay, let me see.", "Right, one moment.", "Let's see."],
-        "ack": ["Mm-hmm.", "Sure."],
-    }
-
-    def _presynth_fillers(self) -> dict:
-        sets = self.cfg.get("conversation.fillers", self._DEFAULT_FILLERS)
-        out: dict[str, list] = {}
-        total = 0
-        misses = 0  # consecutive empty synths — the TTS is cold/down/mute
-        for category, phrases in sets.items():
-            audios = []
-            for phrase in phrases:
-                if misses >= 2:  # stop hammering a dead TTS at 30s/call
-                    break
-                try:
-                    audio = self.voice.synthesize(phrase)
-                except Exception as e:  # never block startup on a filler
-                    audio = None
-                    log.debug("filler synth failed for %r: %s", phrase, e)
-                if getattr(audio, "size", 0):
-                    audios.append(audio)
-                    total += 1
-                    misses = 0
-                else:
-                    misses += 1
-            out[category] = audios
-        if misses >= 2:
-            log.warning("filler pre-synth aborted — TTS not responding; fillers "
-                        "off this session (the real reply voice is unaffected)")
-        log.info("pre-synthesized %d fillers across %d categories", total, len(out))
-        return out
+    # (Canned speech — filler/recovery synthesis and selection — lives in
+    # zero/voicelines.py since the M4.1 surgery slice. The methods below
+    # remain as thin delegates so call sites and tests keep their seams.)
 
     # -- state transition helper -------------------------------------------
     def _to(self, dst: State) -> None:
@@ -2115,36 +2076,14 @@ class Zero:
 
         return gen(), stop
 
-    _QUESTION_WORDS = {
-        "what", "why", "how", "when", "who", "where", "which", "whose", "can",
-        "could", "would", "do", "does", "did", "is", "are", "should", "tell",
-        "explain", "describe",
-    }
-
     def _filler_category(self, text: str) -> str:
-        """Pick the filler that FITS what the user just said, so it sounds aware:
-        a question gets 'Good question, let me think.'; a one-word reply gets a
-        quick 'Mm-hmm.'; everything else gets a neutral 'Let's see.'"""
-        t = text.lower().strip()
-        words = t.split()
-        if t.endswith("?") or (words and words[0] in self._QUESTION_WORDS):
-            return "question"
-        if len(words) <= 2:
-            return "ack"
-        return "default"
+        return VoiceLines.filler_category(text)
 
     def _pick_filler(self, user_text: str):
         """One pre-synthesized filler matched to what the user said, or None.
         Handed to _speak_streaming, which plays it only if the real reply's
         audio hasn't arrived within the grace window."""
-        if random.random() > self._filler_prob:
-            return None
-        category = self._filler_category(user_text)
-        audios = self._fillers.get(category) or self._fillers.get("default") or []
-        if not audios:
-            return None
-        log.debug("filler category: %s", category)
-        return random.choice(audios)
+        return self.lines.pick_filler(user_text)
 
     def _speak_streaming(self, chunks, llm_stop: threading.Event,
                          filler_audio=None) -> str:
@@ -2343,38 +2282,13 @@ class Zero:
         """Barge-in hook: True stops playback the instant the wake word fires."""
         return self._interrupt
 
-    def _presynth_recovery(self) -> dict:
-        """Render the recovery lines once, at startup, and keep the WAVEFORMS.
-        This is the whole point: when the exhibition wifi drops, TTS is gone
-        too, so anything synthesised on demand would also fail. These are
-        already audio."""
-        out: dict[str, list] = {}
-        for kind, lines in self._RECOVERY_LINES.items():
-            clips = []
-            for line in lines:
-                try:
-                    audio = self.voice.synthesize(line)
-                except Exception as e:
-                    audio = None
-                    log.debug("recovery synth failed for %r: %s", line, e)
-                if getattr(audio, "size", 0):
-                    clips.append(audio)
-            out[kind] = clips
-        total = sum(len(v) for v in out.values())
-        if total:
-            log.info("pre-synthesized %d recovery lines (offline-safe)", total)
-        else:
-            log.warning("NO recovery lines cached — a failed turn will be "
-                        "SILENT. Check the TTS service before going live.")
-        return out
-
     def _say_recovery(self, kind: str = "retry") -> bool:
         """Speak a cached recovery line. Never raises, never synthesises."""
-        clips = (self._recovery.get(kind) or self._recovery.get("retry") or [])
-        if not clips:
+        clip = self.lines.recovery_clip(kind)
+        if clip is None:
             return False
         try:
-            self.speaker.play(random.choice(clips), self.voice.sample_rate,
+            self.speaker.play(clip, self.voice.sample_rate,
                               should_stop=lambda: False)
             return True
         except Exception as e:
@@ -2639,7 +2553,7 @@ class Zero:
         cooldown = cfg.get("conversation.backchannel.cooldown_ms", 8000) / 1000.0
         if time.monotonic() - self._last_backchannel < cooldown:
             return
-        audios = self._fillers.get("ack") or []
+        audios = self.lines.clips("ack")
         if not audios:
             return
         self._last_backchannel = time.monotonic()
