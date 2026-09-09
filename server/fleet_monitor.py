@@ -47,7 +47,55 @@ CHECKS = [
     ("AF-1 gateway (arm pi)", "http",
      "http://100.67.233.65:5000/api/telemetry", "every joint command"),
     ("head pi (ssh)", "tcp", "100.106.44.56:22", "the robot itself"),
+    ("joint black box (pi)", "func", "blackbox", "the flight recorder"),
 ]
+
+
+def _check_blackbox():
+    """The recorder can never die silently again: fresh rows while the
+    robot runs, or 'idle' while the service is stopped — anything else
+    is a dead recorder. (Path is the SERVICE's configured one at the
+    repo root; an empty decoy at data/ once got it declared dead.)"""
+    try:
+        out = subprocess.run(
+            ["ssh", "-o", "ConnectTimeout=4", "-o", "BatchMode=yes",
+             "head@100.106.44.56",
+             "systemctl is-active zero; python3 -c \"import sqlite3,time;"
+             "c=sqlite3.connect('/home/head/Mzee/ZERO/zero_joints.sqlite');"
+             "r=c.execute('SELECT MAX(ts) FROM joint_angles').fetchone();"
+             "print(int(time.time()-r[0]) if r and r[0] else -1)\""],
+            capture_output=True, text=True, timeout=10).stdout.split()
+        active, age = out[0] == "active", int(out[-1])
+        if not active:
+            return True, "robot idle (service stopped)"
+        if age < 0:
+            return False, "NO ROWS EVER — recorder dead"
+        return age < 900, f"last row {age}s ago"
+    except Exception as e:
+        return False, f"unreachable ({type(e).__name__})"
+
+
+_FUNC_CHECKS = {"blackbox": _check_blackbox}
+
+
+def _alert(name: str, up: bool, note: str) -> None:
+    """Push a state change to the operator's phone via ntfy (topic from
+    the unit's FLEET_NTFY_TOPIC env; unset = alerts off). Content is
+    service names only — nothing sensitive leaves the fleet."""
+    import os
+    topic = os.environ.get("FLEET_NTFY_TOPIC", "")
+    if not topic:
+        return
+    try:
+        msg = f"{'RECOVERED' if up else 'DOWN'}: {name} ({note})"
+        req = urllib.request.Request(
+            f"https://ntfy.sh/{topic}", data=msg.encode(),
+            headers={"Title": "ZERO fleet",
+                     "Priority": "default" if up else "urgent",
+                     "Tags": "white_check_mark" if up else "rotating_light"})
+        _OPENER.open(req, timeout=6)
+    except Exception:
+        pass
 
 GPU_HOSTS = [("zl0", "maxwell@100.95.210.94"),
              ("zl1", None),
@@ -109,12 +157,20 @@ def _poll_loop(interval: float) -> None:
     while True:
         checks = {}
         for name, kind, target, note in CHECKS:
-            up = _http_ok(target) if kind == "http" else _tcp_ok(target)
+            if kind == "func":
+                up, live_note = _FUNC_CHECKS[target]()
+                note = live_note
+            else:
+                up = _http_ok(target) if kind == "http" else _tcp_ok(target)
             with _lock:
                 prev = _state["checks"].get(name)
             if prev is None or prev["up"] != up:
                 _log_change(name, up)
                 since = time.time()
+                # alert only on real TRANSITIONS, never the startup
+                # baseline — a monitor reboot must not page the operator
+                if prev is not None:
+                    _alert(name, up, note)
             else:
                 since = prev["since"]
             checks[name] = {"up": up, "note": note, "since": since}

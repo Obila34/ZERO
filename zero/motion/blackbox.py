@@ -60,7 +60,20 @@ class JointAngleLog:
             # robot (audit 2026-08-25 #6). Crash cost: the last few rows.
             self._conn.execute("PRAGMA synchronous=NORMAL")
             self._conn.executescript(_SCHEMA)
+            # Retention: this file must be able to run for MONTHS on an
+            # SD card. Prune on open (not per-write) — at ~2 rows/s peak
+            # that is ~5M rows/month; 30 days is weeks of post-mortem
+            # reach for tens of MB.
+            cutoff = time.time() - 30 * 86400
+            self._conn.execute("DELETE FROM joint_angles WHERE ts < ?",
+                               (cutoff,))
             self._conn.commit()
+            n = self._conn.execute(
+                "SELECT COUNT(*), MAX(ts) FROM joint_angles").fetchone()
+            log.info("joint black box: %s (%d rows, last %s)", self._path,
+                     n[0] or 0,
+                     time.strftime("%m-%d %H:%M", time.localtime(n[1]))
+                     if n[1] else "never")
         except Exception as e:
             log.warning("joint black box unavailable (%s) — not recording", e)
             self._conn = None
