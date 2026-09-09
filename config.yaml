@@ -598,7 +598,11 @@ llm:
   speculative_reply: true
   speculative_reply_threshold: 0.8 # P(turn complete) needed to place a bet
   # vLLM on zerolabs0 over the tailnet (binds 0.0.0.0 — no tunnel needed).
-  host: http://100.95.210.94:8001
+  host: http://100.110.56.17:8001 # vLLM on zerolabs1 (migrated 2026-09-09;
+                                  # whisper retired to make room, 4k ctx +
+                                  # fp8 KV for the shared-card fit).
+                                  # zerolabs0's copy kept installed-but-off
+                                  # as instant rollback.
   model: gemma4-12b # the id vLLM serves (NOT the HF path — /v1/models shows it)
   # Previous Ollama stack, kept for rollback:
   #   host: http://127.0.0.1:11435

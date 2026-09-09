@@ -30,8 +30,8 @@ _OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 # name, kind, target, note
 CHECKS = [
-    ("brain gemma4-vllm (zl0)", "http",
-     "http://100.95.210.94:8001/v1/models", "LLM — every reply"),
+    ("brain gemma4-vllm (zl1)", "http",
+     "http://127.0.0.1:8001/v1/models", "LLM — every reply"),
     ("ears kyutai-stt (zl2)", "tcp", "100.100.95.12:8090",
      "live speech recognition"),
     ("voice kyutai-tts (zl2)", "tcp", "100.100.95.12:8091",
@@ -42,8 +42,6 @@ CHECKS = [
      "fingerspell reading"),
     ("vision (zl1)", "http", "http://127.0.0.1:8000/health",
      "depth + scene facts"),
-    ("whisper fallback (zl1)", "http", "http://127.0.0.1:9000/",
-     "STT fallback"),
     ("memory embedder (zl1)", "http", "http://127.0.0.1:11434/api/tags",
      "semantic recall"),
     ("AF-1 gateway (arm pi)", "http",
