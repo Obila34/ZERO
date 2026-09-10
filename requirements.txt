@@ -21,6 +21,11 @@ wasmtime>=47                # host for TEN VAD's WebAssembly build
 webrtcvad>=2.0.10
 
 # --- Speech to text ---
+# Kyutai streaming STT/TTS (stt.engine / tts.engine: kyutai) speak msgpack
+# over a websocket to zerolabs2. Both engines import these lazily at build
+# time; the af2 laptop bring-up (2026-09-10) died at build_stt without them.
+msgpack>=1.0
+websockets>=12
 # whisper.cpp is built natively (see scripts/setup_pi.sh). Python binding:
 pywhispercpp>=1.2.0
 
