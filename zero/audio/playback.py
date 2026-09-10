@@ -92,6 +92,29 @@ class Speaker:
         self._env.append((time.monotonic(),
                           float(np.sqrt(np.mean(block ** 2))) * 32768.0))
 
+    def _open_stream(self, sample_rate: int) -> sd.OutputStream:
+        """Open the output stream at the waveform's rate.
+
+        WASAPI shared mode (the af2 laptop) refuses any rate but the mixer's
+        (48 kHz) with PaErrorCode -9997 "Invalid sample rate", and Kyutai
+        streams at 24 kHz. On that error we retry once with WASAPI's
+        auto_convert, which resamples in the Windows mixer at no added
+        latency. Where WasapiSettings does not exist (Linux/Pi PortAudio) the
+        original error is re-raised unchanged, so Pi behaviour is identical
+        and the retry can never mask a real device fault there."""
+        kwargs = dict(samplerate=sample_rate, device=self.device, channels=1,
+                      dtype="float32")
+        try:
+            return sd.OutputStream(**kwargs)
+        except sd.PortAudioError:
+            wasapi = getattr(sd, "WasapiSettings", None)
+            if wasapi is None:
+                raise
+            log.warning("output device rejected %d Hz — WASAPI auto-convert on",
+                        sample_rate)
+            return sd.OutputStream(extra_settings=wasapi(auto_convert=True),
+                                   **kwargs)
+
     def play(
         self,
         audio: np.ndarray,
@@ -107,12 +130,7 @@ class Speaker:
         self.gain = 1.0  # a leftover duck must never quiet a fresh utterance
 
         try:
-            with sd.OutputStream(
-                samplerate=sample_rate,
-                device=self.device,
-                channels=1,
-                dtype="float32",
-            ) as stream:
+            with self._open_stream(sample_rate) as stream:
                 self.playing = True
                 for start in range(0, audio.size, chunk):
                     if should_stop is not None and should_stop():
@@ -155,9 +173,7 @@ class Speaker:
                 log.info("playback interrupted (barge-in)")
                 return False
             if stream is None:
-                stream = sd.OutputStream(samplerate=sample_rate,
-                                         device=self.device, channels=1,
-                                         dtype="float32")
+                stream = self._open_stream(sample_rate)
                 stream.start()
                 self.playing = True  # sound is now really leaving the device
             block = self._level(block)
