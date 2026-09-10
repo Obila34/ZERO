@@ -2965,17 +2965,38 @@ class Zero:
 def _acquire_instance_lock():
     """Refuse to start a second voice instance. Two ZEROs on one box both
     answer the mic (double voice) and their concurrent TTS requests crash the
-    Orpheus CUDA backend. flock releases automatically however the process
-    dies, so a stale lock file can never block a fresh start."""
-    import fcntl
+    Orpheus CUDA backend. The OS lock releases automatically however the
+    process dies, so a stale lock file can never block a fresh start.
 
-    lock = open("/tmp/zero-main.lock", "w")  # noqa: SIM115 — held for process lifetime
-    try:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
-        print("another ZERO instance is already running (voice would double up).\n"
-              "find it with:  pgrep -af zero.main", file=sys.stderr)
-        raise SystemExit(1)
+    POSIX: flock on /tmp/zero-main.lock (unchanged path, so a manual run and
+    the systemd unit contend for the same lock). Windows (af2 laptop): a
+    byte-range lock via msvcrt on the same file name under %TEMP%."""
+    if os.name == "nt":
+        import msvcrt
+        import tempfile
+
+        path = os.path.join(tempfile.gettempdir(), "zero-main.lock")
+        lock = open(path, "a+")  # noqa: SIM115 — held for process lifetime
+        try:
+            lock.seek(0)
+            msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+        except OSError:
+            print("another ZERO instance is already running (voice would double up).\n"
+                  "find it with:  tasklist /fi \"imagename eq python.exe\"",
+                  file=sys.stderr)
+            raise SystemExit(1)
+    else:
+        import fcntl
+
+        lock = open("/tmp/zero-main.lock", "a+")  # noqa: SIM115 — held for process lifetime
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print("another ZERO instance is already running (voice would double up).\n"
+                  "find it with:  pgrep -af zero.main", file=sys.stderr)
+            raise SystemExit(1)
+    lock.seek(0)
+    lock.truncate()
     lock.write(str(os.getpid()))
     lock.flush()
     return lock  # keep the handle alive; closing it would drop the lock
