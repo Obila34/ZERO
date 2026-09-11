@@ -278,7 +278,11 @@ def _stance_engine():
 def test_stance_rises_before_letters_and_lowers_to_rest_after():
     eng, bus, t = _stance_engine()
     eng.spell("HI")
-    assert _wait_released(bus)
+    # 12 s, not 5: since the 2026-09-11 coordination fix the arms are
+    # commanded at the steppers' REAL acceleration, so a 40 deg stance
+    # rise takes ~2.4 s (up AND down) instead of the 0.83 s the old
+    # shared-clock code claimed and the motor could never deliver.
+    assert _wait_released(bus, timeout=12.0)
     io = [p["right_in_out_joint"] for p in t.posts
           if "right_in_out_joint" in p]
     assert io, "stance joints must move during a spell"

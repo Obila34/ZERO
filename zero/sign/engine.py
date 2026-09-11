@@ -24,6 +24,7 @@ it is heard, the same synchrony rule the gesture layer follows for strokes.
 """
 from __future__ import annotations
 
+import math
 import threading
 import time
 
@@ -85,6 +86,12 @@ class SignEngine:
         self._stance_on = bool(cfg.get("sign.stance.enabled", True))
         self._stance_move_s = float(cfg.get("sign.stance.move_s", 1.2))
         self._stance_dps = float(cfg.get("sign.stance_speed_dps", 90.0))
+        # The arm steppers' REAL acceleration (nano1_steppers.ino:
+        # setAcceleration(2500) steps/s^2 / 88.9 steps-per-degree). The
+        # sender shapes commanded motion to this so the arm is asked for
+        # what it can actually do — see _arm_step.
+        self._arm_accel = float(cfg.get("sign.stance_accel_dps2", 28.0))
+        self._arm_vel: dict[str, float] = {}   # persists across keyframes
         self._stance_joints = {
             side: {str(j): float(v) for j, v in (targets or {}).items()}
             for side, targets in (cfg.get("sign.stance.joints") or {}).items()}
@@ -269,7 +276,7 @@ class SignEngine:
                 dt = 1.0 / max(1.0, self._rate)
                 # _ease_to stretches for the stepper cap, so a raised
                 # stance comes down at stance_speed_dps, not in one hop.
-                self._ease_to(targets, 0.8, gen, dt)
+                self._ease_to(targets, 0.8, gen, dt, land_arms=True)
         self._bus.release("sign")
 
     def status(self) -> dict:
@@ -388,6 +395,7 @@ class SignEngine:
         with self._lock:
             self._gen += 1
             gen = self._gen
+        self._arm_vel.clear()      # a new playback starts from standstill
         self._player = threading.Thread(
             target=self._play, args=(frames, gen, finish_open, sides,
                                      lower or []),
@@ -433,7 +441,7 @@ class SignEngine:
                     open_pose[j] = spec.home_deg
             if not self._ease_to(
                     open_pose, self._stance_move_s if lower else 0.4,
-                    gen, dt):
+                    gen, dt, land_arms=True):
                 self._release_if_mine(gen)
                 return
         with self._lock:
@@ -451,7 +459,7 @@ class SignEngine:
         self._release_if_mine(gen)
 
     def _ease_to(self, target: dict[str, float], dur: float, gen: int,
-                 dt: float) -> bool:
+                 dt: float, land_arms: bool = False) -> bool:
         """Minimum-jerk from the current belief to target, writing the sign
         track each step. False when preempted or e-stopped."""
         self._seed_pose(target)
@@ -462,15 +470,34 @@ class SignEngine:
             # registration) — skip the segment rather than stall the sign
             # writing joints the bus drops (audit sign #5).
             return True
-        # Per-joint speed caps: hand servos are quick, but a stance move
-        # rides 160:1 geared steppers — those stretch the segment to their
-        # own (much slower) ceiling. The frame finishes late rather than
-        # whipping an arm.
+        # TWO CLOCKS, NOT ONE (coordination fix, 2026-09-11). This used to
+        # stretch ONE duration to the slowest joint, so any arm that needed
+        # longer time-warped every finger in the frame — by a different
+        # amount each frame. That destroyed the recording's rhythm, which
+        # is the very thing that makes a sign readable ("moves, but not
+        # coordinative"). Now:
+        #   * HANDS own the frame clock — servos are fast and absolute, so
+        #     the dictionary's timing reaches the fingers untouched;
+        #   * ARMS run their own physics-honest chase across frames, at
+        #     the acceleration the 160:1 geared steppers actually have.
+        #     They arrive when they arrive; the next frame simply continues
+        #     from wherever they got to. An arm-ONLY frame (the stance
+        #     rise) still sizes the frame to the arm's real travel time.
+        # Restarting a min-jerk per frame would be worse than the bug:
+        # at 8 frames/s against a ~1.5 s stepper move, each frame would
+        # advance the arm ~0.5% of the way — a frozen arm.
         dur = max(0.05, float(dur))
-        for j in goal:
-            cap = (self._stance_dps if j in STEPPER_JOINTS
-                   else self._max_dps)
-            dur = max(dur, PEAK * abs(goal[j] - start[j]) / max(1e-6, cap))
+        hand_goal = {j: v for j, v in goal.items() if j not in STEPPER_JOINTS}
+        arm_goal = {j: v for j, v in goal.items() if j in STEPPER_JOINTS}
+        for j in hand_goal:
+            dur = max(dur, PEAK * abs(goal[j] - start[j])
+                      / max(1e-6, self._max_dps))
+        if land_arms or not hand_goal:
+            # A frame that must LAND (the stance rise, and every path that
+            # ends at rest) waits for the arms — releasing the sign track
+            # with an arm still travelling would park it mid-air.
+            for j in arm_goal:
+                dur = max(dur, self._arm_time(goal[j] - start[j]))
         t0 = time.monotonic()
         while True:
             with self._lock:
@@ -480,9 +507,55 @@ class SignEngine:
                 return False
             tau = min(1.0, (time.monotonic() - t0) / dur)
             ease = min_jerk(tau)
-            step = {j: start[j] + (goal[j] - start[j]) * ease for j in goal}
+            step = {j: start[j] + (goal[j] - start[j]) * ease
+                    for j in hand_goal}
+            for j in arm_goal:
+                step[j] = self._arm_step(j, self._pose.get(j, start[j]),
+                                         goal[j], dt)
             self._pose.update(step)
             self._bus.write("sign", step)
             if tau >= 1.0:
                 return True
             time.sleep(dt)
+
+    # ── stepper reality: what a geared arm can actually do ──────────────────
+    def _arm_time(self, dist: float) -> float:
+        """Seconds for a stepper to travel `dist` under its real
+        acceleration and speed cap (trapezoid, or triangle when the move
+        is too short to reach the cap)."""
+        a, v = self._arm_accel, self._stance_dps
+        d = abs(float(dist))
+        if d <= 1e-6 or a <= 0:
+            return 0.0
+        if d <= v * v / a:
+            return 2.0 * math.sqrt(d / a)
+        return v / a + d / v
+
+    def _arm_step(self, j: str, cur: float, target: float,
+                  dt: float) -> float:
+        """One tick of an arm's commanded motion, shaped like the motor's
+        own: accelerate toward the target, cruise at the cap, brake in
+        time to land on it. Velocity persists ACROSS frames — that
+        continuity is what lets a stepper make a real excursion instead
+        of restarting from standstill 8 times a second. Commanding only
+        what the hardware can follow is also what collapses the
+        command-vs-physical gap the replay simulator measured (17 deg,
+        235 ms on the shoulder)."""
+        a, vmax = self._arm_accel, self._stance_dps
+        v = self._arm_vel.get(j, 0.0)
+        d = float(target) - cur
+        if abs(d) < 1e-4 and abs(v) < 1e-3:
+            self._arm_vel[j] = 0.0
+            return float(target)
+        want = 1.0 if d > 0 else -1.0
+        brake_d = (v * v) / (2.0 * a) if a > 0 else 0.0
+        if v != 0.0 and (v > 0) == (d > 0) and brake_d >= abs(d):
+            v -= (1.0 if v > 0 else -1.0) * a * dt       # decelerate
+        else:
+            v += want * a * dt
+        v = max(-vmax, min(vmax, v))
+        nxt = cur + v * dt
+        if (float(target) - nxt) * (float(target) - cur) < 0:
+            nxt, v = float(target), 0.0                  # land, don't pass
+        self._arm_vel[j] = v
+        return nxt
